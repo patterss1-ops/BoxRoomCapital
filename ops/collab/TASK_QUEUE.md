@@ -20,6 +20,7 @@ Canonical queue for Codex + Claude parallel execution.
 | A-008 | Regression and reliability suite | codex | REVIEW | A-001..A-007 | `tests/**`, `ops/collab/**release-checks**` | `codex/a-008-regression-reliability-suite` | `6c5ad4a` | `ops/collab/HANDOFFS/20260228-1324Z-codex-A-008.md` | Existing IG path preserved; failure injection covered | 2026-02-28T13:24:47Z |
 | A-009 | FastAPI deprecation cleanup | codex | REVIEW | A-007 | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | `codex/a-009-fastapi-deprecation-cleanup` | `7e69434` | `ops/collab/HANDOFFS/20260228-1340Z-codex-A-009.md` | FastAPI startup + template deprecation warnings removed; tests pass | 2026-02-28T13:40:30Z |
 | A-010 | Ledger panel UI wiring | codex | REVIEW | A-005, A-007 | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | `codex/a-009-fastapi-deprecation-cleanup` | `b4b68e2` | `ops/collab/HANDOFFS/20260228-1343Z-codex-A-010.md` | Unified ledger/NAV visible in Overview + Trading with fragment/API tests | 2026-02-28T13:43:41Z |
+| A-011 | Phase A integration candidate | codex | REVIEW | A-001..A-010 | `broker/ibkr.py`, `config.py`, `requirements.txt`, `.env.example`, `tests/test_ibkr.py` | `codex/a-011-phasea-integration-candidate` | `50aa094` | `ops/collab/HANDOFFS/20260228-1345Z-codex-A-011.md` | Single branch includes reviewed A-003 IBKR lane + all Codex Phase A changes with passing full suite | 2026-02-28T13:45:41Z |
 
 ## Queue transition rules
 1. `READY -> IN_PROGRESS`: owner claims ticket, sets branch, updates ownership map, records claim timestamp.
