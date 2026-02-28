@@ -10,7 +10,7 @@ from typing import Optional
 
 import requests
 
-from broker.base import BaseBroker, OrderResult, Position, AccountInfo
+from broker.base import BaseBroker, BrokerCapabilities, OrderResult, Position, AccountInfo
 import config
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 
 class CityIndexBroker(BaseBroker):
     """CityIndex CIAPI spread betting broker."""
+
+    capabilities = BrokerCapabilities(
+        supports_spreadbet=True,
+        supports_cfd=True,
+        supports_short=True,
+        supports_live=True,
+    )
 
     def __init__(self, is_demo: bool = True):
         self.is_demo = is_demo

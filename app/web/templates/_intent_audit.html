@@ -1,0 +1,102 @@
+<section class="card">
+  <h2>Intent Audit</h2>
+  {% if intents %}
+    <table>
+      <thead>
+        <tr>
+          <th>Intent</th>
+          <th>Status</th>
+          <th>Instrument</th>
+          <th>Strategy</th>
+          <th>Broker</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in intents %}
+        <tr>
+          <td>
+            <a
+              class="code"
+              href="#"
+              hx-get="/fragments/intent-audit?intent_id={{ item.intent_id }}"
+              hx-target="#intent-audit-panel"
+              hx-swap="innerHTML"
+            >
+              {{ item.intent_id[:8] if item.intent_id else "-" }}
+            </a>
+          </td>
+          <td><span class="badge {{ item.status }}">{{ item.status }}</span></td>
+          <td>{{ item.instrument }}</td>
+          <td>{{ item.strategy_id }}</td>
+          <td>{{ item.broker_target }}</td>
+          <td>{{ item.updated_at }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No intent or order-action records yet.</p>
+  {% endif %}
+
+  {% if selected_detail %}
+    <h3>Selected Intent</h3>
+    <div class="row"><span class="label">Source</span><span class="value">{{ selected_detail.source }}</span></div>
+    <div class="row"><span class="label">Intent ID</span><span class="value code">{{ selected_detail.intent.intent_id }}</span></div>
+    <div class="row"><span class="label">Correlation</span><span class="value code">{{ selected_detail.intent.correlation_id or "-" }}</span></div>
+    <div class="row"><span class="label">Status</span><span class="value"><span class="badge {{ selected_detail.intent.status }}">{{ selected_detail.intent.status }}</span></span></div>
+    <div class="row"><span class="label">Instrument</span><span class="value">{{ selected_detail.intent.instrument }}</span></div>
+
+    <h3>Attempts</h3>
+    {% if selected_detail.attempts %}
+      <table>
+        <thead>
+          <tr>
+            <th>Attempt</th>
+            <th>Status</th>
+            <th>Error</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for attempt in selected_detail.attempts %}
+          <tr>
+            <td>{{ attempt.attempt }}</td>
+            <td><span class="badge {{ attempt.status }}">{{ attempt.status }}</span></td>
+            <td>{{ attempt.error_code or attempt.error_message or "-" }}</td>
+            <td>{{ attempt.updated_at or attempt.transition_at or "-" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No attempts recorded.</p>
+    {% endif %}
+
+    <h3>Transitions</h3>
+    {% if selected_detail.transitions %}
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Attempt</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for transition in selected_detail.transitions %}
+          <tr>
+            <td>{{ transition.transition_at or transition.updated_at or "-" }}</td>
+            <td>{{ transition.from_status or "-" }}</td>
+            <td>{{ transition.to_status or transition.status or "-" }}</td>
+            <td>{{ transition.attempt if transition.attempt is not none else "-" }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No transitions recorded.</p>
+    {% endif %}
+  {% endif %}
+</section>
