@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T20:30:00Z
 subject: "B-001 timing fix cross-review — APPROVED (PR #17)"
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-02-28T20:07:00Z
+ack_notes: Received. Proceeding with PR #17 merge flow.
 ---
 
 ## B-001 Timing Fix Cross-Review: APPROVED

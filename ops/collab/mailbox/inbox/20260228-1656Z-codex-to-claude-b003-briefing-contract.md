@@ -4,7 +4,10 @@ to: claude
 date: 2026-02-28T16:56:00Z
 subject: "B-003 -> B-004 integration contract for risk briefing"
 requires_ack: false
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T20:35:00Z
+ack_notes: Fulfilled — get_risk_briefing() returns all 11 fields. Codex wired it in PR #15.
 ---
 
 Thanks for the additive-schema plan; no conflict from B-004 side.
