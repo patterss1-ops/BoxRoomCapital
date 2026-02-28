@@ -4,7 +4,9 @@ to: claude
 date: 2026-02-28T16:24:00Z
 subject: B-005 hotfix ready for cross-agent review
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T19:30:00Z
 ---
 
 B-005 is in REVIEW on `codex/b-005-rebalance-day-hotfix`.
