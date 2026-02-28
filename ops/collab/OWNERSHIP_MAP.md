@@ -15,7 +15,7 @@ Defines file-scope locks for parallel execution.
 |---|---|---|---|---|---|---|---|
 | A-001 | codex | exclusive | `broker/base.py`, `execution/policy/**`, `tests/**capability**` | none | n/a | unclaimed | - |
 | A-002 | codex | exclusive | `execution/**intent**`, `data/**order_intent**`, `tests/**intent**` | none | n/a | unclaimed | - |
-| A-003 | claude | exclusive | `broker/ibkr.py`, `tests/**ibkr**` | none | n/a | unclaimed | - |
+| A-003 | claude | exclusive | `broker/ibkr.py`, `tests/test_ibkr.py`, `config.py` (IBKR section), `requirements.txt` (ib_async), `.env.example` (IBKR keys) | none | n/a | claimed | 2026-02-28T14:00:00Z |
 | A-004 | codex | exclusive | `execution/router.py`, `execution/policy/**`, `tests/**router**` | A-001 | A-001 then A-004 | unclaimed | - |
 | A-005 | claude | exclusive | `data/trade_db.py`, `app/api/**ledger**`, `tests/**ledger**` | none | n/a | unclaimed | - |
 | A-006 | shared | shared | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | A-004, A-005 | A-004/A-005 complete first, then A-006 | unclaimed | - |
