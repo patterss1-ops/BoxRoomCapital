@@ -489,7 +489,9 @@ class TestRiskBriefing:
         )
 
         assert briefing["fund_nav"] == 100000
-        assert briefing["day_pnl"] == 1500.0  # 1.5% of 100k
+        # day_pnl derived from prev_nav: prev = 100000/(1+0.015) ≈ 98522.17
+        # pnl = 100000 - 98522.17 ≈ 1477.83
+        assert briefing["day_pnl"] == pytest.approx(1477.83, abs=0.01)
         assert briefing["drawdown_pct"] == -2.0
         assert briefing["cash_buffer_pct"] == 40.0  # 40k/100k
         assert briefing["gross_exposure_pct"] == 30.0  # heat from positions
@@ -532,3 +534,72 @@ class TestRiskBriefing:
         assert all("severity" in a for a in briefing["alerts"])
         assert all("code" in a for a in briefing["alerts"])
         assert all("action" in a for a in briefing["alerts"])
+
+
+# ─── Regression: day_pnl derivation (C-000b) ────────────────────────────
+
+
+class TestDayPnlDerivation:
+    """Regression tests for day_pnl formula fix (C-000b).
+
+    day_pnl must be derived from previous NAV, not current NAV.
+    Given daily_return_pct = ((current - prev) / prev) * 100:
+      prev = current / (1 + r/100)
+      day_pnl = current - prev
+    """
+
+    def test_day_pnl_positive_return(self, db):
+        """Positive return: day_pnl should equal NAV change, not NAV * r%."""
+        from risk.portfolio_risk import get_risk_briefing
+
+        # 2% return on 100k NAV → prev ≈ 98039.22, pnl ≈ 1960.78
+        briefing = get_risk_briefing(
+            total_nav=100000,
+            daily_return_pct=2.0,
+            snapshot_date="2026-02-28",
+            db_path=db,
+        )
+        # Old formula would give 2000.0 (NAV * r/100)
+        # New formula: 100000 - 100000/1.02 = 100000 - 98039.2157 = 1960.7843
+        assert briefing["day_pnl"] != 2000.0
+        assert briefing["day_pnl"] == pytest.approx(1960.78, abs=0.01)
+
+    def test_day_pnl_negative_return(self, db):
+        """Negative return: day_pnl should be negative and derived from prev NAV."""
+        from risk.portfolio_risk import get_risk_briefing
+
+        # -3% return on 200k NAV → prev ≈ 206185.57, pnl ≈ -6185.57
+        briefing = get_risk_briefing(
+            total_nav=200000,
+            daily_return_pct=-3.0,
+            snapshot_date="2026-02-28",
+            db_path=db,
+        )
+        # Old formula would give -6000.0
+        # New formula: 200000 - 200000/0.97 = 200000 - 206185.567 = -6185.567
+        assert briefing["day_pnl"] != -6000.0
+        assert briefing["day_pnl"] == pytest.approx(-6185.57, abs=0.01)
+
+    def test_day_pnl_zero_return(self, db):
+        """Zero return: day_pnl should be zero regardless of formula."""
+        from risk.portfolio_risk import get_risk_briefing
+
+        briefing = get_risk_briefing(
+            total_nav=100000,
+            daily_return_pct=0.0,
+            snapshot_date="2026-02-28",
+            db_path=db,
+        )
+        assert briefing["day_pnl"] == 0.0
+
+    def test_day_pnl_none_return(self, db):
+        """None return (first day): day_pnl should default to zero."""
+        from risk.portfolio_risk import get_risk_briefing
+
+        briefing = get_risk_briefing(
+            total_nav=100000,
+            daily_return_pct=None,
+            snapshot_date="2026-02-28",
+            db_path=db,
+        )
+        assert briefing["day_pnl"] == 0.0

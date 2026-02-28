@@ -2123,16 +2123,33 @@ def get_sleeve_daily_reports(
     days: int = 30,
     db_path: str = DB_PATH,
 ) -> list[dict]:
-    """Get recent sleeve daily reports, optionally filtered by sleeve."""
+    """Get recent sleeve daily reports, optionally filtered by sleeve.
+
+    The ``days`` parameter selects the most recent N *distinct report dates*,
+    then returns all sleeve rows for those dates.  This avoids silently
+    truncating sleeves when multiple sleeves exist (a global LIMIT N would
+    return only N total rows regardless of sleeve count).
+    """
     conn = get_conn(db_path)
     if sleeve:
         rows = conn.execute(
-            "SELECT * FROM sleeve_daily_report WHERE sleeve=? ORDER BY report_date DESC LIMIT ?",
+            """SELECT * FROM sleeve_daily_report
+               WHERE sleeve = ?
+                 AND report_date IN (
+                     SELECT DISTINCT report_date FROM sleeve_daily_report
+                     ORDER BY report_date DESC LIMIT ?
+                 )
+               ORDER BY report_date DESC, sleeve""",
             (sleeve, days),
         ).fetchall()
     else:
         rows = conn.execute(
-            "SELECT * FROM sleeve_daily_report ORDER BY report_date DESC LIMIT ?",
+            """SELECT * FROM sleeve_daily_report
+               WHERE report_date IN (
+                   SELECT DISTINCT report_date FROM sleeve_daily_report
+                   ORDER BY report_date DESC LIMIT ?
+               )
+               ORDER BY report_date DESC, sleeve""",
             (days,),
         ).fetchall()
     conn.close()
