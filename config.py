@@ -183,6 +183,33 @@ ROTATION_PARAMS = {
     "allow_short_loser": False,        # Set True for v4 (short loser variant)
 }
 
+# ─── GTAA TREND FOLLOWING PARAMETERS ──────────────────────────────────────
+# Meb Faber (2007): monthly rebalance, SMA trend filter, multi-asset universe.
+# Designed for IBKR ISA — long-only ETFs, zero financing, tax-free.
+
+GTAA_PARAMS = {
+    "sma_period": 200,                # 10-month SMA (~200 trading days)
+    "rebalance_day": 1,               # Trading day of month to rebalance
+    "universe": ["SPY", "EFA", "IEF", "VNQ", "DBC"],  # Faber 5-asset
+    "weight_mode": "equal",           # Equal weight (1/N)
+    "use_trend_filter": True,         # Only hold assets above SMA
+}
+
+# ─── DUAL MOMENTUM GEM PARAMETERS ────────────────────────────────────────
+# Gary Antonacci (2014): relative + absolute momentum, 3-asset rotation.
+# All-in on one asset at a time. Designed for IBKR ISA.
+
+DUAL_MOMENTUM_PARAMS = {
+    "lookback_days": 252,             # 12-month lookback
+    "rebalance_day": 1,               # Trading day of month
+    "us_equity": "SPY",               # US equities proxy
+    "intl_equity": "EFA",             # International equities proxy
+    "safe_haven": "AGG",              # Bonds / safe haven
+    "abs_momentum_threshold": 0.0,    # Winner must have positive return
+    "use_excess_return": False,       # Simple returns (not excess over T-bill)
+    "risk_free_ticker": "BIL",        # T-bill proxy (if use_excess_return=True)
+}
+
 # ─── BACKTESTER: MARKET SUGGESTIONS PER STRATEGY ──────────────────────────
 # "proven" = currently live on the bot, backtested & verified
 # "candidates" = not yet tested but fit the strategy criteria — worth backtesting
