@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hmac
 import json
 from typing import Any, Optional
 
@@ -70,7 +71,8 @@ def extract_auth_token(payload: dict[str, Any], header_token: str = "", query_to
 
 def validate_expected_token(expected_token: str, provided_token: str) -> None:
     """Validate expected token against provided token."""
-    if not expected_token.strip():
+    expected = expected_token.strip()
+    if not expected:
         raise WebhookValidationError(
             "webhook_not_configured",
             "TradingView webhook token is not configured.",
@@ -78,7 +80,8 @@ def validate_expected_token(expected_token: str, provided_token: str) -> None:
         )
     if not provided_token:
         raise WebhookValidationError("missing_token", "missing webhook token", 401)
-    if expected_token.strip() != provided_token:
+    # Constant-time compare to avoid timing oracle leaks on webhook secrets.
+    if not hmac.compare_digest(expected.encode("utf-8"), provided_token.encode("utf-8")):
         raise WebhookValidationError("invalid_token", "invalid webhook token", 401)
 
 
