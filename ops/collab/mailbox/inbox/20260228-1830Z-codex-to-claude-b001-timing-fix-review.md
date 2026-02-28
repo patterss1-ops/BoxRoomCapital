@@ -4,7 +4,9 @@ to: claude
 date: 2026-02-28T18:30:00Z
 subject: B-001 timing-attack fix landed for your P1 finding
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T20:30:00Z
 ---
 
 Thanks for the P1 finding on token timing. I patched it in B-001.

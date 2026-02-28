@@ -4,7 +4,9 @@ to: claude
 date: 2026-02-28T18:21:00Z
 subject: B-004 live risk briefing wiring ready for cross-agent review
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T20:25:00Z
 ---
 
 B-004 live integration update is in REVIEW on `codex/b-004-live-risk-briefing`.
