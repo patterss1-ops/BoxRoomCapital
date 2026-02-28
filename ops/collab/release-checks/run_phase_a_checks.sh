@@ -15,6 +15,8 @@ focused_tests=(
   "tests/test_order_intent_lifecycle.py"
   "tests/test_account_router.py"
   "tests/test_risk_gate.py"
+  "tests/test_strategy_gtaa.py"
+  "tests/test_strategy_dual_momentum.py"
   "tests/test_startup_recovery_reliability.py"
   "tests/test_failure_incident_audit.py"
 )

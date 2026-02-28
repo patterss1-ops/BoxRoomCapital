@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
 import json
 import threading
 import uuid
@@ -210,6 +211,10 @@ def create_app() -> FastAPI:
         except FileNotFoundError:
             text = ""
         return JSONResponse({"log": text})
+
+    @app.get("/api/risk/briefing")
+    def api_risk_briefing():
+        return build_risk_briefing_payload()
 
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
@@ -765,6 +770,17 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/fragments/risk-briefing", response_class=HTMLResponse)
+    def risk_briefing_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_risk_briefing.html",
+            {
+                "request": request,
+                "risk_briefing": build_risk_briefing_payload(),
+            },
+        )
+
     @app.get("/fragments/incidents", response_class=HTMLResponse)
     def incidents_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
@@ -931,6 +947,39 @@ def build_status_payload() -> dict[str, Any]:
         "engine": control.status(),
         "summary": get_summary(),
         "open_option_positions": get_open_option_positions(),
+    }
+
+
+def build_risk_briefing_payload() -> dict[str, Any]:
+    """
+    Build risk briefing payload for operator surfaces.
+
+    This intentionally degrades to an "unavailable" state until B-003 provides
+    portfolio risk/fund reporting data sources.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    return {
+        "ok": False,
+        "generated_at": now,
+        "state": "unavailable",
+        "summary": {
+            "fund_nav": None,
+            "day_pnl": None,
+            "drawdown_pct": None,
+            "gross_exposure_pct": None,
+            "net_exposure_pct": None,
+            "cash_buffer_pct": None,
+            "open_risk_pct": None,
+        },
+        "limits": [],
+        "alerts": [
+            {
+                "severity": "warn",
+                "code": "RISK_DATA_UNAVAILABLE",
+                "message": "Risk data provider not wired yet.",
+                "action": "Complete B-003 risk/fund integration, then reload.",
+            }
+        ],
     }
 
 

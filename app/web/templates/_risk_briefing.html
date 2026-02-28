@@ -1,0 +1,52 @@
+<section class="card">
+  <div class="section-head">
+    <h2>Risk Briefing</h2>
+    <p>Fund-level risk snapshot and actionable alerts.</p>
+  </div>
+
+  {% set state = (risk_briefing.state or "unavailable")|lower %}
+  <div class="badge-wrap" style="margin-bottom: 0.7rem;">
+    <span class="badge {{ 'ok' if state == 'ok' else ('running' if state == 'attention' else 'failed') }}">{{ state|upper }}</span>
+    <span class="muted">Generated: {{ risk_briefing.generated_at or '-' }}</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Fund NAV</th>
+        <th>Day P&L</th>
+        <th>Drawdown</th>
+        <th>Gross Exposure</th>
+        <th>Net Exposure</th>
+        <th>Cash Buffer</th>
+        <th>Open Risk</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ "%.2f"|format(risk_briefing.summary.fund_nav) if risk_briefing.summary.fund_nav is not none else "-" }}</td>
+        <td>{{ "%.2f"|format(risk_briefing.summary.day_pnl) if risk_briefing.summary.day_pnl is not none else "-" }}</td>
+        <td>{{ "%.2f%%"|format(risk_briefing.summary.drawdown_pct) if risk_briefing.summary.drawdown_pct is not none else "-" }}</td>
+        <td>{{ "%.2f%%"|format(risk_briefing.summary.gross_exposure_pct) if risk_briefing.summary.gross_exposure_pct is not none else "-" }}</td>
+        <td>{{ "%.2f%%"|format(risk_briefing.summary.net_exposure_pct) if risk_briefing.summary.net_exposure_pct is not none else "-" }}</td>
+        <td>{{ "%.2f%%"|format(risk_briefing.summary.cash_buffer_pct) if risk_briefing.summary.cash_buffer_pct is not none else "-" }}</td>
+        <td>{{ "%.2f%%"|format(risk_briefing.summary.open_risk_pct) if risk_briefing.summary.open_risk_pct is not none else "-" }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  {% if risk_briefing.alerts %}
+    <h3 style="margin-top: 0.85rem;">Alerts</h3>
+    <ul class="events" style="max-height: 200px;">
+      {% for alert in risk_briefing.alerts[:3] %}
+        <li>
+          <span class="badge {{ 'failed' if alert.severity == 'critical' else ('running' if alert.severity == 'warn' else 'ok') }}">{{ alert.severity|upper }}</span>
+          <span class="headline">{{ alert.message }}</span>
+          {% if alert.action %}<div class="detail" style="margin-left: 0;">Action: {{ alert.action }}</div>{% endif %}
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted" style="margin-top: 0.7rem;">No active risk alerts.</p>
+  {% endif %}
+</section>
