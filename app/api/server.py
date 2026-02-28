@@ -20,6 +20,7 @@ import config
 from app.api.ledger import router as ledger_router
 from app.engine.control import BotControlService
 from app.research.service import ResearchService
+from fund.nav import calculate_fund_nav
 from data.trade_db import (
     complete_calibration_run,
     create_job,
@@ -57,6 +58,7 @@ from intelligence.webhook_server import (
     summarize_payload,
     validate_expected_token,
 )
+from risk.portfolio_risk import get_risk_briefing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "web" / "templates"))
@@ -950,13 +952,11 @@ def build_status_payload() -> dict[str, Any]:
     }
 
 
-def build_risk_briefing_payload() -> dict[str, Any]:
-    """
-    Build risk briefing payload for operator surfaces.
-
-    This intentionally degrades to an "unavailable" state until B-003 provides
-    portfolio risk/fund reporting data sources.
-    """
+def _unavailable_risk_briefing_payload(
+    message: str,
+    action: str,
+    code: str = "RISK_DATA_UNAVAILABLE",
+) -> dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
     return {
         "ok": False,
@@ -975,12 +975,79 @@ def build_risk_briefing_payload() -> dict[str, Any]:
         "alerts": [
             {
                 "severity": "warn",
-                "code": "RISK_DATA_UNAVAILABLE",
-                "message": "Risk data provider not wired yet.",
-                "action": "Complete B-003 risk/fund integration, then reload.",
+                "code": code,
+                "message": message,
+                "action": action,
             }
         ],
     }
+
+
+def build_risk_briefing_payload() -> dict[str, Any]:
+    """Build risk briefing payload for operator surfaces from B-003 providers."""
+    try:
+        nav = calculate_fund_nav()
+        if nav.total_nav <= 0 and nav.total_cash <= 0 and nav.total_positions_value <= 0:
+            return _unavailable_risk_briefing_payload(
+                message="No ledger data available yet.",
+                action="Sync broker cash/positions and reload.",
+            )
+
+        briefing = get_risk_briefing(
+            total_nav=nav.total_nav,
+            daily_return_pct=nav.daily_return_pct,
+            drawdown_pct=nav.drawdown_pct,
+            total_cash=nav.total_cash,
+            snapshot_date=nav.report_date,
+        )
+
+        status = str(briefing.get("status") or "GREEN").upper()
+        state = {
+            "GREEN": "ok",
+            "AMBER": "attention",
+            "RED": "critical",
+        }.get(status, "attention")
+
+        alerts = []
+        for item in briefing.get("alerts", []):
+            severity = str(item.get("severity") or "info").lower()
+            if severity in {"warning", "warn", "amber"}:
+                mapped = "warn"
+            elif severity in {"critical", "error", "red"}:
+                mapped = "critical"
+            else:
+                mapped = "info"
+            alerts.append(
+                {
+                    "severity": mapped,
+                    "code": item.get("code", ""),
+                    "message": item.get("message", ""),
+                    "action": item.get("action", ""),
+                }
+            )
+
+        return {
+            "ok": True,
+            "generated_at": briefing.get("generated_at", datetime.now(timezone.utc).isoformat()),
+            "state": state,
+            "summary": {
+                "fund_nav": briefing.get("fund_nav"),
+                "day_pnl": briefing.get("day_pnl"),
+                "drawdown_pct": briefing.get("drawdown_pct"),
+                "gross_exposure_pct": briefing.get("gross_exposure_pct"),
+                "net_exposure_pct": briefing.get("net_exposure_pct"),
+                "cash_buffer_pct": briefing.get("cash_buffer_pct"),
+                "open_risk_pct": briefing.get("open_risk_pct"),
+            },
+            "limits": briefing.get("limits", []),
+            "alerts": alerts,
+        }
+    except Exception:
+        return _unavailable_risk_briefing_payload(
+            message="Risk briefing provider failed.",
+            action="Check risk/nav services and retry.",
+            code="RISK_DATA_ERROR",
+        )
 
 
 def _page_context(request: Request, page_key: str, title: str) -> dict[str, Any]:
