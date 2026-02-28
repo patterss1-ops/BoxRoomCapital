@@ -13,18 +13,18 @@ Defines file-scope locks for parallel execution.
 
 | ticket_id | owner | mode | file_scope | overlap_with | merge_order | claim_status | claimed_utc |
 |---|---|---|---|---|---|---|---|
-| A-001 | codex | exclusive | `broker/base.py`, `execution/policy/**`, `tests/**capability**` | none | n/a | claimed | 2026-02-28T13:22:00Z |
-| A-002 | codex | exclusive | `execution/**intent**`, `data/**order_intent**`, `tests/**intent**` | none | n/a | claimed | 2026-02-28T13:08:50Z |
-| A-003 | claude | exclusive | `broker/ibkr.py`, `tests/test_ibkr.py`, `config.py` (IBKR section), `requirements.txt` (ib_async), `.env.example` (IBKR keys) | none | n/a | claimed | 2026-02-28T14:00:00Z |
-| A-004 | codex | exclusive | `execution/router.py`, `execution/policy/**`, `tests/**router**` | A-001 | A-001 then A-004 | claimed | 2026-02-28T13:13:27Z |
-| A-005 | codex | shared | `data/trade_db.py`, `app/api/**ledger**`, `app/api/server.py`, `tests/**ledger**` | A-007 | A-007 then A-005 | claimed | 2026-02-28T13:30:27Z |
-| A-006 | codex | exclusive | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | A-004, A-005 | A-004/A-005 complete first, then A-006 | claimed | 2026-02-28T13:16:10Z |
-| A-007 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `app/web/static/**`, `tests/**api**` | A-005, A-006 | A-005/A-006 complete first, then A-007 | claimed | 2026-02-28T13:25:42Z |
-| A-008 | codex | shared | `tests/**`, `ops/collab/**release-checks**` | all prior tickets | Final ticket after A-001..A-007 | claimed | 2026-02-28T13:22:20Z |
-| A-009 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | A-007 | A-007 then A-009 | claimed | 2026-02-28T13:38:59Z |
-| A-010 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | A-005, A-007, A-009 | A-005/A-007/A-009 then A-010 | claimed | 2026-02-28T13:42:07Z |
-| A-011 | codex | shared | `broker/ibkr.py`, `config.py`, `requirements.txt`, `.env.example`, `tests/test_ibkr.py` | A-003 | A-003 then A-011 | claimed | 2026-02-28T13:44:54Z |
-| A-012 | codex | shared | `ops/collab/**`, merge metadata, branch integration | all Phase A tickets | A-001..A-011 then A-012 | claimed | 2026-02-28T14:03:16Z |
+| A-001 | codex | exclusive | `broker/base.py`, `execution/policy/**`, `tests/**capability**` | none | n/a | released | 2026-02-28T13:22:00Z |
+| A-002 | codex | exclusive | `execution/**intent**`, `data/**order_intent**`, `tests/**intent**` | none | n/a | released | 2026-02-28T13:08:50Z |
+| A-003 | claude | exclusive | `broker/ibkr.py`, `tests/test_ibkr.py`, `config.py` (IBKR section), `requirements.txt` (ib_async), `.env.example` (IBKR keys) | none | n/a | released | 2026-02-28T14:00:00Z |
+| A-004 | codex | exclusive | `execution/router.py`, `execution/policy/**`, `tests/**router**` | A-001 | A-001 then A-004 | released | 2026-02-28T13:13:27Z |
+| A-005 | codex | shared | `data/trade_db.py`, `app/api/**ledger**`, `app/api/server.py`, `tests/**ledger**` | A-007 | A-007 then A-005 | released | 2026-02-28T13:30:27Z |
+| A-006 | codex | exclusive | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | A-004, A-005 | A-004/A-005 complete first, then A-006 | released | 2026-02-28T13:16:10Z |
+| A-007 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `app/web/static/**`, `tests/**api**` | A-005, A-006 | A-005/A-006 complete first, then A-007 | released | 2026-02-28T13:25:42Z |
+| A-008 | codex | shared | `tests/**`, `ops/collab/**release-checks**` | all prior tickets | Final ticket after A-001..A-007 | released | 2026-02-28T13:22:20Z |
+| A-009 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | A-007 | A-007 then A-009 | released | 2026-02-28T13:38:59Z |
+| A-010 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | A-005, A-007, A-009 | A-005/A-007/A-009 then A-010 | released | 2026-02-28T13:42:07Z |
+| A-011 | codex | shared | `broker/ibkr.py`, `config.py`, `requirements.txt`, `.env.example`, `tests/test_ibkr.py` | A-003 | A-003 then A-011 | released | 2026-02-28T13:44:54Z |
+| A-012 | codex | shared | `ops/collab/**`, merge metadata, branch integration | all Phase A tickets | A-001..A-011 then A-012 | released | 2026-02-28T14:03:16Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.
