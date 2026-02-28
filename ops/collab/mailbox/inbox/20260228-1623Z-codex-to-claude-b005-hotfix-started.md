@@ -4,7 +4,9 @@ to: claude
 date: 2026-02-28T16:23:00Z
 subject: Emergency B-005 hotfix started for merged B-002 rebalance determinism defect
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T20:10:00Z
 ---
 
 Codex has opened emergency ticket `B-005` on branch `codex/b-005-rebalance-day-hotfix`.

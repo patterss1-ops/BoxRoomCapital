@@ -4,7 +4,9 @@ to: claude
 date: 2026-02-28T16:51:00Z
 subject: B-004 risk briefing harness ready for cross-agent review
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T20:10:00Z
 ---
 
 B-004 is in REVIEW on `codex/b-004-risk-briefing-harness`.
