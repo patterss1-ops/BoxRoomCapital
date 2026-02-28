@@ -291,6 +291,106 @@ def init_db(db_path: str = DB_PATH):
             ON strategy_promotions(timestamp);
         CREATE INDEX IF NOT EXISTS idx_strategy_promotions_strategy
             ON strategy_promotions(strategy_key);
+
+        -- ─── A-005: Multi-broker ledger tables ─────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS broker_accounts (
+            id TEXT PRIMARY KEY,
+            broker TEXT NOT NULL,                -- ig, ibkr, cityindex, paper
+            account_id TEXT NOT NULL,
+            account_type TEXT NOT NULL,           -- ISA, SIPP, GIA, SPREADBET, PAPER
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            label TEXT,                           -- human-readable label
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(broker, account_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_broker_accounts_broker
+            ON broker_accounts(broker);
+        CREATE INDEX IF NOT EXISTS idx_broker_accounts_type
+            ON broker_accounts(account_type);
+
+        CREATE TABLE IF NOT EXISTS broker_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            broker_account_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            direction TEXT NOT NULL,              -- long / short
+            quantity REAL NOT NULL,
+            avg_cost REAL NOT NULL DEFAULT 0,
+            market_value REAL DEFAULT 0,
+            unrealised_pnl REAL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'USD',
+            strategy TEXT,                        -- strategy attribution (nullable until mapped)
+            sleeve TEXT,                          -- sleeve attribution
+            con_id TEXT,                          -- broker-specific contract/instrument ID
+            last_synced_at TEXT NOT NULL,
+            UNIQUE(broker_account_id, ticker, direction),
+            FOREIGN KEY (broker_account_id) REFERENCES broker_accounts(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_account
+            ON broker_positions(broker_account_id);
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_ticker
+            ON broker_positions(ticker);
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_strategy
+            ON broker_positions(strategy);
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_sleeve
+            ON broker_positions(sleeve);
+
+        CREATE TABLE IF NOT EXISTS broker_cash_balances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            broker_account_id TEXT NOT NULL,
+            balance REAL NOT NULL,
+            buying_power REAL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            synced_at TEXT NOT NULL,
+            FOREIGN KEY (broker_account_id) REFERENCES broker_accounts(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_broker_cash_account
+            ON broker_cash_balances(broker_account_id);
+        CREATE INDEX IF NOT EXISTS idx_broker_cash_synced
+            ON broker_cash_balances(synced_at);
+
+        CREATE TABLE IF NOT EXISTS nav_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_date TEXT NOT NULL,
+            level TEXT NOT NULL,                  -- fund / sleeve / account
+            level_id TEXT NOT NULL,               -- e.g. 'fund', 'sleeve_1', account id
+            net_liquidation REAL NOT NULL,
+            cash REAL NOT NULL DEFAULT 0,
+            positions_value REAL NOT NULL DEFAULT 0,
+            unrealised_pnl REAL DEFAULT 0,
+            realised_pnl REAL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            broker TEXT,                          -- null for fund-level
+            account_type TEXT,                    -- null for fund-level
+            created_at TEXT NOT NULL,
+            UNIQUE(snapshot_date, level, level_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_nav_snapshots_date
+            ON nav_snapshots(snapshot_date);
+        CREATE INDEX IF NOT EXISTS idx_nav_snapshots_level
+            ON nav_snapshots(level, level_id);
+
+        CREATE TABLE IF NOT EXISTS reconciliation_reports (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            broker_account_id TEXT NOT NULL,
+            status TEXT NOT NULL,                 -- clean / mismatch / error
+            positions_checked INTEGER DEFAULT 0,
+            mismatches_found INTEGER DEFAULT 0,
+            details TEXT,                         -- JSON array of mismatch details
+            FOREIGN KEY (broker_account_id) REFERENCES broker_accounts(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_recon_reports_created
+            ON reconciliation_reports(created_at);
+        CREATE INDEX IF NOT EXISTS idx_recon_reports_status
+            ON reconciliation_reports(status);
     """)
     conn.commit()
     conn.close()
