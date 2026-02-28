@@ -396,3 +396,125 @@ class TestRunDailyNAV:
         assert result["total_nav"] == 0
         assert result["total_cash"] == 0
         assert result["sleeves"] == []
+
+
+# ─── Regression: sleeve query truncation (C-000b) ───────────────────────
+
+
+class TestSleeveQueryRegression:
+    """Regression tests for get_sleeve_daily_reports truncation fix (C-000b).
+
+    The ``days`` parameter must select the N most recent distinct *dates*,
+    returning all sleeve rows for those dates.  Previously a global
+    ``LIMIT N`` would silently drop sleeves when more sleeves than N existed.
+    """
+
+    def test_multiple_sleeves_not_truncated(self, db):
+        """All sleeves should be returned even when days=2 and >2 sleeves exist."""
+        from data.trade_db import save_sleeve_daily_report
+
+        # 4 sleeves on a single date
+        for sleeve in ["equity", "bonds", "commodities", "cash"]:
+            save_sleeve_daily_report(
+                report_date="2026-02-28",
+                sleeve=sleeve,
+                nav=25000,
+                positions_value=15000,
+                cash_allocated=10000,
+                db_path=db,
+            )
+
+        reports = get_sleeve_daily_reports(days=2, db_path=db)
+        sleeves_returned = {r["sleeve"] for r in reports}
+        assert sleeves_returned == {"equity", "bonds", "commodities", "cash"}
+        assert len(reports) == 4
+
+    def test_multiple_dates_multiple_sleeves(self, db):
+        """days=2 should return all sleeves for the 2 most recent dates."""
+        from data.trade_db import save_sleeve_daily_report
+
+        for date in ["2026-02-26", "2026-02-27", "2026-02-28"]:
+            for sleeve in ["equity", "bonds", "commodities"]:
+                save_sleeve_daily_report(
+                    report_date=date,
+                    sleeve=sleeve,
+                    nav=25000,
+                    positions_value=15000,
+                    cash_allocated=10000,
+                    db_path=db,
+                )
+
+        # days=2 should return 2 dates × 3 sleeves = 6 rows
+        reports = get_sleeve_daily_reports(days=2, db_path=db)
+        assert len(reports) == 6
+        dates_returned = {r["report_date"] for r in reports}
+        assert dates_returned == {"2026-02-27", "2026-02-28"}
+
+    def test_days_1_returns_all_sleeves_for_latest_date(self, db):
+        """days=1 should return all sleeves for just the most recent date."""
+        from data.trade_db import save_sleeve_daily_report
+
+        for date in ["2026-02-27", "2026-02-28"]:
+            for sleeve in ["equity", "bonds"]:
+                save_sleeve_daily_report(
+                    report_date=date,
+                    sleeve=sleeve,
+                    nav=50000,
+                    positions_value=30000,
+                    cash_allocated=20000,
+                    db_path=db,
+                )
+
+        reports = get_sleeve_daily_reports(days=1, db_path=db)
+        assert len(reports) == 2
+        assert all(r["report_date"] == "2026-02-28" for r in reports)
+
+    def test_sleeve_filter_still_works(self, db):
+        """Filtering by specific sleeve should still work correctly."""
+        from data.trade_db import save_sleeve_daily_report
+
+        for date in ["2026-02-27", "2026-02-28"]:
+            for sleeve in ["equity", "bonds"]:
+                save_sleeve_daily_report(
+                    report_date=date,
+                    sleeve=sleeve,
+                    nav=50000,
+                    positions_value=30000,
+                    cash_allocated=20000,
+                    db_path=db,
+                )
+
+        reports = get_sleeve_daily_reports(sleeve="equity", days=5, db_path=db)
+        assert len(reports) == 2
+        assert all(r["sleeve"] == "equity" for r in reports)
+
+    def test_sleeve_filter_uses_sleeve_specific_dates(self, db):
+        """P1 regression: sleeve-filter must scope the date subquery to the
+        requested sleeve, not use global dates.
+
+        Scenario: 'bonds' only has data on 2026-02-26, but 'equity' has data
+        on 2026-02-27 and 2026-02-28.  A global-date subquery with days=2
+        would pick the two latest global dates (02-27, 02-28) and return zero
+        rows for 'bonds' because it has no data on those dates.
+        """
+        from data.trade_db import save_sleeve_daily_report
+
+        # 'equity' has data on the two most recent global dates
+        for date in ["2026-02-27", "2026-02-28"]:
+            save_sleeve_daily_report(
+                report_date=date, sleeve="equity", nav=50000,
+                positions_value=30000, cash_allocated=20000, db_path=db,
+            )
+
+        # 'bonds' only has data on an older date
+        save_sleeve_daily_report(
+            report_date="2026-02-26", sleeve="bonds", nav=40000,
+            positions_value=20000, cash_allocated=20000, db_path=db,
+        )
+
+        # Requesting bonds with days=2 must return the 1 row it has,
+        # NOT zero rows (which would happen if the subquery used global dates).
+        reports = get_sleeve_daily_reports(sleeve="bonds", days=2, db_path=db)
+        assert len(reports) == 1
+        assert reports[0]["sleeve"] == "bonds"
+        assert reports[0]["report_date"] == "2026-02-26"
