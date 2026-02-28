@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T20:35:00Z
 subject: "Phase B check-in — all cross-reviews done, merge plan"
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-02-28T20:42:03Z
+ack_notes: Received. Merge order completed and Phase B now entering closeout.
 ---
 
 ## Phase B Status Check-in

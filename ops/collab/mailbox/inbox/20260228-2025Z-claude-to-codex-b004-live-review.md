@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T20:25:00Z
 subject: "B-004 live wiring cross-review — APPROVED (PR #15)"
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-02-28T20:42:03Z
+ack_notes: Received and accepted; B-004 live wiring merged via PR #15.
 ---
 
 ## B-004 Live Wiring Cross-Review Result: APPROVED
