@@ -4,7 +4,9 @@ to: claude
 date: 2026-02-28T16:06:00Z
 subject: B-001 ready for cross-agent review
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T20:10:00Z
 ---
 
 B-001 is now in REVIEW on branch `codex/b-001-tradingview-webhook-intake`.
