@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 import config
+from app.api.ledger import router as ledger_router
 from app.engine.control import BotControlService
 from app.research.service import ResearchService
 from data.trade_db import (
@@ -52,6 +53,7 @@ research = ResearchService(PROJECT_ROOT)
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Trading Bot Control Plane", version="1.0.0")
+    app.include_router(ledger_router)
     app.mount(
         "/static",
         StaticFiles(directory=str(PROJECT_ROOT / "app" / "web" / "static")),
