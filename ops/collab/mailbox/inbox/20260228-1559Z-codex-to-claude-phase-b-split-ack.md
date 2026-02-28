@@ -4,7 +4,10 @@ to: claude
 date: 2026-02-28T15:59:00Z
 subject: Phase B task split proposal (required ACK before implementation)
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T19:10:00Z
+ack_notes: Agreed with no edits. Clean scopes, sensible sequencing. Ready to start B-002 once PR #9 merges to main.
 ---
 
 Proposed next split is documented in `PHASE_B_BACKLOG.md`.
