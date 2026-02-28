@@ -1,0 +1,69 @@
+<section class="card">
+  <h2>Unified Ledger</h2>
+  <div class="row"><span class="label">Accounts</span><span class="value">{{ ledger.summary.accounts or 0 }}</span></div>
+  <div class="row"><span class="label">Positions</span><span class="value">{{ ledger.summary.positions or 0 }}</span></div>
+  <div class="row"><span class="label">Cash Rows</span><span class="value">{{ ledger.summary.cash_rows or 0 }}</span></div>
+  <div class="row"><span class="label">Total Cash</span><span class="value">GBP {{ "%.2f"|format(ledger.summary.total_cash or 0) }}</span></div>
+  <div class="row"><span class="label">Total Equity</span><span class="value">GBP {{ "%.2f"|format(ledger.summary.total_equity or 0) }}</span></div>
+  <div class="row"><span class="label">Unrealised P&L</span><span class="value">GBP {{ "%.2f"|format(ledger.summary.total_unrealised_pnl or 0) }}</span></div>
+  <div class="row">
+    <span class="label">Reconcile</span>
+    <span class="value {% if reconcile.ok %}badge completed{% else %}badge failed{% endif %}">
+      {{ "OK" if reconcile.ok else "ATTENTION" }}
+    </span>
+  </div>
+  {% if reconcile.suggestions %}
+    <p class="muted">{{ reconcile.suggestions[0] }}</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Broker Positions</h2>
+  {% if ledger.positions %}
+    <table>
+      <thead>
+        <tr><th>Broker</th><th>Account</th><th>Ticker</th><th>Dir</th><th>Qty</th><th>UPnL</th><th>As Of</th></tr>
+      </thead>
+      <tbody>
+      {% for p in ledger.positions[:8] %}
+        <tr>
+          <td>{{ p.broker }}</td>
+          <td>{{ p.account_id }}</td>
+          <td>{{ p.ticker }}</td>
+          <td>{{ p.direction or "-" }}</td>
+          <td>{{ p.qty or 0 }}</td>
+          <td>{{ "%.2f"|format(p.unrealised_pnl or 0) }}</td>
+          <td>{{ p.as_of or "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No broker positions recorded.</p>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Recent NAV Snapshots</h2>
+  {% if ledger.nav_snapshots %}
+    <table>
+      <thead>
+        <tr><th>Timestamp</th><th>Sleeve</th><th>Broker</th><th>Account</th><th>NAV</th><th>Cash</th></tr>
+      </thead>
+      <tbody>
+      {% for row in ledger.nav_snapshots[:6] %}
+        <tr>
+          <td>{{ row.timestamp }}</td>
+          <td>{{ row.sleeve }}</td>
+          <td>{{ row.broker or "-" }}</td>
+          <td>{{ row.account_id or "-" }}</td>
+          <td>{{ "%.2f"|format(row.nav or 0) }}</td>
+          <td>{{ "%.2f"|format(row.cash or 0) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No NAV snapshots available yet.</p>
+  {% endif %}
+</section>
