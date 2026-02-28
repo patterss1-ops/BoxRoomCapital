@@ -395,6 +395,13 @@ OPTIONS_SAFETY = {
     "max_contracts_per_trade": 20,    # Hard cap
 }
 
+# ─── TRADINGVIEW WEBHOOK INTAKE ────────────────────────────────────────────
+
+TRADINGVIEW_WEBHOOK_TOKEN = os.getenv("TRADINGVIEW_WEBHOOK_TOKEN", "")
+TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES = int(
+    os.getenv("TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES", "65536")
+)
+
 # ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
 
 NOTIFICATIONS = {

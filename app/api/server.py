@@ -44,8 +44,17 @@ from data.trade_db import (
     get_summary,
     init_db,
     insert_calibration_points,
+    log_event,
     promote_strategy_parameter_set,
     update_job,
+)
+from intelligence.webhook_server import (
+    WebhookValidationError,
+    build_audit_detail,
+    extract_auth_token,
+    parse_json_payload,
+    summarize_payload,
+    validate_expected_token,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -201,6 +210,58 @@ def create_app() -> FastAPI:
         except FileNotFoundError:
             text = ""
         return JSONResponse({"log": text})
+
+    @app.post("/api/webhooks/tradingview")
+    async def tradingview_webhook(request: Request, token: str = ""):
+        payload: Optional[dict[str, Any]] = None
+        client_ip = request.client.host if request.client else "-"
+        try:
+            payload = parse_json_payload(
+                raw_body=await request.body(),
+                max_payload_bytes=config.TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES,
+            )
+            provided_token = extract_auth_token(
+                payload=payload,
+                header_token=request.headers.get("x-webhook-token", ""),
+                query_token=token,
+            )
+            validate_expected_token(
+                expected_token=config.TRADINGVIEW_WEBHOOK_TOKEN,
+                provided_token=provided_token,
+            )
+            signal = summarize_payload(payload)
+        except WebhookValidationError as exc:
+            _safe_log_event(
+                category="REJECTION",
+                headline="TradingView webhook rejected",
+                detail=build_audit_detail(
+                    reason=exc.message,
+                    client_ip=client_ip,
+                    payload=payload,
+                ),
+                ticker=(str(payload.get("symbol") or payload.get("ticker")) if payload else None),
+                strategy="tradingview_webhook",
+            )
+            return JSONResponse(
+                {"ok": False, "error": exc.code, "detail": exc.message},
+                status_code=exc.status_code,
+            )
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"TradingView webhook accepted: {signal.action or '-'} {signal.ticker or '-'}",
+            detail=build_audit_detail(reason="accepted", client_ip=client_ip, payload=payload),
+            ticker=signal.ticker or None,
+            strategy=signal.strategy or "tradingview_webhook",
+        )
+        return {
+            "ok": True,
+            "message": "TradingView webhook accepted.",
+            "ticker": signal.ticker,
+            "action": signal.action,
+            "strategy": signal.strategy,
+            "timeframe": signal.timeframe,
+        }
 
     @app.post("/api/actions/start", response_class=HTMLResponse)
     def start_bot(mode: str = Form(default=config.TRADING_MODE)):
@@ -855,6 +916,14 @@ def create_app() -> FastAPI:
 def action_message(text: str, ok: bool) -> str:
     css = "action-msg ok" if ok else "action-msg error"
     return f"<div class='{css}'>{text}</div>"
+
+
+def _safe_log_event(**kwargs: Any) -> None:
+    """Best-effort event logging for non-critical API paths."""
+    try:
+        log_event(**kwargs)
+    except Exception:
+        return
 
 
 def build_status_payload() -> dict[str, Any]:
