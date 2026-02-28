@@ -391,6 +391,33 @@ def init_db(db_path: str = DB_PATH):
             ON reconciliation_reports(created_at);
         CREATE INDEX IF NOT EXISTS idx_recon_reports_status
             ON reconciliation_reports(status);
+
+        -- ─── A-006: Pre-trade risk gate verdicts ────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS risk_verdicts (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            strategy TEXT,
+            sleeve TEXT,
+            broker TEXT,
+            approved INTEGER NOT NULL,              -- 1 = approved, 0 = rejected
+            rule_id TEXT,                           -- ID of first failing rule (null if approved)
+            reason TEXT NOT NULL,                   -- Human-readable rejection reason or 'OK'
+            checks_run INTEGER NOT NULL DEFAULT 0,
+            details TEXT                            -- JSON array of all check results
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_created
+            ON risk_verdicts(created_at);
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_approved
+            ON risk_verdicts(approved);
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_ticker
+            ON risk_verdicts(ticker);
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_rule_id
+            ON risk_verdicts(rule_id);
     """)
     conn.commit()
     conn.close()
