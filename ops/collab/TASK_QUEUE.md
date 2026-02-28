@@ -10,7 +10,7 @@ Canonical queue for Codex + Claude parallel execution.
 
 | ticket_id | title | owner | status | deps | file_scope | branch | commit_head | handoff_ref | acceptance_criteria | updated_utc |
 |---|---|---|---|---|---|---|---|---|---|---|
-| A-001 | Broker capability schema | codex | REVIEW | none | `broker/base.py`, `execution/policy/**`, `tests/**capability**` | `codex/a-001-broker-capability-schema` | `-` | `ops/collab/HANDOFFS/20260228-1301Z-codex-A-001.md` | Capability matrix enforced pre-trade; tests pass | 2026-02-28T13:01:58Z |
+| A-001 | Broker capability schema | codex | REVIEW | none | `broker/base.py`, `execution/policy/**`, `tests/**capability**` | `codex/a-001-broker-capability-schema` | `f45b0e6` | `ops/collab/HANDOFFS/20260228-1301Z-codex-A-001.md` | Capability matrix enforced pre-trade; tests pass | 2026-02-28T13:03:00Z |
 | A-002 | Unified order intent + audit envelope | codex | BACKLOG | A-001 | `execution/**intent**`, `data/**order_intent**`, `tests/**intent**` | `codex/a-002-order-intent-audit-envelope` | `-` | `-` | Intent/correlation lifecycle persisted with retries | 2026-02-28T13:05:00Z |
 | A-003 | IBKR paper adapter (MVP) | claude | IN_PROGRESS | A-001 (A-002 for full wiring) | `broker/ibkr.py`, `tests/test_ibkr.py`, `config.py` (IBKR section), `requirements.txt` (ib_async), `.env.example` (IBKR keys) | `claude/a-003-ibkr-paper-adapter` | `-` | `-` | Connect, submit, cancel, status flow for paper lane | 2026-02-28T14:00:00Z |
 | A-004 | Account router and policy engine | codex | BACKLOG | A-001, A-003 | `execution/router.py`, `execution/policy/**`, `tests/**router**` | `codex/a-004-account-router-policy-engine` | `-` | `-` | Deterministic routing + explicit reject reasons | 2026-02-28T13:05:00Z |
