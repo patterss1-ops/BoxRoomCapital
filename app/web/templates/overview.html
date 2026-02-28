@@ -56,6 +56,10 @@
   </div>
 </section>
 
+<section>
+  <div id="risk-briefing-panel" hx-get="/fragments/risk-briefing" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+</section>
+
 <section class="grid-3">
   <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
   <div id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
