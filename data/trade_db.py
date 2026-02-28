@@ -1508,5 +1508,74 @@ def get_summary(db_path: str = DB_PATH) -> dict:
     }
 
 
+# ─── A-006: Risk verdict queries ──────────────────────────────────────────
+
+
+def get_risk_verdicts(
+    limit: int = 50,
+    approved: Optional[int] = None,
+    ticker: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent risk verdicts with optional filters."""
+    import json as _json
+
+    conn = get_conn(db_path)
+    sql = "SELECT * FROM risk_verdicts"
+    where: list[str] = []
+    params: list = []
+    if approved is not None:
+        where.append("approved=?")
+        params.append(int(approved))
+    if ticker:
+        where.append("ticker=?")
+        params.append(ticker)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(sql, tuple(params)).fetchall()
+    conn.close()
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d.get("details"):
+            try:
+                d["details"] = _json.loads(d["details"])
+            except (ValueError, TypeError):
+                pass
+        results.append(d)
+    return results
+
+
+def get_risk_verdict_summary(db_path: str = DB_PATH) -> dict:
+    """Get summary stats for risk verdicts."""
+    conn = get_conn(db_path)
+    total = conn.execute("SELECT COUNT(*) as c FROM risk_verdicts").fetchone()["c"]
+    approved = conn.execute(
+        "SELECT COUNT(*) as c FROM risk_verdicts WHERE approved=1"
+    ).fetchone()["c"]
+    rejected = conn.execute(
+        "SELECT COUNT(*) as c FROM risk_verdicts WHERE approved=0"
+    ).fetchone()["c"]
+
+    # Top rejection reasons
+    top_rules = conn.execute(
+        """SELECT rule_id, COUNT(*) as cnt FROM risk_verdicts
+           WHERE approved=0 AND rule_id IS NOT NULL
+           GROUP BY rule_id ORDER BY cnt DESC LIMIT 5"""
+    ).fetchall()
+    conn.close()
+
+    return {
+        "total": total,
+        "approved": approved,
+        "rejected": rejected,
+        "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
+        "top_rejection_rules": [dict(r) for r in top_rules],
+    }
+
+
 # Initialise on import
 init_db()

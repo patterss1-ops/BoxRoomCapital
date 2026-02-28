@@ -1,0 +1,26 @@
+<section class="card">
+  <h2>Broker Health</h2>
+  {% if brokers %}
+    <table>
+      <thead>
+        <tr><th>Broker</th><th>Status</th><th>Accounts</th><th>Last Updated</th></tr>
+      </thead>
+      <tbody>
+      {% for b in brokers %}
+        <tr>
+          <td><strong>{{ b.broker | upper }}</strong></td>
+          <td><span class="badge completed">{{ b.status }}</span></td>
+          <td>
+            {% for acct in b.accounts %}
+              <span class="code">{{ acct.account_type }}{% if acct.label %} ({{ acct.label }}){% endif %}</span>{% if not loop.last %}, {% endif %}
+            {% endfor %}
+          </td>
+          <td>{{ b.last_updated or "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No broker accounts registered. Connect a broker to get started.</p>
+  {% endif %}
+</section>

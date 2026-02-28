@@ -34,6 +34,8 @@ from data.trade_db import (
     get_option_contract_summary,
     get_option_contracts,
     get_order_actions,
+    get_risk_verdicts,
+    get_risk_verdict_summary,
     get_strategy_parameter_sets,
     get_strategy_promotions,
     get_summary,
@@ -41,6 +43,13 @@ from data.trade_db import (
     insert_calibration_points,
     promote_strategy_parameter_set,
     update_job,
+)
+from execution.ledger import (
+    get_broker_accounts,
+    get_unified_positions,
+    get_latest_cash_balances,
+    get_nav_history,
+    get_reconciliation_reports,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -174,6 +183,107 @@ def create_app() -> FastAPI:
         except FileNotFoundError:
             text = ""
         return JSONResponse({"log": text})
+
+    # ─── A-007: Phase A — Multi-broker fund surfaces ──────────────────────
+
+    @app.get("/api/broker/accounts")
+    def api_broker_accounts(broker: str = "", active_only: bool = True):
+        """List registered broker accounts from the multi-broker ledger."""
+        return {
+            "items": get_broker_accounts(
+                broker=broker or None,
+                active_only=active_only,
+            )
+        }
+
+    @app.get("/api/broker/positions")
+    def api_broker_positions(broker: str = "", sleeve: str = ""):
+        """Unified positions across all brokers."""
+        return {
+            "items": get_unified_positions(
+                broker=broker or None,
+                sleeve=sleeve or None,
+            )
+        }
+
+    @app.get("/api/broker/cash")
+    def api_broker_cash():
+        """Latest cash balances per broker account."""
+        return {"items": get_latest_cash_balances()}
+
+    @app.get("/api/broker/health")
+    def api_broker_health():
+        """
+        Broker connection health status.
+
+        Returns health info for each registered broker. Actual health checks
+        would call broker.health_check() in production; for now returns
+        registration state and last sync times.
+        """
+        accounts = get_broker_accounts(active_only=True)
+        brokers: dict[str, dict] = {}
+        for acct in accounts:
+            b = acct["broker"]
+            if b not in brokers:
+                brokers[b] = {
+                    "broker": b,
+                    "accounts": 0,
+                    "status": "registered",
+                    "last_updated": acct.get("updated_at"),
+                }
+            brokers[b]["accounts"] += 1
+            # Track the most recent update across all accounts for this broker
+            if acct.get("updated_at") and (
+                not brokers[b]["last_updated"]
+                or acct["updated_at"] > brokers[b]["last_updated"]
+            ):
+                brokers[b]["last_updated"] = acct["updated_at"]
+
+        return {"items": list(brokers.values())}
+
+    @app.get("/api/nav/history")
+    def api_nav_history(level: str = "fund", level_id: str = "fund", days: int = 30):
+        """NAV history for charting (fund, sleeve, or account level)."""
+        return {
+            "items": get_nav_history(
+                level=level,
+                level_id=level_id,
+                days=days,
+            )
+        }
+
+    @app.get("/api/risk/verdicts")
+    def api_risk_verdicts(
+        limit: int = 50, approved: str = "", ticker: str = ""
+    ):
+        """Recent pre-trade risk gate verdicts."""
+        approved_val = None
+        if approved == "1":
+            approved_val = 1
+        elif approved == "0":
+            approved_val = 0
+        return {
+            "items": get_risk_verdicts(
+                limit=limit,
+                approved=approved_val,
+                ticker=ticker or None,
+            )
+        }
+
+    @app.get("/api/risk/summary")
+    def api_risk_summary():
+        """Risk verdict summary statistics."""
+        return get_risk_verdict_summary()
+
+    @app.get("/api/reconciliation/reports")
+    def api_reconciliation_reports(broker_account_id: str = "", limit: int = 10):
+        """Multi-broker reconciliation report history."""
+        return {
+            "items": get_reconciliation_reports(
+                broker_account_id=broker_account_id or None,
+                limit=limit,
+            )
+        }
 
     @app.post("/api/actions/start", response_class=HTMLResponse)
     def start_bot(mode: str = Form(default=config.TRADING_MODE)):
@@ -531,6 +641,13 @@ def create_app() -> FastAPI:
             _page_context(request=request, page_key="settings", title="Settings | Trading Bot"),
         )
 
+    @app.get("/fund", response_class=HTMLResponse)
+    def fund_page(request: Request):
+        return TEMPLATES.TemplateResponse(
+            "fund_page.html",
+            _page_context(request=request, page_key="fund", title="Fund | Trading Bot"),
+        )
+
     @app.get("/legacy", response_class=HTMLResponse)
     def legacy_single_page(request: Request):
         payload = build_status_payload()
@@ -743,6 +860,80 @@ def create_app() -> FastAPI:
         return TEMPLATES.TemplateResponse(
             "_log_tail.html",
             {"request": request, "log_text": log_text},
+        )
+
+    # ─── A-007: Fund dashboard fragments ──────────────────────────────────
+
+    @app.get("/fragments/broker-health", response_class=HTMLResponse)
+    def broker_health_fragment(request: Request):
+        accounts = get_broker_accounts(active_only=True)
+        brokers: dict[str, dict] = {}
+        for acct in accounts:
+            b = acct["broker"]
+            if b not in brokers:
+                brokers[b] = {
+                    "broker": b,
+                    "accounts": [],
+                    "status": "registered",
+                    "last_updated": acct.get("updated_at"),
+                }
+            brokers[b]["accounts"].append(acct)
+            if acct.get("updated_at") and (
+                not brokers[b]["last_updated"]
+                or acct["updated_at"] > brokers[b]["last_updated"]
+            ):
+                brokers[b]["last_updated"] = acct["updated_at"]
+
+        return TEMPLATES.TemplateResponse(
+            "_broker_health.html",
+            {"request": request, "brokers": list(brokers.values())},
+        )
+
+    @app.get("/fragments/ledger-positions", response_class=HTMLResponse)
+    def ledger_positions_fragment(request: Request, broker: str = "", sleeve: str = ""):
+        positions = get_unified_positions(
+            broker=broker or None,
+            sleeve=sleeve or None,
+        )
+        return TEMPLATES.TemplateResponse(
+            "_ledger_positions.html",
+            {"request": request, "positions": positions},
+        )
+
+    @app.get("/fragments/ledger-cash", response_class=HTMLResponse)
+    def ledger_cash_fragment(request: Request):
+        balances = get_latest_cash_balances()
+        total = sum(b.get("balance", 0) for b in balances)
+        return TEMPLATES.TemplateResponse(
+            "_ledger_cash.html",
+            {"request": request, "balances": balances, "total_cash": total},
+        )
+
+    @app.get("/fragments/risk-verdicts", response_class=HTMLResponse)
+    def risk_verdicts_fragment(request: Request, limit: int = 20):
+        verdicts = get_risk_verdicts(limit=limit)
+        summary = get_risk_verdict_summary()
+        return TEMPLATES.TemplateResponse(
+            "_risk_verdicts.html",
+            {"request": request, "verdicts": verdicts, "summary": summary},
+        )
+
+    @app.get("/fragments/nav-history", response_class=HTMLResponse)
+    def nav_history_fragment(
+        request: Request, level: str = "fund", level_id: str = "fund", days: int = 30
+    ):
+        history = get_nav_history(level=level, level_id=level_id, days=days)
+        return TEMPLATES.TemplateResponse(
+            "_nav_history.html",
+            {"request": request, "nav_history": history, "level": level, "level_id": level_id},
+        )
+
+    @app.get("/fragments/reconciliation-reports", response_class=HTMLResponse)
+    def reconciliation_reports_fragment(request: Request, limit: int = 10):
+        reports = get_reconciliation_reports(limit=limit)
+        return TEMPLATES.TemplateResponse(
+            "_reconciliation_reports.html",
+            {"request": request, "reports": reports},
         )
 
     @app.get("/api/stream/events")
