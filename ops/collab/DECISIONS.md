@@ -12,6 +12,7 @@ Format: `DEC-### | date_utc | decision | rationale | impact | owner`
 | DEC-006 | 2026-02-28T13:39:30Z | Phase A integration replay validated against Claude A-003 baseline | Codex replayed A-002/A-004/A-005/A-006/A-007/A-008 code commits on top of `claude/a-003-ibkr-paper-adapter` in an isolated worktree | No merge blockers detected; combined suite passed (`96 passed`) | codex |
 | DEC-007 | 2026-02-28T13:41:14Z | A-003 cross-review completed with no blocking findings | Code review plus isolated branch/full integration tests passed | A-003 can proceed through merge gate review step | codex |
 | DEC-008 | 2026-02-28T13:45:41Z | Consolidated Phase A candidate branch passes full suite with IBKR adapter included | Integrated reviewed A-003 artifacts into Codex Phase A branch and reran full regression + release checks | Provides a single merge-ready branch candidate (`98 passed`) | codex |
+| DEC-009 | 2026-02-28T13:47:00Z | Runtime smoke verified for consolidated Phase A branch | Short-lived server launch passed health/UI probes including ledger fragment rendering | Reduces risk of merge-time runtime regressions beyond unit/integration tests | codex |
 
 ## Pending decision template
 Use this row format when a blocker needs user decision:
