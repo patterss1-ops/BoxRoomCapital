@@ -1,18 +1,17 @@
-"""
-Risk management — pre-trade risk gate and portfolio-level limits.
+"""Risk modules."""
 
-A-006: Provides hierarchical risk limits (fund → sleeve → strategy → trade)
-evaluated before every broker submission. No order reaches a broker without
-passing all risk rules.
-"""
 from risk.pre_trade_gate import (
+    RiskContext,
+    RiskDecision,
     RiskLimits,
-    RiskVerdict,
-    PreTradeRiskGate,
+    RiskOrderRequest,
+    evaluate_pre_trade_risk,
 )
 
 __all__ = [
+    "RiskContext",
+    "RiskDecision",
     "RiskLimits",
-    "RiskVerdict",
-    "PreTradeRiskGate",
+    "RiskOrderRequest",
+    "evaluate_pre_trade_risk",
 ]

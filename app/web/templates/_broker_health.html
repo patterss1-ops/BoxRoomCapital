@@ -1,26 +1,31 @@
 <section class="card">
   <h2>Broker Health</h2>
-  {% if brokers %}
-    <table>
-      <thead>
-        <tr><th>Broker</th><th>Status</th><th>Accounts</th><th>Last Updated</th></tr>
-      </thead>
-      <tbody>
-      {% for b in brokers %}
-        <tr>
-          <td><strong>{{ b.broker | upper }}</strong></td>
-          <td><span class="badge completed">{{ b.status }}</span></td>
-          <td>
-            {% for acct in b.accounts %}
-              <span class="code">{{ acct.account_type }}{% if acct.label %} ({{ acct.label }}){% endif %}</span>{% if not loop.last %}, {% endif %}
-            {% endfor %}
-          </td>
-          <td>{{ b.last_updated or "-" }}</td>
-        </tr>
+  <div class="row">
+    <span class="label">Readiness</span>
+    <span class="value {% if broker_health.ready %}ok{% else %}muted{% endif %}">
+      {{ "READY" if broker_health.ready else "DEGRADED" }}
+    </span>
+  </div>
+  <div class="row"><span class="label">Engine Running</span><span class="value">{{ "YES" if broker_health.engine_running else "NO" }}</span></div>
+  <div class="row"><span class="label">Mode</span><span class="value">{{ broker_health.engine_mode or "-" }}</span></div>
+  <div class="row"><span class="label">Broker</span><span class="value">{{ broker_health.broker_class or "-" }}</span></div>
+  <div class="row"><span class="label">Connected</span><span class="value">{{ "YES" if broker_health.connected else "NO" }}</span></div>
+  <div class="row"><span class="label">Account</span><span class="value code">{{ broker_health.account or "-" }}</span></div>
+  <div class="row"><span class="label">Host</span><span class="value code">{{ broker_health.host or "-" }}</span></div>
+  <div class="row"><span class="label">Port</span><span class="value">{{ broker_health.port or "-" }}</span></div>
+  <div class="row"><span class="label">Server Time</span><span class="value">{{ broker_health.server_time or "-" }}</span></div>
+  <div class="row"><span class="label">Kill Switch</span><span class="value">{{ "ON" if broker_health.kill_switch_active else "OFF" }}</span></div>
+  <div class="row"><span class="label">Message</span><span class="value">{{ broker_health.message or "-" }}</span></div>
+  <div class="row"><span class="label">Error</span><span class="value">{{ broker_health.error or "-" }}</span></div>
+
+  {% if broker_health.capabilities %}
+    <h3>Capabilities</h3>
+    <div class="badge-wrap">
+      {% for name, enabled in broker_health.capabilities.items() %}
+        <span class="badge {% if enabled %}completed{% else %}failed{% endif %}">
+          {{ name|replace("supports_", "") }}
+        </span>
       {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="muted">No broker accounts registered. Connect a broker to get started.</p>
+    </div>
   {% endif %}
 </section>
