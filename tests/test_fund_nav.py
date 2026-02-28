@@ -487,3 +487,34 @@ class TestSleeveQueryRegression:
         reports = get_sleeve_daily_reports(sleeve="equity", days=5, db_path=db)
         assert len(reports) == 2
         assert all(r["sleeve"] == "equity" for r in reports)
+
+    def test_sleeve_filter_uses_sleeve_specific_dates(self, db):
+        """P1 regression: sleeve-filter must scope the date subquery to the
+        requested sleeve, not use global dates.
+
+        Scenario: 'bonds' only has data on 2026-02-26, but 'equity' has data
+        on 2026-02-27 and 2026-02-28.  A global-date subquery with days=2
+        would pick the two latest global dates (02-27, 02-28) and return zero
+        rows for 'bonds' because it has no data on those dates.
+        """
+        from data.trade_db import save_sleeve_daily_report
+
+        # 'equity' has data on the two most recent global dates
+        for date in ["2026-02-27", "2026-02-28"]:
+            save_sleeve_daily_report(
+                report_date=date, sleeve="equity", nav=50000,
+                positions_value=30000, cash_allocated=20000, db_path=db,
+            )
+
+        # 'bonds' only has data on an older date
+        save_sleeve_daily_report(
+            report_date="2026-02-26", sleeve="bonds", nav=40000,
+            positions_value=20000, cash_allocated=20000, db_path=db,
+        )
+
+        # Requesting bonds with days=2 must return the 1 row it has,
+        # NOT zero rows (which would happen if the subquery used global dates).
+        reports = get_sleeve_daily_reports(sleeve="bonds", days=2, db_path=db)
+        assert len(reports) == 1
+        assert reports[0]["sleeve"] == "bonds"
+        assert reports[0]["report_date"] == "2026-02-26"

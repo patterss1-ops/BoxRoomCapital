@@ -2137,10 +2137,11 @@ def get_sleeve_daily_reports(
                WHERE sleeve = ?
                  AND report_date IN (
                      SELECT DISTINCT report_date FROM sleeve_daily_report
+                     WHERE sleeve = ?
                      ORDER BY report_date DESC LIMIT ?
                  )
-               ORDER BY report_date DESC, sleeve""",
-            (sleeve, days),
+               ORDER BY report_date DESC""",
+            (sleeve, sleeve, days),
         ).fetchall()
     else:
         rows = conn.execute(

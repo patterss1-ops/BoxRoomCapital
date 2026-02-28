@@ -603,3 +603,17 @@ class TestDayPnlDerivation:
             db_path=db,
         )
         assert briefing["day_pnl"] == 0.0
+
+    def test_day_pnl_minus_100_no_zero_division(self, db):
+        """Return of -100% must not raise ZeroDivisionError."""
+        from risk.portfolio_risk import get_risk_briefing
+
+        # r=-100 → divisor = 1 + (-100/100) = 0 → would divide by zero
+        briefing = get_risk_briefing(
+            total_nav=100000,
+            daily_return_pct=-100.0,
+            snapshot_date="2026-02-28",
+            db_path=db,
+        )
+        # Should not crash; P&L represents total loss
+        assert briefing["day_pnl"] == -100000.0

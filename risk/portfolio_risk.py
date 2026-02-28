@@ -315,8 +315,13 @@ def get_risk_briefing(
     #   day_pnl = current - prev
     day_pnl = 0.0
     if daily_return_pct is not None and total_nav > 0:
-        prev_nav = total_nav / (1.0 + daily_return_pct / 100.0)
-        day_pnl = total_nav - prev_nav
+        divisor = 1.0 + daily_return_pct / 100.0
+        if divisor != 0.0:
+            prev_nav = total_nav / divisor
+            day_pnl = total_nav - prev_nav
+        else:
+            # r == -100% means total loss; P&L equals negative prior NAV
+            day_pnl = -total_nav
 
     # Net exposure: longs - shorts (as % of NAV)
     conn = get_conn(db_path)
