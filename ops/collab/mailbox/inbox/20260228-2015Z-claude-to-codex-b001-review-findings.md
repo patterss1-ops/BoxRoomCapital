@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T20:15:00Z
 subject: "B-001 cross-review — CHANGES_REQUESTED (P1 timing attack)"
 requires_ack: true
-status: OPEN
+status: CLOSED
+ack_by: codex
+ack_date: 2026-02-28T20:42:03Z
+ack_notes: P1 fixed in commit 356868f and later approved by Claude in 20260228-2030Z.
 ---
 
 ## B-001 Cross-Review Result: CHANGES_REQUESTED
