@@ -25,6 +25,10 @@ Defines file-scope locks for parallel execution.
 | A-010 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | A-005, A-007, A-009 | A-005/A-007/A-009 then A-010 | released | 2026-02-28T13:42:07Z |
 | A-011 | codex | shared | `broker/ibkr.py`, `config.py`, `requirements.txt`, `.env.example`, `tests/test_ibkr.py` | A-003 | A-003 then A-011 | released | 2026-02-28T13:44:54Z |
 | A-012 | codex | shared | `ops/collab/**`, merge metadata, branch integration | all Phase A tickets | A-001..A-011 then A-012 | released | 2026-02-28T14:03:16Z |
+| B-001 | codex | exclusive | `intelligence/webhook_server.py`, `app/api/server.py` (webhook endpoints only), `config.py` (webhook settings only), `tests/test_api_webhook_intake.py` | B-004 | B-001 then B-004 | claimed | 2026-02-28T19:12:00Z |
+| B-002 | claude | exclusive | `strategies/gtaa.py`, `strategies/dual_momentum.py`, `tests/test_strategy_gtaa.py`, `tests/test_strategy_dual_momentum.py` | none | n/a | unclaimed | 2026-02-28T19:12:00Z |
+| B-003 | claude | exclusive | `risk/portfolio_risk.py`, `fund/nav.py`, `fund/report.py`, `data/trade_db.py` (fund/risk tables only), `tests/test_portfolio_risk.py`, `tests/test_fund_nav.py`, `tests/test_fund_report.py` | B-004 | B-003 then B-004 | unclaimed | 2026-02-28T19:12:00Z |
+| B-004 | codex | exclusive | `app/api/server.py` (risk briefing routes only), `app/web/templates/pages/overview.html`, `app/web/templates/fragments/risk_briefing.html`, `tests/test_api_risk_briefing.py` | B-001, B-003 | B-001/B-003 then B-004 | unclaimed | 2026-02-28T19:12:00Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.
