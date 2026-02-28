@@ -95,7 +95,8 @@ def test_unified_ledger_snapshot_reads_accounts_positions_cash_and_nav(tmp_path)
     assert snapshot["summary"]["positions"] == 1
     assert snapshot["summary"]["cash_rows"] == 1
     assert snapshot["summary"]["total_cash"] == 5000.0
-    assert snapshot["summary"]["total_equity"] == 5200.0
+    # Claude schema: equity = balance + unrealised_pnl (5000 + 4.0 = 5004.0)
+    assert snapshot["summary"]["total_equity"] == 5004.0
     assert len(snapshot["nav_snapshots"]) == 1
 
     report = trade_db.get_ledger_reconcile_report(stale_after_minutes=30, db_path=db_path)
