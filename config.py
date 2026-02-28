@@ -19,6 +19,15 @@ IG_API_KEY = os.getenv("IG_API_KEY", "")
 IG_ACC_TYPE = os.getenv("IG_ACC_TYPE", "DEMO")  # "DEMO" or "LIVE"
 IG_ACC_NUMBER = os.getenv("IG_ACC_NUMBER", "")   # Your spread bet account number
 
+# IBKR API credentials — requires TWS or IB Gateway running with API enabled
+# Paper trading: port 7497 (TWS) or 4002 (Gateway)
+# Live trading:  port 7496 (TWS) or 4001 (Gateway)
+IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))      # 7497 = TWS paper
+IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
+IBKR_ACCOUNT = os.getenv("IBKR_ACCOUNT", "")          # e.g. DU1234567 for paper
+IBKR_CURRENCY = os.getenv("IBKR_CURRENCY", "USD")
+
 # ─── MARKET MAPPING ──────────────────────────────────────────────────────────
 # yfinance ticker → IG EPIC code for spread betting
 # EPICs are IG's unique market identifiers (verified via search_markets)

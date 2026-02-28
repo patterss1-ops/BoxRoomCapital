@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-grid">
+  <article class="kpi-card">
+    <p class="kpi-label">Brokers</p>
+    <p class="kpi-value">-</p>
+    <p class="kpi-foot" id="broker-count-foot">Loading...</p>
+  </article>
+  <article class="kpi-card">
+    <p class="kpi-label">Positions</p>
+    <p class="kpi-value">-</p>
+    <p class="kpi-foot" id="position-count-foot">Across all brokers</p>
+  </article>
+  <article class="kpi-card">
+    <p class="kpi-label">Total Cash</p>
+    <p class="kpi-value">-</p>
+    <p class="kpi-foot" id="cash-foot">All accounts</p>
+  </article>
+  <article class="kpi-card">
+    <p class="kpi-label">Risk Gate</p>
+    <p class="kpi-value">-</p>
+    <p class="kpi-foot" id="risk-foot">Approval rate</p>
+  </article>
+</section>
+
+<section class="grid-2">
+  <div id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 15s" hx-swap="innerHTML"></div>
+  <div id="ledger-cash-panel" hx-get="/fragments/ledger-cash" hx-trigger="load, every 15s" hx-swap="innerHTML"></div>
+</section>
+
+<section>
+  <div id="ledger-positions-panel" hx-get="/fragments/ledger-positions" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+</section>
+
+<section class="grid-2">
+  <div id="risk-verdicts-panel" hx-get="/fragments/risk-verdicts" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div id="nav-history-panel" hx-get="/fragments/nav-history" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>
+</section>
+
+<section>
+  <div id="reconciliation-panel" hx-get="/fragments/reconciliation-reports" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>
+</section>
+{% endblock %}

@@ -292,79 +292,132 @@ def init_db(db_path: str = DB_PATH):
         CREATE INDEX IF NOT EXISTS idx_strategy_promotions_strategy
             ON strategy_promotions(strategy_key);
 
+        -- ─── A-005: Multi-broker ledger tables ─────────────────────────────
+
         CREATE TABLE IF NOT EXISTS broker_accounts (
-            broker TEXT NOT NULL,
+            id TEXT PRIMARY KEY,
+            broker TEXT NOT NULL,                -- ig, ibkr, cityindex, paper
             account_id TEXT NOT NULL,
-            account_type TEXT,
-            account_label TEXT,
-            currency TEXT,
-            status TEXT,
+            account_type TEXT NOT NULL,           -- ISA, SIPP, GIA, SPREADBET, PAPER
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            label TEXT,                           -- human-readable label
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
-            PRIMARY KEY (broker, account_id)
+            UNIQUE(broker, account_id)
         );
 
         CREATE INDEX IF NOT EXISTS idx_broker_accounts_broker
             ON broker_accounts(broker);
+        CREATE INDEX IF NOT EXISTS idx_broker_accounts_type
+            ON broker_accounts(account_type);
 
         CREATE TABLE IF NOT EXISTS broker_positions (
-            broker TEXT NOT NULL,
-            account_id TEXT NOT NULL,
-            position_id TEXT NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            broker_account_id TEXT NOT NULL,
             ticker TEXT NOT NULL,
-            instrument_type TEXT,
-            direction TEXT,
-            qty REAL NOT NULL DEFAULT 0,
-            avg_price REAL,
-            market_price REAL,
-            unrealised_pnl REAL,
-            as_of TEXT NOT NULL,
-            raw_payload TEXT,
-            PRIMARY KEY (broker, account_id, position_id)
+            direction TEXT NOT NULL,              -- long / short
+            quantity REAL NOT NULL,
+            avg_cost REAL NOT NULL DEFAULT 0,
+            market_value REAL DEFAULT 0,
+            unrealised_pnl REAL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'USD',
+            strategy TEXT,                        -- strategy attribution (nullable until mapped)
+            sleeve TEXT,                          -- sleeve attribution
+            con_id TEXT,                          -- broker-specific contract/instrument ID
+            last_synced_at TEXT NOT NULL,
+            UNIQUE(broker_account_id, ticker, direction),
+            FOREIGN KEY (broker_account_id) REFERENCES broker_accounts(id)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_broker_positions_broker
-            ON broker_positions(broker);
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_account
+            ON broker_positions(broker_account_id);
         CREATE INDEX IF NOT EXISTS idx_broker_positions_ticker
             ON broker_positions(ticker);
-        CREATE INDEX IF NOT EXISTS idx_broker_positions_as_of
-            ON broker_positions(as_of);
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_strategy
+            ON broker_positions(strategy);
+        CREATE INDEX IF NOT EXISTS idx_broker_positions_sleeve
+            ON broker_positions(sleeve);
 
         CREATE TABLE IF NOT EXISTS broker_cash_balances (
-            broker TEXT NOT NULL,
-            account_id TEXT NOT NULL,
-            currency TEXT NOT NULL,
-            balance REAL NOT NULL DEFAULT 0,
-            equity REAL,
-            available REAL,
-            margin_used REAL,
-            as_of TEXT NOT NULL,
-            raw_payload TEXT,
-            PRIMARY KEY (broker, account_id, currency)
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            broker_account_id TEXT NOT NULL,
+            balance REAL NOT NULL,
+            buying_power REAL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            synced_at TEXT NOT NULL,
+            FOREIGN KEY (broker_account_id) REFERENCES broker_accounts(id)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_broker_cash_broker
-            ON broker_cash_balances(broker);
-        CREATE INDEX IF NOT EXISTS idx_broker_cash_as_of
-            ON broker_cash_balances(as_of);
+        CREATE INDEX IF NOT EXISTS idx_broker_cash_account
+            ON broker_cash_balances(broker_account_id);
+        CREATE INDEX IF NOT EXISTS idx_broker_cash_synced
+            ON broker_cash_balances(synced_at);
 
         CREATE TABLE IF NOT EXISTS nav_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            timestamp TEXT NOT NULL,
-            sleeve TEXT NOT NULL,
-            broker TEXT,
-            account_id TEXT,
-            nav REAL NOT NULL DEFAULT 0,
+            snapshot_date TEXT NOT NULL,
+            level TEXT NOT NULL,                  -- fund / sleeve / account
+            level_id TEXT NOT NULL,               -- e.g. 'fund', 'sleeve_1', account id
+            net_liquidation REAL NOT NULL,
             cash REAL NOT NULL DEFAULT 0,
-            gross_exposure REAL NOT NULL DEFAULT 0,
-            net_exposure REAL NOT NULL DEFAULT 0,
-            source TEXT,
-            UNIQUE(timestamp, sleeve, broker, account_id)
+            positions_value REAL NOT NULL DEFAULT 0,
+            unrealised_pnl REAL DEFAULT 0,
+            realised_pnl REAL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            broker TEXT,                          -- null for fund-level
+            account_type TEXT,                    -- null for fund-level
+            created_at TEXT NOT NULL,
+            UNIQUE(snapshot_date, level, level_id)
         );
 
-        CREATE INDEX IF NOT EXISTS idx_nav_snapshots_timestamp
-            ON nav_snapshots(timestamp);
-        CREATE INDEX IF NOT EXISTS idx_nav_snapshots_sleeve
-            ON nav_snapshots(sleeve);
+        CREATE INDEX IF NOT EXISTS idx_nav_snapshots_date
+            ON nav_snapshots(snapshot_date);
+        CREATE INDEX IF NOT EXISTS idx_nav_snapshots_level
+            ON nav_snapshots(level, level_id);
+
+        CREATE TABLE IF NOT EXISTS reconciliation_reports (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            broker_account_id TEXT NOT NULL,
+            status TEXT NOT NULL,                 -- clean / mismatch / error
+            positions_checked INTEGER DEFAULT 0,
+            mismatches_found INTEGER DEFAULT 0,
+            details TEXT,                         -- JSON array of mismatch details
+            FOREIGN KEY (broker_account_id) REFERENCES broker_accounts(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_recon_reports_created
+            ON reconciliation_reports(created_at);
+        CREATE INDEX IF NOT EXISTS idx_recon_reports_status
+            ON reconciliation_reports(status);
+
+        -- ─── A-006: Pre-trade risk gate verdicts ────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS risk_verdicts (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            quantity REAL NOT NULL,
+            strategy TEXT,
+            sleeve TEXT,
+            broker TEXT,
+            approved INTEGER NOT NULL,              -- 1 = approved, 0 = rejected
+            rule_id TEXT,                           -- ID of first failing rule (null if approved)
+            reason TEXT NOT NULL,                   -- Human-readable rejection reason or 'OK'
+            checks_run INTEGER NOT NULL DEFAULT 0,
+            details TEXT                            -- JSON array of all check results
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_created
+            ON risk_verdicts(created_at);
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_approved
+            ON risk_verdicts(approved);
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_ticker
+            ON risk_verdicts(ticker);
+        CREATE INDEX IF NOT EXISTS idx_risk_verdicts_rule_id
+            ON risk_verdicts(rule_id);
     """)
     conn.commit()
     conn.close()
@@ -1455,401 +1508,72 @@ def get_summary(db_path: str = DB_PATH) -> dict:
     }
 
 
-def upsert_broker_account(
-    broker: str,
-    account_id: str,
-    account_type: Optional[str] = None,
-    account_label: Optional[str] = None,
-    currency: Optional[str] = None,
-    status: Optional[str] = None,
-    db_path: str = DB_PATH,
-):
-    """Upsert a broker account identity record."""
-    now = datetime.now().isoformat()
-    conn = get_conn(db_path)
-    conn.execute(
-        """INSERT INTO broker_accounts
-           (broker, account_id, account_type, account_label, currency, status, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(broker, account_id) DO UPDATE SET
-             account_type=excluded.account_type,
-             account_label=excluded.account_label,
-             currency=excluded.currency,
-             status=excluded.status,
-             updated_at=excluded.updated_at""",
-        (
-            broker.strip().lower(),
-            account_id.strip(),
-            account_type,
-            account_label,
-            currency,
-            status,
-            now,
-        ),
-    )
-    conn.commit()
-    conn.close()
+# ─── A-006: Risk verdict queries ──────────────────────────────────────────
 
 
-def upsert_broker_position(
-    broker: str,
-    account_id: str,
-    position_id: str,
-    ticker: str,
-    instrument_type: Optional[str],
-    direction: Optional[str],
-    qty: float,
-    avg_price: Optional[float],
-    market_price: Optional[float],
-    unrealised_pnl: Optional[float],
-    as_of: Optional[str] = None,
-    raw_payload: Optional[str] = None,
-    db_path: str = DB_PATH,
-):
-    """Upsert one broker position row."""
-    stamp = as_of or datetime.now().isoformat()
-    conn = get_conn(db_path)
-    conn.execute(
-        """INSERT INTO broker_positions
-           (broker, account_id, position_id, ticker, instrument_type, direction, qty,
-            avg_price, market_price, unrealised_pnl, as_of, raw_payload)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(broker, account_id, position_id) DO UPDATE SET
-             ticker=excluded.ticker,
-             instrument_type=excluded.instrument_type,
-             direction=excluded.direction,
-             qty=excluded.qty,
-             avg_price=excluded.avg_price,
-             market_price=excluded.market_price,
-             unrealised_pnl=excluded.unrealised_pnl,
-             as_of=excluded.as_of,
-             raw_payload=excluded.raw_payload""",
-        (
-            broker.strip().lower(),
-            account_id.strip(),
-            position_id.strip(),
-            ticker.strip().upper(),
-            instrument_type,
-            direction,
-            float(qty),
-            avg_price,
-            market_price,
-            unrealised_pnl,
-            stamp,
-            raw_payload,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-
-def replace_broker_positions(
-    broker: str,
-    account_id: str,
-    positions: list[dict],
-    as_of: Optional[str] = None,
-    db_path: str = DB_PATH,
-) -> int:
-    """
-    Replace all positions for one broker/account snapshot.
-    Returns number of positions written.
-    """
-    broker_key = broker.strip().lower()
-    account_key = account_id.strip()
-    stamp = as_of or datetime.now().isoformat()
-    conn = get_conn(db_path)
-    conn.execute(
-        "DELETE FROM broker_positions WHERE broker=? AND account_id=?",
-        (broker_key, account_key),
-    )
-    count = 0
-    for row in positions:
-        conn.execute(
-            """INSERT INTO broker_positions
-               (broker, account_id, position_id, ticker, instrument_type, direction, qty,
-                avg_price, market_price, unrealised_pnl, as_of, raw_payload)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                broker_key,
-                account_key,
-                str(row.get("position_id", "")).strip() or f"pos-{count+1}",
-                str(row.get("ticker", "")).strip().upper(),
-                row.get("instrument_type"),
-                row.get("direction"),
-                float(row.get("qty", 0) or 0),
-                row.get("avg_price"),
-                row.get("market_price"),
-                row.get("unrealised_pnl"),
-                row.get("as_of") or stamp,
-                row.get("raw_payload"),
-            ),
-        )
-        count += 1
-    conn.commit()
-    conn.close()
-    return count
-
-
-def upsert_broker_cash_balance(
-    broker: str,
-    account_id: str,
-    currency: str,
-    balance: float,
-    equity: Optional[float] = None,
-    available: Optional[float] = None,
-    margin_used: Optional[float] = None,
-    as_of: Optional[str] = None,
-    raw_payload: Optional[str] = None,
-    db_path: str = DB_PATH,
-):
-    """Upsert broker cash/equity snapshot."""
-    stamp = as_of or datetime.now().isoformat()
-    conn = get_conn(db_path)
-    conn.execute(
-        """INSERT INTO broker_cash_balances
-           (broker, account_id, currency, balance, equity, available, margin_used, as_of, raw_payload)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(broker, account_id, currency) DO UPDATE SET
-             balance=excluded.balance,
-             equity=excluded.equity,
-             available=excluded.available,
-             margin_used=excluded.margin_used,
-             as_of=excluded.as_of,
-             raw_payload=excluded.raw_payload""",
-        (
-            broker.strip().lower(),
-            account_id.strip(),
-            currency.strip().upper(),
-            float(balance),
-            equity,
-            available,
-            margin_used,
-            stamp,
-            raw_payload,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-
-def insert_nav_snapshot(
-    timestamp: str,
-    sleeve: str,
-    nav: float,
-    cash: float = 0.0,
-    gross_exposure: float = 0.0,
-    net_exposure: float = 0.0,
-    broker: Optional[str] = None,
-    account_id: Optional[str] = None,
-    source: Optional[str] = None,
-    db_path: str = DB_PATH,
-):
-    """Insert or update one NAV snapshot row."""
-    conn = get_conn(db_path)
-    conn.execute(
-        """INSERT INTO nav_snapshots
-           (timestamp, sleeve, broker, account_id, nav, cash, gross_exposure, net_exposure, source)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON CONFLICT(timestamp, sleeve, broker, account_id) DO UPDATE SET
-             nav=excluded.nav,
-             cash=excluded.cash,
-             gross_exposure=excluded.gross_exposure,
-             net_exposure=excluded.net_exposure,
-             source=excluded.source""",
-        (
-            timestamp,
-            sleeve,
-            broker.strip().lower() if broker else None,
-            account_id,
-            float(nav),
-            float(cash),
-            float(gross_exposure),
-            float(net_exposure),
-            source,
-        ),
-    )
-    conn.commit()
-    conn.close()
-
-
-def get_broker_accounts(
-    broker: Optional[str] = None,
+def get_risk_verdicts(
+    limit: int = 50,
+    approved: Optional[int] = None,
+    ticker: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> list[dict]:
-    """Return broker accounts, optionally filtered by broker key."""
-    conn = get_conn(db_path)
-    if broker:
-        rows = conn.execute(
-            "SELECT * FROM broker_accounts WHERE broker=? ORDER BY account_id",
-            (broker.strip().lower(),),
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT * FROM broker_accounts ORDER BY broker, account_id"
-        ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    """Get recent risk verdicts with optional filters."""
+    import json as _json
 
-
-def get_broker_positions(
-    broker: Optional[str] = None,
-    account_id: Optional[str] = None,
-    db_path: str = DB_PATH,
-) -> list[dict]:
-    """Return broker positions with optional broker/account filters."""
     conn = get_conn(db_path)
-    query = "SELECT * FROM broker_positions"
+    sql = "SELECT * FROM risk_verdicts"
     where: list[str] = []
-    params: list[Any] = []
-    if broker:
-        where.append("broker=?")
-        params.append(broker.strip().lower())
-    if account_id:
-        where.append("account_id=?")
-        params.append(account_id.strip())
+    params: list = []
+    if approved is not None:
+        where.append("approved=?")
+        params.append(int(approved))
+    if ticker:
+        where.append("ticker=?")
+        params.append(ticker)
     if where:
-        query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY broker, account_id, ticker"
-    rows = conn.execute(query, tuple(params)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_broker_cash_balances(
-    broker: Optional[str] = None,
-    account_id: Optional[str] = None,
-    db_path: str = DB_PATH,
-) -> list[dict]:
-    """Return broker cash snapshots with optional broker/account filters."""
-    conn = get_conn(db_path)
-    query = "SELECT * FROM broker_cash_balances"
-    where: list[str] = []
-    params: list[Any] = []
-    if broker:
-        where.append("broker=?")
-        params.append(broker.strip().lower())
-    if account_id:
-        where.append("account_id=?")
-        params.append(account_id.strip())
-    if where:
-        query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY broker, account_id, currency"
-    rows = conn.execute(query, tuple(params)).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_nav_snapshots(
-    limit: int = 100,
-    sleeve: Optional[str] = None,
-    broker: Optional[str] = None,
-    db_path: str = DB_PATH,
-) -> list[dict]:
-    """Return NAV snapshots with optional sleeve/broker filters."""
-    conn = get_conn(db_path)
-    query = "SELECT * FROM nav_snapshots"
-    where: list[str] = []
-    params: list[Any] = []
-    if sleeve:
-        where.append("sleeve=?")
-        params.append(sleeve.strip())
-    if broker:
-        where.append("broker=?")
-        params.append(broker.strip().lower())
-    if where:
-        query += " WHERE " + " AND ".join(where)
-    query += " ORDER BY timestamp DESC LIMIT ?"
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY created_at DESC LIMIT ?"
     params.append(limit)
-    rows = conn.execute(query, tuple(params)).fetchall()
+    rows = conn.execute(sql, tuple(params)).fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+
+    results = []
+    for r in rows:
+        d = dict(r)
+        if d.get("details"):
+            try:
+                d["details"] = _json.loads(d["details"])
+            except (ValueError, TypeError):
+                pass
+        results.append(d)
+    return results
 
 
-def get_unified_ledger_snapshot(
-    nav_limit: int = 50,
-    db_path: str = DB_PATH,
-) -> dict:
-    """Return unified broker accounts, positions, cash balances, and NAV snapshots."""
-    accounts = get_broker_accounts(db_path=db_path)
-    positions = get_broker_positions(db_path=db_path)
-    cash_balances = get_broker_cash_balances(db_path=db_path)
-    nav = get_nav_snapshots(limit=nav_limit, db_path=db_path)
+def get_risk_verdict_summary(db_path: str = DB_PATH) -> dict:
+    """Get summary stats for risk verdicts."""
+    conn = get_conn(db_path)
+    total = conn.execute("SELECT COUNT(*) as c FROM risk_verdicts").fetchone()["c"]
+    approved = conn.execute(
+        "SELECT COUNT(*) as c FROM risk_verdicts WHERE approved=1"
+    ).fetchone()["c"]
+    rejected = conn.execute(
+        "SELECT COUNT(*) as c FROM risk_verdicts WHERE approved=0"
+    ).fetchone()["c"]
 
-    total_cash = sum(float(row.get("balance", 0) or 0) for row in cash_balances)
-    total_equity = sum(float(row.get("equity", 0) or 0) for row in cash_balances if row.get("equity") is not None)
-    total_unrealised = sum(float(row.get("unrealised_pnl", 0) or 0) for row in positions)
-
-    return {
-        "accounts": accounts,
-        "positions": positions,
-        "cash_balances": cash_balances,
-        "nav_snapshots": nav,
-        "summary": {
-            "accounts": len(accounts),
-            "positions": len(positions),
-            "cash_rows": len(cash_balances),
-            "total_cash": round(total_cash, 2),
-            "total_equity": round(total_equity, 2),
-            "total_unrealised_pnl": round(total_unrealised, 2),
-        },
-    }
-
-
-def get_ledger_reconcile_report(
-    stale_after_minutes: int = 30,
-    db_path: str = DB_PATH,
-) -> dict:
-    """
-    Build a unified ledger reconciliation report with actionable suggestions.
-    """
-    accounts = get_broker_accounts(db_path=db_path)
-    positions = get_broker_positions(db_path=db_path)
-    open_option_positions = get_open_option_positions(db_path=db_path)
-
-    account_keys = {(row.get("broker"), row.get("account_id")) for row in accounts}
-    orphan_positions = [
-        row for row in positions
-        if (row.get("broker"), row.get("account_id")) not in account_keys
-    ]
-
-    cutoff = datetime.now() - timedelta(minutes=max(1, int(stale_after_minutes)))
-    stale_positions = []
-    for row in positions:
-        as_of = str(row.get("as_of") or "")
-        try:
-            timestamp = datetime.fromisoformat(as_of)
-            if timestamp < cutoff:
-                stale_positions.append(row)
-        except ValueError:
-            stale_positions.append(row)
-
-    ig_position_count = len([row for row in positions if row.get("broker") == "ig"])
-    ig_option_spread_count = len(open_option_positions)
-    ig_count_mismatch = ig_option_spread_count != ig_position_count and (ig_option_spread_count or ig_position_count)
-
-    suggestions: list[str] = []
-    if orphan_positions:
-        suggestions.append("Broker positions exist without matching broker account metadata. Run account sync.")
-    if stale_positions:
-        suggestions.append("Broker positions are stale. Trigger broker ledger ingestion and reconcile again.")
-    if ig_count_mismatch:
-        suggestions.append(
-            "IG ledger position count differs from option spread count. Run manual reconcile and inspect stale spreads."
-        )
-    if not suggestions:
-        suggestions.append("Ledger reconciliation is clean.")
+    # Top rejection reasons
+    top_rules = conn.execute(
+        """SELECT rule_id, COUNT(*) as cnt FROM risk_verdicts
+           WHERE approved=0 AND rule_id IS NOT NULL
+           GROUP BY rule_id ORDER BY cnt DESC LIMIT 5"""
+    ).fetchall()
+    conn.close()
 
     return {
-        "ok": not (orphan_positions or stale_positions or ig_count_mismatch),
-        "stale_after_minutes": max(1, int(stale_after_minutes)),
-        "broker_accounts": len(accounts),
-        "broker_positions": len(positions),
-        "orphan_position_count": len(orphan_positions),
-        "stale_position_count": len(stale_positions),
-        "ig_option_spread_count": ig_option_spread_count,
-        "ig_ledger_position_count": ig_position_count,
-        "ig_count_mismatch": bool(ig_count_mismatch),
-        "suggestions": suggestions,
+        "total": total,
+        "approved": approved,
+        "rejected": rejected,
+        "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
+        "top_rejection_rules": [dict(r) for r in top_rules],
     }
 
 
