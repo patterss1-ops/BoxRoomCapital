@@ -418,6 +418,68 @@ def init_db(db_path: str = DB_PATH):
             ON risk_verdicts(ticker);
         CREATE INDEX IF NOT EXISTS idx_risk_verdicts_rule_id
             ON risk_verdicts(rule_id);
+
+        -- ─── B-003: Fund daily reports ────────────────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS fund_daily_report (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_date TEXT NOT NULL,
+            total_nav REAL NOT NULL,
+            total_cash REAL NOT NULL DEFAULT 0,
+            total_positions_value REAL NOT NULL DEFAULT 0,
+            unrealised_pnl REAL NOT NULL DEFAULT 0,
+            realised_pnl REAL NOT NULL DEFAULT 0,
+            daily_return_pct REAL,
+            drawdown_pct REAL NOT NULL DEFAULT 0,
+            high_water_mark REAL NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            created_at TEXT NOT NULL,
+            UNIQUE(report_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_fund_daily_report_date
+            ON fund_daily_report(report_date);
+
+        -- ─── B-003: Sleeve daily reports ──────────────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS sleeve_daily_report (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_date TEXT NOT NULL,
+            sleeve TEXT NOT NULL,
+            nav REAL NOT NULL,
+            positions_value REAL NOT NULL DEFAULT 0,
+            cash_allocated REAL NOT NULL DEFAULT 0,
+            unrealised_pnl REAL NOT NULL DEFAULT 0,
+            realised_pnl REAL NOT NULL DEFAULT 0,
+            weight_pct REAL NOT NULL DEFAULT 0,
+            daily_return_pct REAL,
+            created_at TEXT NOT NULL,
+            UNIQUE(report_date, sleeve)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_sleeve_daily_report_date
+            ON sleeve_daily_report(report_date);
+        CREATE INDEX IF NOT EXISTS idx_sleeve_daily_report_sleeve
+            ON sleeve_daily_report(sleeve);
+
+        -- ─── B-003: Risk daily snapshots ──────────────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS risk_daily_snapshot (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            snapshot_date TEXT NOT NULL,
+            total_heat_pct REAL NOT NULL DEFAULT 0,
+            total_margin_pct REAL NOT NULL DEFAULT 0,
+            max_position_pct REAL NOT NULL DEFAULT 0,
+            open_position_count INTEGER NOT NULL DEFAULT 0,
+            open_spread_count INTEGER NOT NULL DEFAULT 0,
+            leverage_ratio REAL NOT NULL DEFAULT 0,
+            var_95_pct REAL,
+            created_at TEXT NOT NULL,
+            UNIQUE(snapshot_date)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_risk_daily_snapshot_date
+            ON risk_daily_snapshot(snapshot_date);
     """)
     conn.commit()
     conn.close()
@@ -1968,6 +2030,160 @@ def get_risk_verdict_summary(db_path: str = DB_PATH) -> dict:
         "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
         "top_rejection_rules": [dict(r) for r in top_rules],
     }
+
+
+# ─── B-003: Fund / sleeve / risk daily report persistence ─────────────────
+
+
+def save_fund_daily_report(
+    report_date: str,
+    total_nav: float,
+    total_cash: float = 0,
+    total_positions_value: float = 0,
+    unrealised_pnl: float = 0,
+    realised_pnl: float = 0,
+    daily_return_pct: Optional[float] = None,
+    drawdown_pct: float = 0,
+    high_water_mark: float = 0,
+    currency: str = "GBP",
+    db_path: str = DB_PATH,
+):
+    """Persist a daily fund-level report row (upsert by report_date)."""
+    now = datetime.utcnow().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO fund_daily_report
+           (report_date, total_nav, total_cash, total_positions_value,
+            unrealised_pnl, realised_pnl, daily_return_pct, drawdown_pct,
+            high_water_mark, currency, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(report_date) DO UPDATE SET
+             total_nav=excluded.total_nav, total_cash=excluded.total_cash,
+             total_positions_value=excluded.total_positions_value,
+             unrealised_pnl=excluded.unrealised_pnl, realised_pnl=excluded.realised_pnl,
+             daily_return_pct=excluded.daily_return_pct, drawdown_pct=excluded.drawdown_pct,
+             high_water_mark=excluded.high_water_mark, created_at=excluded.created_at""",
+        (report_date, total_nav, total_cash, total_positions_value,
+         unrealised_pnl, realised_pnl, daily_return_pct, drawdown_pct,
+         high_water_mark, currency, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_fund_daily_reports(
+    days: int = 30,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent fund daily reports for charting and analysis."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM fund_daily_report ORDER BY report_date DESC LIMIT ?",
+        (days,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_sleeve_daily_report(
+    report_date: str,
+    sleeve: str,
+    nav: float,
+    positions_value: float = 0,
+    cash_allocated: float = 0,
+    unrealised_pnl: float = 0,
+    realised_pnl: float = 0,
+    weight_pct: float = 0,
+    daily_return_pct: Optional[float] = None,
+    db_path: str = DB_PATH,
+):
+    """Persist a daily sleeve-level report row (upsert by report_date + sleeve)."""
+    now = datetime.utcnow().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO sleeve_daily_report
+           (report_date, sleeve, nav, positions_value, cash_allocated,
+            unrealised_pnl, realised_pnl, weight_pct, daily_return_pct, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(report_date, sleeve) DO UPDATE SET
+             nav=excluded.nav, positions_value=excluded.positions_value,
+             cash_allocated=excluded.cash_allocated,
+             unrealised_pnl=excluded.unrealised_pnl, realised_pnl=excluded.realised_pnl,
+             weight_pct=excluded.weight_pct, daily_return_pct=excluded.daily_return_pct,
+             created_at=excluded.created_at""",
+        (report_date, sleeve, nav, positions_value, cash_allocated,
+         unrealised_pnl, realised_pnl, weight_pct, daily_return_pct, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_sleeve_daily_reports(
+    sleeve: Optional[str] = None,
+    days: int = 30,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent sleeve daily reports, optionally filtered by sleeve."""
+    conn = get_conn(db_path)
+    if sleeve:
+        rows = conn.execute(
+            "SELECT * FROM sleeve_daily_report WHERE sleeve=? ORDER BY report_date DESC LIMIT ?",
+            (sleeve, days),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM sleeve_daily_report ORDER BY report_date DESC LIMIT ?",
+            (days,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def save_risk_daily_snapshot(
+    snapshot_date: str,
+    total_heat_pct: float = 0,
+    total_margin_pct: float = 0,
+    max_position_pct: float = 0,
+    open_position_count: int = 0,
+    open_spread_count: int = 0,
+    leverage_ratio: float = 0,
+    var_95_pct: Optional[float] = None,
+    db_path: str = DB_PATH,
+):
+    """Persist a daily risk metrics snapshot (upsert by snapshot_date)."""
+    now = datetime.utcnow().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO risk_daily_snapshot
+           (snapshot_date, total_heat_pct, total_margin_pct, max_position_pct,
+            open_position_count, open_spread_count, leverage_ratio, var_95_pct, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(snapshot_date) DO UPDATE SET
+             total_heat_pct=excluded.total_heat_pct, total_margin_pct=excluded.total_margin_pct,
+             max_position_pct=excluded.max_position_pct,
+             open_position_count=excluded.open_position_count,
+             open_spread_count=excluded.open_spread_count,
+             leverage_ratio=excluded.leverage_ratio, var_95_pct=excluded.var_95_pct,
+             created_at=excluded.created_at""",
+        (snapshot_date, total_heat_pct, total_margin_pct, max_position_pct,
+         open_position_count, open_spread_count, leverage_ratio, var_95_pct, now),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_risk_daily_snapshots(
+    days: int = 30,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent risk daily snapshots for charting and analysis."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM risk_daily_snapshot ORDER BY snapshot_date DESC LIMIT ?",
+        (days,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # Initialise on import
