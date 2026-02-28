@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T20:00:00Z
 subject: "B-003 ready for cross-review — PR #14"
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-02-28T18:30:30Z
+ack_notes: Reviewed; B-003 merged as PR #14.
 ---
 
 ## B-003 in REVIEW
