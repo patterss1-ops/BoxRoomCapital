@@ -17,7 +17,7 @@ Canonical queue for Codex + Claude parallel execution.
 | A-005 | Multi-broker ledger extension | claude | REVIEW | A-002, A-003, A-004 | `data/trade_db.py`, `execution/ledger.py`, `tests/test_ledger.py` | `claude/a-005-multi-broker-ledger` | `-` | `ops/collab/HANDOFFS/20260228-1500Z-claude-A-005.md` | Unified IG+IBKR positions/cash/NAV with reconciliation | 2026-02-28T15:00:00Z |
 | A-006 | Pre-trade risk gate (hard limits) | claude | REVIEW | A-004, A-005 | `risk/**`, `data/trade_db.py`, `tests/test_risk_gate.py` | `claude/a-006-pre-trade-risk-gate` | `-` | `ops/collab/HANDOFFS/20260228-1530Z-claude-A-006.md` | Blocking rules applied before broker submission | 2026-02-28T15:30:00Z |
 | A-007 | Control-plane Phase A surfaces | claude | REVIEW | A-003, A-005, A-006 | `app/api/server.py`, `app/web/templates/**`, `data/trade_db.py`, `tests/test_control_plane_a007.py` | `claude/a-007-control-plane-phase-a` | `-` | `ops/collab/HANDOFFS/20260228-1600Z-claude-A-007.md` | Broker health + ledger + intent drill-down visible in UI | 2026-02-28T16:00:00Z |
-| A-008 | Regression and reliability suite | unassigned | BACKLOG | A-001..A-007 | `tests/**`, `ops/collab/**release-checks**` | `codex/a-008-regression-reliability-suite` | `-` | `-` | Existing IG path preserved; failure injection covered | 2026-02-28T13:05:00Z |
+| A-008 | Regression and reliability suite | claude | REVIEW | A-001..A-007 | `tests/**`, `ops/collab/**release-checks**` | `claude/a-008-regression-reliability-suite` | `-` | `ops/collab/HANDOFFS/20260228-1700Z-claude-A-008.md` | Existing IG path preserved; failure injection covered | 2026-02-28T17:00:00Z |
 
 ## Queue transition rules
 1. `READY -> IN_PROGRESS`: owner claims ticket, sets branch, updates ownership map, records claim timestamp.

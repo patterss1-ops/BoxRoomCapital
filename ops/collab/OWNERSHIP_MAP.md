@@ -20,7 +20,7 @@ Defines file-scope locks for parallel execution.
 | A-005 | claude | exclusive | `data/trade_db.py`, `app/api/**ledger**`, `tests/**ledger**` | none | n/a | unclaimed | - |
 | A-006 | shared | shared | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | A-004, A-005 | A-004/A-005 complete first, then A-006 | unclaimed | - |
 | A-007 | shared | shared | `app/api/server.py`, `app/web/templates/**`, `app/web/static/**`, `tests/**api**` | A-005, A-006 | A-005/A-006 complete first, then A-007 | unclaimed | - |
-| A-008 | shared | shared | `tests/**`, `ops/collab/**release-checks**` | all prior tickets | Final ticket after A-001..A-007 | unclaimed | - |
+| A-008 | claude | shared | `tests/**`, `ops/collab/**release-checks**` | all prior tickets | Final ticket after A-001..A-007 | claimed | 2026-02-28T17:00:00Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.
