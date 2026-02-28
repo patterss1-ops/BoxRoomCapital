@@ -1,0 +1,36 @@
+# Ownership Map
+
+Defines file-scope locks for parallel execution.
+
+## Rule summary
+1. Active ticket scopes are exclusive by default.
+2. Parallel tickets may not overlap scope unless marked `shared`.
+3. Shared scope requires explicit merge/edit order in this file and dependency order in queue.
+4. If a file changed after claim timestamp by another agent in the same scope, stop and raise blocker.
+
+## Scope lock table
+`ticket_id | owner | mode | file_scope | overlap_with | merge_order | claim_status | claimed_utc`
+
+| ticket_id | owner | mode | file_scope | overlap_with | merge_order | claim_status | claimed_utc |
+|---|---|---|---|---|---|---|---|
+| A-001 | codex | exclusive | `broker/base.py`, `execution/policy/**`, `tests/**capability**` | none | n/a | unclaimed | - |
+| A-002 | codex | exclusive | `execution/**intent**`, `data/**order_intent**`, `tests/**intent**` | none | n/a | unclaimed | - |
+| A-003 | claude | exclusive | `broker/ibkr.py`, `tests/**ibkr**` | none | n/a | unclaimed | - |
+| A-004 | codex | exclusive | `execution/router.py`, `execution/policy/**`, `tests/**router**` | A-001 | A-001 then A-004 | unclaimed | - |
+| A-005 | claude | exclusive | `data/trade_db.py`, `app/api/**ledger**`, `tests/**ledger**` | none | n/a | unclaimed | - |
+| A-006 | shared | shared | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | A-004, A-005 | A-004/A-005 complete first, then A-006 | unclaimed | - |
+| A-007 | shared | shared | `app/api/server.py`, `app/web/templates/**`, `app/web/static/**`, `tests/**api**` | A-005, A-006 | A-005/A-006 complete first, then A-007 | unclaimed | - |
+| A-008 | shared | shared | `tests/**`, `ops/collab/**release-checks**` | all prior tickets | Final ticket after A-001..A-007 | unclaimed | - |
+
+## Claim protocol
+1. Update queue row to `IN_PROGRESS`.
+2. Set lock row `claim_status=claimed` and `claimed_utc`.
+3. Create branch matching ticket naming convention.
+4. Start edits only within claimed scope.
+
+## Conflict protocol
+1. Stop editing immediately.
+2. Set queue status to `BLOCKED`.
+3. Write blocker handoff in `HANDOFFS/`.
+4. Add decision request entry in `DECISIONS.md`.
+
