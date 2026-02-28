@@ -461,6 +461,51 @@ class TestDeterministic:
 
         assert len(set(picks)) == 1, "Same input should produce same signal"
 
+    def test_multi_ticker_same_date_is_order_independent(self):
+        """
+        Rebalance eligibility and picks must be order-independent across
+        same-date multi-ticker calls with one strategy instance.
+        """
+        spy_df = _make_trending_up(n=100, slope=1.0)
+        efa_df = _make_trending_up(n=100, slope=0.3)
+        agg_df = _make_flat(n=100, price=100.0)
+        end_idx = 71
+        same_day = {
+            "SPY": spy_df.iloc[:end_idx + 1],
+            "EFA": efa_df.iloc[:end_idx + 1],
+            "AGG": agg_df.iloc[:end_idx + 1],
+        }
+        current_date = same_day["SPY"].index[-1]
+        rebalance_day = int(((same_day["SPY"].index.year == current_date.year) & (same_day["SPY"].index.month == current_date.month)).sum())
+        params = {"lookback_days": 50, "rebalance_day": rebalance_day}
+
+        def evaluate(order):
+            dm = DualMomentumStrategy(params=params)
+            results = {}
+            for ticker in order:
+                universe_data = {
+                    t: df for t, df in same_day.items() if t != ticker
+                }
+                signal = dm.generate_signal(
+                    ticker=ticker,
+                    df=same_day[ticker],
+                    current_position=0.0,
+                    bars_in_trade=0,
+                    universe_data=universe_data,
+                )
+                results[ticker] = signal
+            return results
+
+        order_a = ["SPY", "EFA", "AGG"]
+        order_b = ["AGG", "EFA", "SPY"]
+        results_a = evaluate(order_a)
+        results_b = evaluate(order_b)
+
+        for ticker in same_day:
+            assert "waiting for rebalance" not in results_a[ticker].reason.lower()
+            assert "waiting for rebalance" not in results_b[ticker].reason.lower()
+            assert results_a[ticker].signal_type == results_b[ticker].signal_type
+
 
 # ─── Configurable Assets ─────────────────────────────────────────────────────
 

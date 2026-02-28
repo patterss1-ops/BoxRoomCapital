@@ -29,6 +29,7 @@ Defines file-scope locks for parallel execution.
 | B-002 | claude | exclusive | `strategies/gtaa.py`, `strategies/dual_momentum.py`, `tests/test_strategy_gtaa.py`, `tests/test_strategy_dual_momentum.py` | none | n/a | unclaimed | 2026-02-28T19:12:00Z |
 | B-003 | claude | exclusive | `risk/portfolio_risk.py`, `fund/nav.py`, `fund/report.py`, `data/trade_db.py` (fund/risk tables only), `tests/test_portfolio_risk.py`, `tests/test_fund_nav.py`, `tests/test_fund_report.py` | B-004 | B-003 then B-004 | unclaimed | 2026-02-28T19:12:00Z |
 | B-004 | codex | exclusive | `app/api/server.py` (risk briefing routes only), `app/web/templates/pages/overview.html`, `app/web/templates/fragments/risk_briefing.html`, `tests/test_api_risk_briefing.py` | B-001, B-003 | B-001/B-003 then B-004 | unclaimed | 2026-02-28T19:12:00Z |
+| B-005 | codex | emergency | `strategies/gtaa.py`, `strategies/dual_momentum.py`, `tests/test_strategy_gtaa.py`, `tests/test_strategy_dual_momentum.py`, `tests/test_strategies.py` | B-002 | B-005 hotfix first, then B-003 | claimed | 2026-02-28T16:21:47Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.

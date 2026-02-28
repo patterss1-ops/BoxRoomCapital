@@ -75,8 +75,7 @@ class GTAAStrategy(BaseStrategy):
 
     def __init__(self, params: Optional[dict] = None):
         self.p = {**DEFAULT_GTAA_PARAMS, **(params or {})}
-        # Track rebalance state
-        self._last_rebalance_month: Optional[int] = None
+        # Cached for observability/debug messages only.
         self._trading_day_of_month: int = 0
 
     @property
@@ -178,24 +177,19 @@ class GTAAStrategy(BaseStrategy):
 
     def _is_rebalance_day(self, df: pd.DataFrame) -> bool:
         """
-        Detect if the latest bar is a rebalance day.
+        Detect if the latest bar is a rebalance day using only index dates.
 
-        Tracks trading day of month and fires on the configured day.
+        This method is intentionally stateless across calls, so evaluating
+        multiple tickers for the same date is order-independent.
         """
         dates = df.index
         current_date = dates[-1]
-        prev_date = dates[-2] if len(dates) > 1 else current_date
-
-        current_month = current_date.month
-        prev_month = prev_date.month
-        is_new_month = current_month != prev_month
-
-        if is_new_month:
-            self._trading_day_of_month = 1
-        else:
-            self._trading_day_of_month += 1
-
-        return self._trading_day_of_month == self.p["rebalance_day"]
+        same_month = (
+            (dates.year == current_date.year)
+            & (dates.month == current_date.month)
+        )
+        self._trading_day_of_month = int(same_month.sum())
+        return self._trading_day_of_month == int(self.p["rebalance_day"])
 
     def score_universe(
         self,

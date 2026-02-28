@@ -407,3 +407,50 @@ class TestDeterministic:
                 return
 
         # If no rebalance triggered, that's also acceptable (day counting)
+
+    def test_multi_ticker_same_date_is_order_independent(self):
+        """
+        Rebalance eligibility must be identical for all tickers on same date,
+        regardless of call order against one strategy instance.
+        """
+        spy_df = _make_trending_up(n=100)
+        efa_df = _make_trending_up(n=100, start_price=90.0)
+        ief_df = _make_trending_down(n=100, start_price=130.0)
+        end_idx = 71
+        same_day = {
+            "SPY": spy_df.iloc[:end_idx + 1],
+            "EFA": efa_df.iloc[:end_idx + 1],
+            "IEF": ief_df.iloc[:end_idx + 1],
+        }
+        current_date = same_day["SPY"].index[-1]
+        rebalance_day = int(((same_day["SPY"].index.year == current_date.year) & (same_day["SPY"].index.month == current_date.month)).sum())
+
+        params = {
+            "sma_period": 50,
+            "rebalance_day": rebalance_day,
+            "universe": ["SPY", "EFA", "IEF"],
+        }
+
+        order_a = ["SPY", "EFA", "IEF"]
+        order_b = ["IEF", "EFA", "SPY"]
+
+        def evaluate(order):
+            strategy = GTAAStrategy(params=params)
+            results = {}
+            for ticker in order:
+                s = strategy.generate_signal(
+                    ticker=ticker,
+                    df=same_day[ticker],
+                    current_position=0.0,
+                    bars_in_trade=0,
+                )
+                results[ticker] = s
+            return results
+
+        results_a = evaluate(order_a)
+        results_b = evaluate(order_b)
+
+        for ticker in same_day:
+            assert "waiting for rebalance" not in results_a[ticker].reason.lower()
+            assert "waiting for rebalance" not in results_b[ticker].reason.lower()
+            assert results_a[ticker].signal_type == results_b[ticker].signal_type
