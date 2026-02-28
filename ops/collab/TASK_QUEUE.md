@@ -18,6 +18,7 @@ Canonical queue for Codex + Claude parallel execution.
 | A-006 | Pre-trade risk gate (hard limits) | codex | REVIEW | A-004, A-005 | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | `codex/a-006-pre-trade-risk-gate` | `4340a43` | `ops/collab/HANDOFFS/20260228-1318Z-codex-A-006.md` | Blocking rules applied before broker submission | 2026-02-28T13:18:16Z |
 | A-007 | Control-plane Phase A surfaces | codex | REVIEW | A-003, A-005, A-006 | `app/api/server.py`, `app/web/templates/**`, `app/web/static/**`, `tests/**api**` | `codex/a-007-control-plane-phase-a-surfaces` | `f0417f6` | `ops/collab/HANDOFFS/20260228-1329Z-codex-A-007.md` | Broker health + ledger + intent drill-down visible in UI | 2026-02-28T13:29:40Z |
 | A-008 | Regression and reliability suite | codex | REVIEW | A-001..A-007 | `tests/**`, `ops/collab/**release-checks**` | `codex/a-008-regression-reliability-suite` | `6c5ad4a` | `ops/collab/HANDOFFS/20260228-1324Z-codex-A-008.md` | Existing IG path preserved; failure injection covered | 2026-02-28T13:24:47Z |
+| A-009 | FastAPI deprecation cleanup | codex | REVIEW | A-007 | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | `codex/a-009-fastapi-deprecation-cleanup` | `7e69434` | `ops/collab/HANDOFFS/20260228-1340Z-codex-A-009.md` | FastAPI startup + template deprecation warnings removed; tests pass | 2026-02-28T13:40:30Z |
 
 ## Queue transition rules
 1. `READY -> IN_PROGRESS`: owner claims ticket, sets branch, updates ownership map, records claim timestamp.

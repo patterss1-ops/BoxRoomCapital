@@ -21,6 +21,7 @@ Defines file-scope locks for parallel execution.
 | A-006 | codex | exclusive | `risk/**`, `execution/**risk**`, `tests/**risk_gate**` | A-004, A-005 | A-004/A-005 complete first, then A-006 | claimed | 2026-02-28T13:16:10Z |
 | A-007 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `app/web/static/**`, `tests/**api**` | A-005, A-006 | A-005/A-006 complete first, then A-007 | claimed | 2026-02-28T13:25:42Z |
 | A-008 | codex | shared | `tests/**`, `ops/collab/**release-checks**` | all prior tickets | Final ticket after A-001..A-007 | claimed | 2026-02-28T13:22:20Z |
+| A-009 | codex | shared | `app/api/server.py`, `app/web/templates/**`, `tests/**api**` | A-007 | A-007 then A-009 | claimed | 2026-02-28T13:38:59Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.
