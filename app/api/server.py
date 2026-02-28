@@ -32,8 +32,10 @@ from data.trade_db import (
     get_job,
     get_active_strategy_parameter_set,
     get_incidents,
+    get_ledger_reconcile_report,
     get_jobs,
     get_open_option_positions,
+    get_unified_ledger_snapshot,
     get_option_contract_summary,
     get_option_contracts,
     get_order_actions,
@@ -685,6 +687,20 @@ def create_app() -> FastAPI:
             {
                 "request": request,
                 "broker_health": build_broker_health_payload(),
+            },
+        )
+
+    @app.get("/fragments/ledger", response_class=HTMLResponse)
+    def ledger_fragment(request: Request):
+        snapshot = get_unified_ledger_snapshot(nav_limit=25)
+        reconcile = get_ledger_reconcile_report(stale_after_minutes=30)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_ledger_snapshot.html",
+            {
+                "request": request,
+                "ledger": snapshot,
+                "reconcile": reconcile,
             },
         )
 

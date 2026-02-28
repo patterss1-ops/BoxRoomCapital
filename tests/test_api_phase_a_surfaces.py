@@ -158,3 +158,71 @@ def test_fragments_render_broker_health_and_intent_audit(monkeypatch):
         assert intent_fragment.status_code == 200
         assert "Intent Audit" in intent_fragment.text
         assert "intent-2" in intent_fragment.text
+
+
+def test_ledger_fragment_renders_snapshot_and_reconcile(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "get_unified_ledger_snapshot",
+        lambda nav_limit=25: {
+            "summary": {
+                "accounts": 2,
+                "positions": 1,
+                "cash_rows": 2,
+                "total_cash": 15000.0,
+                "total_equity": 15800.0,
+                "total_unrealised_pnl": 220.0,
+            },
+            "positions": [
+                {
+                    "broker": "ig",
+                    "account_id": "ACC-1",
+                    "ticker": "SPY",
+                    "direction": "short",
+                    "qty": 1,
+                    "unrealised_pnl": 220.0,
+                    "as_of": "2026-02-28T13:00:00Z",
+                }
+            ],
+            "nav_snapshots": [
+                {
+                    "timestamp": "2026-02-28T13:00:00Z",
+                    "sleeve": "options_income",
+                    "broker": "ig",
+                    "account_id": "ACC-1",
+                    "nav": 15800.0,
+                    "cash": 15000.0,
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "get_ledger_reconcile_report",
+        lambda stale_after_minutes=30: {
+            "ok": False,
+            "suggestions": ["Broker positions are stale. Trigger broker ledger ingestion and reconcile again."],
+        },
+    )
+
+    with TestClient(server.app) as client:
+        response = client.get("/fragments/ledger")
+
+    assert response.status_code == 200
+    assert "Unified Ledger" in response.text
+    assert "ATTENTION" in response.text
+    assert "SPY" in response.text
+    assert "Recent NAV Snapshots" in response.text
+
+
+def test_overview_and_trading_pages_include_ledger_panel():
+    with TestClient(server.app) as client:
+        overview = client.get("/overview")
+        trading = client.get("/trading")
+
+    assert overview.status_code == 200
+    assert trading.status_code == 200
+    assert 'id="ledger-panel"' in overview.text
+    assert 'hx-get="/fragments/ledger"' in overview.text
+    assert 'id="ledger-panel"' in trading.text
+    assert 'hx-get="/fragments/ledger"' in trading.text
