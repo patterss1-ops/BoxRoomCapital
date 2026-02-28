@@ -450,6 +450,12 @@ th {
 .badge.shadow { color: #0b3d64; background: #e7f1ff; border-color: #c0d8fb; }
 .badge.archived { color: #4b5563; background: #f1f5f9; border-color: #cbd5e1; }
 
+.badge-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.32rem;
+}
+
 .log-tail,
 .json-view {
   max-height: 360px;

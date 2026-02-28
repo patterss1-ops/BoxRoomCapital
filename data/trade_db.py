@@ -4,8 +4,8 @@ Used by both the bot (writes) and the Streamlit dashboard (reads).
 """
 import sqlite3
 import os
-from datetime import datetime, date
-from typing import Optional
+from datetime import datetime, date, timedelta
+from typing import Any, Optional
 import uuid
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trades.db")
