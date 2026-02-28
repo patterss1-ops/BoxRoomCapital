@@ -1,0 +1,30 @@
+<section class="card">
+  <h2>Reconcile Report</h2>
+  <div class="row"><span class="label">DB Open Spreads</span><span class="value">{{ report.db_open_spreads or 0 }}</span></div>
+  <div class="row"><span class="label">Memory Open Spreads</span><span class="value">{{ report.memory_open_spreads or 0 }}</span></div>
+  <div class="row"><span class="label">Broker Open Deals</span><span class="value">{{ report.broker_open_deals or 0 }}</span></div>
+  <div class="row">
+    <span class="label">Mismatch</span>
+    <span class="value {% if report.has_mismatch %}badge failed{% else %}badge completed{% endif %}">
+      {{ "YES" if report.has_mismatch else "NO" }}
+    </span>
+  </div>
+  {% if report.broker_error %}
+    <p class="muted">Broker fetch error: {{ report.broker_error }}</p>
+  {% endif %}
+  <h3>Differences</h3>
+  <div class="row"><span class="label">DB-only Spread IDs</span><span class="value code">{{ (report.db_only_spread_ids or [])|join(", ") or "-" }}</span></div>
+  <div class="row"><span class="label">Memory-only Spread IDs</span><span class="value code">{{ (report.memory_only_spread_ids or [])|join(", ") or "-" }}</span></div>
+  <div class="row"><span class="label">DB-only Deal IDs</span><span class="value code">{{ (report.db_only_deal_ids or [])|join(", ") or "-" }}</span></div>
+  <div class="row"><span class="label">Broker-only Deal IDs</span><span class="value code">{{ (report.broker_only_deal_ids or [])|join(", ") or "-" }}</span></div>
+  <h3>Corrective Suggestions</h3>
+  {% if report.suggestions %}
+    <ul>
+    {% for item in report.suggestions %}
+      <li>{{ item }}</li>
+    {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No suggestions available.</p>
+  {% endif %}
+</section>

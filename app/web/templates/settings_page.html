@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h2>Settings & Runbook</h2>
+    <p>Operational references for local runtime control and health checks.</p>
+  </div>
+  <div class="row"><span class="label">Health Endpoint</span><span class="value code">/health</span></div>
+  <div class="row"><span class="label">Status API</span><span class="value code">/api/status</span></div>
+  <div class="row"><span class="label">Log Tail API</span><span class="value code">/api/log-tail</span></div>
+  <div class="row"><span class="label">Process Log</span><span class="value code">.runtime/control_plane.log</span></div>
+  <div class="row"><span class="label">Process PID</span><span class="value code">.runtime/control_plane.pid</span></div>
+  <div class="row"><span class="label">DB Path</span><span class="value code">trades.db</span></div>
+</section>
+
+<section class="card">
+  <h2>Local Commands</h2>
+  <pre class="json-view">./start_control_plane.sh
+./stop_control_plane.sh
+python3 -m pytest -q tests
+python3 run_console.py</pre>
+</section>
+
+<section class="grid-2">
+  <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+</section>
+{% endblock %}

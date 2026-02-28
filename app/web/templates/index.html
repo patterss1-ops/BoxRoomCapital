@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="controls">
+  <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Mode
+      <select name="mode">
+        <option value="shadow" {% if default_mode == "shadow" %}selected{% endif %}>Shadow</option>
+        <option value="live" {% if default_mode == "live" %}selected{% endif %}>Live</option>
+      </select>
+    </label>
+    <button type="submit" class="btn">Start Bot</button>
+  </form>
+
+  <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML">
+    <button type="submit" class="btn danger">Stop Bot</button>
+  </form>
+
+  <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML">
+    <button type="submit" class="btn secondary">Pause</button>
+  </form>
+
+  <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML">
+    <button type="submit" class="btn">Resume</button>
+  </form>
+
+  <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Scan Mode
+      <select name="mode">
+        <option value="shadow" selected>Shadow</option>
+        <option value="live">Live</option>
+      </select>
+    </label>
+    <button type="submit" class="btn secondary">Run One-Shot Scan</button>
+  </form>
+
+  <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML">
+    <button type="submit" class="btn secondary">Reconcile</button>
+  </form>
+</section>
+
+<section class="controls">
+  <form hx-post="/api/actions/close-spread" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Spread ID
+      <input type="text" name="spread_id" placeholder="SPY:abcd1234" />
+    </label>
+    <label>Ticker
+      <input type="text" name="ticker" placeholder="SPY" />
+    </label>
+    <label>Reason
+      <input type="text" name="reason" value="Manual close from control plane" />
+    </label>
+    <button type="submit" class="btn danger">Close Spread</button>
+  </form>
+</section>
+
+<section class="controls">
+  <form hx-post="/api/actions/kill-switch-enable" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Kill Switch Reason
+      <input type="text" name="reason" value="Manual operator kill switch" />
+    </label>
+    <button type="submit" class="btn danger">Enable Kill Switch</button>
+  </form>
+
+  <form hx-post="/api/actions/kill-switch-disable" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Disable Reason
+      <input type="text" name="reason" value="Manual clear from control plane" />
+    </label>
+    <button type="submit" class="btn">Disable Kill Switch</button>
+  </form>
+
+  <form hx-post="/api/actions/risk-throttle" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Risk Throttle (%)
+      <input type="number" name="throttle_pct" min="10" max="100" value="100" />
+    </label>
+    <label>Reason
+      <input type="text" name="reason" value="Manual risk throttle" />
+    </label>
+    <button type="submit" class="btn secondary">Set Throttle</button>
+  </form>
+</section>
+
+<section class="controls">
+  <form hx-post="/api/actions/cooldown-set" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Ticker
+      <input type="text" name="ticker" placeholder="SPY" />
+    </label>
+    <label>Minutes
+      <input type="number" name="minutes" min="1" value="30" />
+    </label>
+    <label>Reason
+      <input type="text" name="reason" value="Manual market cooldown" />
+    </label>
+    <button type="submit" class="btn secondary">Set Cooldown</button>
+  </form>
+
+  <form hx-post="/api/actions/cooldown-clear" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Ticker
+      <input type="text" name="ticker" placeholder="SPY" />
+    </label>
+    <label>Reason
+      <input type="text" name="reason" value="Manual cooldown clear" />
+    </label>
+    <button type="submit" class="btn">Clear Cooldown</button>
+  </form>
+</section>
+
+<section class="controls">
+  <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Discovery Mode
+      <select name="mode">
+        <option value="search" selected>Search</option>
+        <option value="nav">Navigation</option>
+        <option value="both">Both</option>
+      </select>
+    </label>
+    <label>Include Details
+      <select name="include_details">
+        <option value="on" selected>Yes</option>
+        <option value="off">No</option>
+      </select>
+    </label>
+    <label>Strikes Filter
+      <input type="text" name="strikes" placeholder="US 500" />
+    </label>
+    <button type="submit" class="btn secondary">Run Discovery</button>
+  </form>
+
+  <form hx-post="/api/actions/calibrate-options" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Index (optional)
+      <input type="text" name="index_filter" placeholder="US 500" />
+    </label>
+    <label>Verbose
+      <select name="verbose">
+        <option value="off" selected>No</option>
+        <option value="on">Yes</option>
+      </select>
+    </label>
+    <button type="submit" class="btn secondary">Run Calibration</button>
+  </form>
+</section>
+
+<section class="controls">
+  <form hx-post="/api/actions/strategy-params/create" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Strategy
+      <select name="strategy_key">
+        <option value="ibs_credit_spreads" selected>ibs_credit_spreads</option>
+      </select>
+    </label>
+    <label>Set Name
+      <input type="text" name="name" placeholder="ibs-shadow-candidate" />
+    </label>
+    <label>Status
+      <select name="status">
+        <option value="shadow" selected>shadow</option>
+        <option value="staged_live">staged_live</option>
+      </select>
+    </label>
+    <label>Calibration Run ID
+      <input type="text" name="source_run_id" placeholder="optional run id" />
+    </label>
+    <label>Overrides JSON
+      <textarea name="overrides_json" rows="2" placeholder='{"min_credit_pct": 2.8}'></textarea>
+    </label>
+    <label>Notes
+      <input type="text" name="notes" placeholder="why this set exists" />
+    </label>
+    <button type="submit" class="btn secondary">Save Param Set</button>
+  </form>
+
+  <form hx-post="/api/actions/strategy-params/promote" hx-target="#action-result" hx-swap="innerHTML">
+    <label>Set ID
+      <input type="text" name="set_id" placeholder="parameter set id" />
+    </label>
+    <label>Target Status
+      <select name="target_status">
+        <option value="staged_live" selected>staged_live</option>
+        <option value="live">live</option>
+        <option value="archived">archived</option>
+      </select>
+    </label>
+    <label>Actor
+      <input type="text" name="actor" value="operator" />
+    </label>
+    <label>Acknowledgement
+      <input type="text" name="acknowledgement" value="Manual promotion approved" />
+    </label>
+    <label>Note
+      <input type="text" name="note" value="promoted from control plane" />
+    </label>
+    <button type="submit" class="btn">Promote Set</button>
+  </form>
+</section>
+
+<section id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 5s" hx-swap="innerHTML"></section>
+
+<section class="grid-2">
+  <div id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 5s" hx-swap="innerHTML"></div>
+  <div id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 3s" hx-swap="innerHTML"></div>
+</section>
+
+<section id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></section>
+
+<section class="grid-2">
+  <div id="order-actions-panel" hx-get="/fragments/order-actions" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+</section>
+
+<section class="grid-2">
+  <div id="reconcile-panel" hx-get="/fragments/reconcile-report" hx-trigger="load, every 12s" hx-swap="innerHTML"></div>
+  <div id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+</section>
+
+<section id="research-panel" hx-get="/fragments/research" hx-trigger="load, every 15s" hx-swap="innerHTML"></section>
+
+<section id="log-panel" hx-get="/fragments/log-tail" hx-trigger="load, every 5s" hx-swap="innerHTML"></section>
+
+<script>
+  const evt = new EventSource('/api/stream/events');
+  evt.addEventListener('bot_event', () => {
+    htmx.ajax('GET', '/fragments/events', { target: '#events-panel', swap: 'innerHTML' });
+    htmx.ajax('GET', '/fragments/status', { target: '#status-panel', swap: 'innerHTML' });
+    htmx.ajax('GET', '/fragments/incidents', { target: '#incidents-panel', swap: 'innerHTML' });
+    htmx.ajax('GET', '/fragments/order-actions', { target: '#order-actions-panel', swap: 'innerHTML' });
+    htmx.ajax('GET', '/fragments/reconcile-report', { target: '#reconcile-panel', swap: 'innerHTML' });
+    htmx.ajax('GET', '/fragments/control-actions', { target: '#control-actions-panel', swap: 'innerHTML' });
+    htmx.ajax('GET', '/fragments/research', { target: '#research-panel', swap: 'innerHTML' });
+  });
+</script>
+{% endblock %}

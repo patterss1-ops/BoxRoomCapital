@@ -1,0 +1,13 @@
+yfinance>=0.2.31
+pandas>=2.0.0
+numpy>=1.24.0
+requests>=2.31.0
+python-dotenv>=1.0.0
+schedule>=1.2.0
+trading-ig>=0.0.22
+fastapi>=0.116.0
+uvicorn>=0.35.0
+jinja2>=3.1.4
+python-multipart>=0.0.9
+pytest>=8.4.0
+httpx>=0.28.0

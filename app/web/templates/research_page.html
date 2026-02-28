@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h2>Research Workflows</h2>
+    <p>Run discovery and calibration jobs, inspect market quality, and manage strategy parameter promotion.</p>
+  </div>
+  <div class="action-grid">
+    <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Discovery Mode
+        <select name="mode">
+          <option value="search" selected>Search</option>
+          <option value="nav">Navigation</option>
+          <option value="both">Both</option>
+        </select>
+      </label>
+      <label>Include Details
+        <select name="include_details">
+          <option value="on" selected>Yes</option>
+          <option value="off">No</option>
+        </select>
+      </label>
+      <label>Strikes Filter
+        <input type="text" name="strikes" placeholder="US 500" />
+      </label>
+      <button type="submit" class="btn secondary">Run Discovery</button>
+    </form>
+
+    <form hx-post="/api/actions/calibrate-options" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Index (optional)
+        <input type="text" name="index_filter" placeholder="US 500" />
+      </label>
+      <label>Verbose
+        <select name="verbose">
+          <option value="off" selected>No</option>
+          <option value="on">Yes</option>
+        </select>
+      </label>
+      <button type="submit" class="btn secondary">Run Calibration</button>
+    </form>
+  </div>
+</section>
+
+<details class="card" open>
+  <summary>Strategy Parameter Lab</summary>
+  <div class="action-grid">
+    <form hx-post="/api/actions/strategy-params/create" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Strategy
+        <select name="strategy_key">
+          <option value="ibs_credit_spreads" selected>ibs_credit_spreads</option>
+        </select>
+      </label>
+      <label>Set Name
+        <input type="text" name="name" placeholder="ibs-shadow-candidate" />
+      </label>
+      <label>Status
+        <select name="status">
+          <option value="shadow" selected>shadow</option>
+          <option value="staged_live">staged_live</option>
+        </select>
+      </label>
+      <label>Calibration Run ID
+        <input type="text" name="source_run_id" placeholder="optional run id" />
+      </label>
+      <label>Overrides JSON
+        <textarea name="overrides_json" rows="2" placeholder='{"min_credit_pct": 2.8}'></textarea>
+      </label>
+      <label>Notes
+        <input type="text" name="notes" placeholder="why this set exists" />
+      </label>
+      <button type="submit" class="btn">Save Param Set</button>
+    </form>
+
+    <form hx-post="/api/actions/strategy-params/promote" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Promote selected parameter set?">
+      <label>Set ID
+        <input type="text" name="set_id" placeholder="parameter set id" />
+      </label>
+      <label>Target Status
+        <select name="target_status">
+          <option value="staged_live" selected>staged_live</option>
+          <option value="live">live</option>
+          <option value="archived">archived</option>
+        </select>
+      </label>
+      <label>Actor
+        <input type="text" name="actor" value="operator" />
+      </label>
+      <label>Acknowledgement
+        <input type="text" name="acknowledgement" value="Manual promotion approved" />
+      </label>
+      <label>Note
+        <input type="text" name="note" value="promoted from control plane" />
+      </label>
+      <button type="submit" class="btn secondary">Promote Set</button>
+    </form>
+  </div>
+</details>
+
+<section id="research-panel" hx-get="/fragments/research" hx-trigger="load, every 15s" hx-swap="innerHTML"></section>
+
+<section class="grid-2">
+  <div id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
+</section>
+{% endblock %}

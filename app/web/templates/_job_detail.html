@@ -1,0 +1,28 @@
+<section class="card">
+  <h2>Research Job Output</h2>
+  {% if job %}
+    <div class="row"><span class="label">Job ID</span><span class="value code">{{ job.id[:8] }}</span></div>
+    <div class="row"><span class="label">Type</span><span class="value">{{ job.job_type }}</span></div>
+    <div class="row"><span class="label">Status</span><span class="value"><span class="badge {{ job.status }}">{{ job.status }}</span></span></div>
+    <div class="row"><span class="label">Updated</span><span class="value">{{ job.updated_at }}</span></div>
+    <div class="row"><span class="label">Detail</span><span class="value">{{ job.detail or "-" }}</span></div>
+
+    <h3>Result</h3>
+    {% if parsed_result is mapping or parsed_result is sequence and parsed_result is not string %}
+      <pre class="json-view">{{ parsed_result | tojson(indent=2) }}</pre>
+    {% elif parsed_result %}
+      <pre class="json-view">{{ parsed_result }}</pre>
+    {% else %}
+      <p class="muted">No result payload.</p>
+    {% endif %}
+
+    <h3>Error</h3>
+    {% if job.error %}
+      <pre class="json-view">{{ job.error }}</pre>
+    {% else %}
+      <p class="muted">No error payload.</p>
+    {% endif %}
+  {% else %}
+    <p class="muted">No research job selected yet.</p>
+  {% endif %}
+</section>

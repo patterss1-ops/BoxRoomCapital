@@ -1,0 +1,41 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Python cache/build
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Runtime and logs
+.runtime/
+*.log
+
+# Databases and journals
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Local/editor/system artifacts
+.DS_Store
+.claude/
+.fuse_hidden*
+*.swp
+*.swo
+
+# Generated data outputs
+calibration.json
+option_prices.json
+options_discovery.json

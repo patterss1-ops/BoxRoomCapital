@@ -1,0 +1,17 @@
+<section class="card">
+  <h2>Incidents</h2>
+  {% if incidents %}
+    <ul class="events">
+    {% for item in incidents %}
+      <li>
+        <span class="stamp">{{ item.timestamp }}</span>
+        <span class="badge {{ item.category|lower }}">{{ item.category }}</span>
+        <span class="headline">{{ item.title }}</span>
+        {% if item.detail %}<div class="detail">{{ item.detail }}</div>{% endif %}
+      </li>
+    {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No incidents.</p>
+  {% endif %}
+</section>

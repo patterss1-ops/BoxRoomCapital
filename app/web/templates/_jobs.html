@@ -1,0 +1,35 @@
+<section class="card">
+  <h2>Recent Jobs</h2>
+  {% if jobs %}
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Type</th><th>Status</th><th>Mode</th><th>Detail</th><th>View</th></tr>
+      </thead>
+      <tbody>
+      {% for job in jobs %}
+        <tr>
+          <td>{{ job.created_at }}</td>
+          <td>{{ job.job_type }}</td>
+          <td>{{ job.status }}</td>
+          <td>{{ job.mode or "-" }}</td>
+          <td>{{ job.detail or job.result or job.error or "-" }}</td>
+          <td>
+            {% if job.job_type in ["discover_options", "calibrate_options"] %}
+              <button
+                class="btn secondary"
+                hx-get="/fragments/job-detail?job_id={{ job.id }}"
+                hx-target="#job-detail-panel"
+                hx-swap="innerHTML"
+              >Open</button>
+            {% else %}
+              -
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No jobs yet.</p>
+  {% endif %}
+</section>

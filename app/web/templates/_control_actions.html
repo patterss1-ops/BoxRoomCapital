@@ -1,0 +1,29 @@
+<section class="card">
+  <h2>Control Acknowledgements</h2>
+  {% if control_actions %}
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Action</th>
+          <th>Value</th>
+          <th>Reason</th>
+          <th>Actor</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for item in control_actions %}
+        <tr>
+          <td>{{ item.timestamp }}</td>
+          <td>{{ item.action }}</td>
+          <td>{{ item.value or "-" }}</td>
+          <td>{{ item.reason or "-" }}</td>
+          <td>{{ item.actor }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No control acknowledgements yet.</p>
+  {% endif %}
+</section>

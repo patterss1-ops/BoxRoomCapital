@@ -1,0 +1,33 @@
+<section class="card">
+  <h2>Order Actions</h2>
+  {% if order_actions %}
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Type</th>
+          <th>Status</th>
+          <th>Attempt</th>
+          <th>Ticker</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for action in order_actions %}
+        <tr>
+          <td>{{ action.updated_at or action.created_at }}</td>
+          <td>{{ action.action_type }}</td>
+          <td>
+            <span class="badge {{ action.status }}">{{ action.status }}</span>
+          </td>
+          <td>{{ action.attempt }}/{{ action.max_attempts }}</td>
+          <td>{{ action.ticker or "-" }}</td>
+          <td>{{ action.error_code or action.error_message or "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No order actions yet.</p>
+  {% endif %}
+</section>

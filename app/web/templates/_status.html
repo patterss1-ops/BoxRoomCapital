@@ -1,0 +1,55 @@
+<section class="card">
+  <h2>Engine Status</h2>
+  <div class="row">
+    <span class="label">State</span>
+    <span class="value {% if status.running %}ok{% else %}muted{% endif %}">
+      {{ "RUNNING" if status.running else "STOPPED" }}
+    </span>
+  </div>
+  <div class="row"><span class="label">Paused</span><span class="value">{{ "YES" if status.paused else "NO" }}</span></div>
+  <div class="row"><span class="label">Mode</span><span class="value">{{ status.mode }}</span></div>
+  <div class="row"><span class="label">Thread</span><span class="value">{{ status.thread_name or "-" }}</span></div>
+  <div class="row"><span class="label">Started</span><span class="value">{{ status.started_at or "-" }}</span></div>
+  <div class="row"><span class="label">Last Action</span><span class="value">{{ status.last_action or "-" }}</span></div>
+  <div class="row"><span class="label">Action Time</span><span class="value">{{ status.last_action_at or "-" }}</span></div>
+  <div class="row"><span class="label">Engine Open Spreads</span><span class="value">{{ status.open_spreads or 0 }}</span></div>
+  <div class="row"><span class="label">Kill Switch</span><span class="value">{{ "ON" if status.kill_switch_active else "OFF" }}</span></div>
+  <div class="row"><span class="label">Kill Reason</span><span class="value">{{ status.kill_switch_reason or "-" }}</span></div>
+  <div class="row"><span class="label">Risk Throttle</span><span class="value">{{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span></div>
+  <div class="row"><span class="label">Cooldowns</span><span class="value">{{ status.cooldowns_count or 0 }}</span></div>
+  <div class="row"><span class="label">Last Error</span><span class="value">{{ status.last_error or "-" }}</span></div>
+  <div class="row"><span class="label">Log</span><span class="value code">{{ status.log_file }}</span></div>
+</section>
+
+<section class="card">
+  <h2>Portfolio Snapshot</h2>
+  <div class="row"><span class="label">Closed Trades</span><span class="value">{{ summary.total_closed_trades }}</span></div>
+  <div class="row"><span class="label">Total P&L</span><span class="value">GBP {{ "%.2f"|format(summary.total_pnl) }}</span></div>
+  <div class="row"><span class="label">Today P&L</span><span class="value">GBP {{ "%.2f"|format(summary.today_pnl) }}</span></div>
+  <div class="row"><span class="label">Open Positions</span><span class="value">{{ summary.open_positions }}</span></div>
+  <div class="row"><span class="label">Latest Equity</span><span class="value">GBP {{ "%.2f"|format(summary.latest_equity) }}</span></div>
+</section>
+
+<section class="card">
+  <h2>Open Option Spreads</h2>
+  {% if open_positions %}
+    <table>
+      <thead>
+        <tr><th>Ticker</th><th>Type</th><th>Size</th><th>Max Loss</th><th>Entry</th></tr>
+      </thead>
+      <tbody>
+      {% for p in open_positions %}
+        <tr>
+          <td>{{ p.ticker }}</td>
+          <td>{{ p.trade_type }}</td>
+          <td>{{ p.size }}</td>
+          <td>GBP {{ "%.2f"|format(p.max_loss or 0) }}</td>
+          <td>{{ p.entry_date }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No open option positions.</p>
+  {% endif %}
+</section>

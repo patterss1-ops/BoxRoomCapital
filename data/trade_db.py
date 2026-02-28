@@ -1,0 +1,1385 @@
+"""
+SQLite trade database — persistent storage for all trades, P&L, and daily snapshots.
+Used by both the bot (writes) and the Streamlit dashboard (reads).
+"""
+import sqlite3
+import os
+from datetime import datetime, date
+from typing import Optional
+import uuid
+
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trades.db")
+
+
+def get_conn(db_path: str = DB_PATH) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def init_db(db_path: str = DB_PATH):
+    """Create tables if they don't exist."""
+    conn = get_conn(db_path)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            direction TEXT NOT NULL,          -- BUY / SELL
+            action TEXT NOT NULL,             -- OPEN / CLOSE
+            size REAL NOT NULL,
+            price REAL,
+            deal_id TEXT,
+            deal_ref TEXT,
+            pnl REAL,                         -- only set on CLOSE
+            commission REAL DEFAULT 0,
+            notes TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS daily_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL UNIQUE,
+            balance REAL NOT NULL,
+            equity REAL NOT NULL,
+            unrealised_pnl REAL DEFAULT 0,
+            realised_pnl_today REAL DEFAULT 0,
+            open_positions INTEGER DEFAULT 0,
+            drawdown_pct REAL DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            deal_id TEXT UNIQUE,
+            ticker TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            size REAL NOT NULL,
+            entry_price REAL,
+            entry_time TEXT,
+            current_price REAL,
+            unrealised_pnl REAL DEFAULT 0,
+            last_updated TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS bot_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            category TEXT NOT NULL,           -- STARTUP, SCAN, SIGNAL, ORDER, REJECTION, ERROR, MARKET, POSITION, HEARTBEAT, SHUTDOWN
+            icon TEXT NOT NULL DEFAULT '🤖',
+            headline TEXT NOT NULL,            -- Short human-readable summary
+            detail TEXT,                       -- Longer explanation
+            ticker TEXT,
+            strategy TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trades_ticker ON trades(ticker);
+        CREATE INDEX IF NOT EXISTS idx_trades_strategy ON trades(strategy);
+        CREATE INDEX IF NOT EXISTS idx_trades_timestamp ON trades(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_daily_date ON daily_snapshots(date);
+        CREATE INDEX IF NOT EXISTS idx_events_timestamp ON bot_events(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_events_category ON bot_events(category);
+
+        CREATE TABLE IF NOT EXISTS strategy_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS option_positions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            spread_id TEXT UNIQUE NOT NULL,
+            ticker TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            trade_type TEXT NOT NULL,
+            entry_date TEXT NOT NULL,
+            expiry_date TEXT,
+            short_deal_id TEXT,
+            long_deal_id TEXT,
+            short_strike REAL,
+            long_strike REAL,
+            short_epic TEXT,
+            long_epic TEXT,
+            spread_width REAL,
+            premium_collected REAL,
+            max_loss REAL,
+            size REAL NOT NULL,
+            current_value REAL DEFAULT 0,
+            unrealised_pnl REAL DEFAULT 0,
+            exit_date TEXT,
+            exit_pnl REAL,
+            exit_reason TEXT,
+            status TEXT NOT NULL DEFAULT 'open',
+            last_updated TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS shadow_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            strategy TEXT NOT NULL,
+            action TEXT NOT NULL,
+            short_strike REAL,
+            long_strike REAL,
+            spread_width REAL,
+            estimated_premium REAL,
+            max_loss REAL,
+            size REAL,
+            reason TEXT,
+            would_have_traded TEXT NOT NULL DEFAULT 'yes'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_option_positions_status ON option_positions(status);
+        CREATE INDEX IF NOT EXISTS idx_option_positions_ticker ON option_positions(ticker);
+        CREATE INDEX IF NOT EXISTS idx_shadow_trades_timestamp ON shadow_trades(timestamp);
+
+        CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            mode TEXT,
+            detail TEXT,
+            result TEXT,
+            error TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
+
+        CREATE TABLE IF NOT EXISTS order_actions (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            action_type TEXT NOT NULL,       -- open_spread / close_spread
+            status TEXT NOT NULL,            -- queued/running/retrying/completed/failed/aborted
+            ticker TEXT,
+            spread_id TEXT,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            max_attempts INTEGER NOT NULL DEFAULT 1,
+            recoverable INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT,
+            error_message TEXT,
+            request_payload TEXT,
+            result_payload TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_order_actions_created_at ON order_actions(created_at);
+        CREATE INDEX IF NOT EXISTS idx_order_actions_status ON order_actions(status);
+        CREATE INDEX IF NOT EXISTS idx_order_actions_corr ON order_actions(correlation_id);
+
+        CREATE TABLE IF NOT EXISTS control_actions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,            -- kill_switch/risk_throttle/cooldown/recovery/etc
+            value TEXT,
+            reason TEXT,
+            actor TEXT NOT NULL DEFAULT 'operator',
+            metadata TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_control_actions_timestamp ON control_actions(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_control_actions_action ON control_actions(action);
+
+        CREATE TABLE IF NOT EXISTS option_contracts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            discovered_at TEXT NOT NULL,
+            index_name TEXT,
+            epic TEXT NOT NULL UNIQUE,
+            instrument_name TEXT,
+            option_type TEXT,
+            expiry_type TEXT,
+            expiry TEXT,
+            strike REAL,
+            status TEXT,
+            bid REAL,
+            offer REAL,
+            mid REAL,
+            spread REAL,
+            min_deal_size REAL,
+            margin_factor REAL,
+            margin_factor_unit TEXT,
+            source TEXT,
+            raw_payload TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_option_contracts_index ON option_contracts(index_name);
+        CREATE INDEX IF NOT EXISTS idx_option_contracts_expiry_type ON option_contracts(expiry_type);
+        CREATE INDEX IF NOT EXISTS idx_option_contracts_discovered_at ON option_contracts(discovered_at);
+
+        CREATE TABLE IF NOT EXISTS calibration_runs (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            scope TEXT,
+            samples INTEGER DEFAULT 0,
+            overall_ratio REAL,
+            summary_payload TEXT,
+            error TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_calibration_runs_created_at ON calibration_runs(created_at);
+        CREATE INDEX IF NOT EXISTS idx_calibration_runs_status ON calibration_runs(status);
+
+        CREATE TABLE IF NOT EXISTS calibration_points (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            index_name TEXT,
+            ticker TEXT,
+            strike REAL,
+            otm_pct REAL,
+            expiry_type TEXT,
+            dte REAL,
+            epic TEXT,
+            ig_bid REAL,
+            ig_offer REAL,
+            ig_mid REAL,
+            ig_spread REAL,
+            ig_spread_pct REAL,
+            bs_price REAL,
+            ratio_ig_vs_bs REAL,
+            tradeable INTEGER DEFAULT 0,
+            rv REAL,
+            iv_est REAL,
+            underlying REAL,
+            raw_payload TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_calibration_points_run_id ON calibration_points(run_id);
+        CREATE INDEX IF NOT EXISTS idx_calibration_points_index ON calibration_points(index_name);
+        CREATE INDEX IF NOT EXISTS idx_calibration_points_timestamp ON calibration_points(timestamp);
+
+        CREATE TABLE IF NOT EXISTS strategy_parameter_sets (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            strategy_key TEXT NOT NULL,
+            name TEXT NOT NULL,
+            version INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            source_run_id TEXT,
+            parameters_payload TEXT NOT NULL,
+            notes TEXT,
+            created_by TEXT NOT NULL DEFAULT 'operator'
+        );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_strategy_params_key_version
+            ON strategy_parameter_sets(strategy_key, version);
+        CREATE INDEX IF NOT EXISTS idx_strategy_params_status
+            ON strategy_parameter_sets(status);
+        CREATE INDEX IF NOT EXISTS idx_strategy_params_updated_at
+            ON strategy_parameter_sets(updated_at);
+
+        CREATE TABLE IF NOT EXISTS strategy_promotions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            strategy_key TEXT NOT NULL,
+            set_id TEXT NOT NULL,
+            from_status TEXT,
+            to_status TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            acknowledgement TEXT NOT NULL,
+            note TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_strategy_promotions_timestamp
+            ON strategy_promotions(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_strategy_promotions_strategy
+            ON strategy_promotions(strategy_key);
+    """)
+    conn.commit()
+    conn.close()
+
+
+# ─── Bot activity log ──────────────────────────────────────────────────────
+
+def log_event(
+    category: str,
+    headline: str,
+    detail: Optional[str] = None,
+    ticker: Optional[str] = None,
+    strategy: Optional[str] = None,
+    icon: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """
+    Log a human-readable bot event for the dashboard activity feed.
+
+    Categories & default icons:
+        STARTUP  🚀   Bot started / connected
+        SCAN     🔍   Signal scan started/completed
+        SIGNAL   📊   Signal detected (entry/exit condition met)
+        ORDER    ✅   Order placed and filled
+        REJECTION ❌  Order rejected by broker
+        ERROR    ⚠️   Something went wrong
+        MARKET   🏛️   Market status info (closed, opened, etc.)
+        POSITION 📋   Position monitoring event
+        HEARTBEAT 💓  Periodic alive check
+        SHUTDOWN 🛑   Bot stopping
+        SNAPSHOT 📸   Daily snapshot saved
+    """
+    icon_map = {
+        "STARTUP": "🚀", "SCAN": "🔍", "SIGNAL": "📊", "ORDER": "✅",
+        "REJECTION": "❌", "ERROR": "⚠️", "MARKET": "🏛️", "POSITION": "📋",
+        "HEARTBEAT": "💓", "SHUTDOWN": "🛑", "SNAPSHOT": "📸",
+    }
+    if icon is None:
+        icon = icon_map.get(category, "🤖")
+
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO bot_events (timestamp, category, icon, headline, detail, ticker, strategy)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), category, icon, headline, detail, ticker, strategy),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_bot_events(limit: int = 100, category: Optional[str] = None,
+                   db_path: str = DB_PATH) -> list[dict]:
+    """Get recent bot events for the dashboard activity feed."""
+    conn = get_conn(db_path)
+    if category:
+        rows = conn.execute(
+            "SELECT * FROM bot_events WHERE category=? ORDER BY timestamp DESC LIMIT ?",
+            (category, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM bot_events ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Strategy state persistence (trailing stops, cooldowns, etc.) ──────────
+
+def save_strategy_state(key: str, value: str, db_path: str = DB_PATH):
+    """Save a strategy state value (e.g. trailing stop levels) to survive restarts."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO strategy_state (key, value, updated) VALUES (?, ?, ?)
+           ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated=excluded.updated""",
+        (key, value, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def load_strategy_state(key: str, db_path: str = DB_PATH) -> Optional[str]:
+    """Load a strategy state value. Returns None if not found."""
+    conn = get_conn(db_path)
+    row = conn.execute("SELECT value FROM strategy_state WHERE key=?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else None
+
+
+def delete_strategy_state(key: str, db_path: str = DB_PATH):
+    """Delete a strategy state value (e.g. when a position is closed)."""
+    conn = get_conn(db_path)
+    conn.execute("DELETE FROM strategy_state WHERE key=?", (key,))
+    conn.commit()
+    conn.close()
+
+
+# ─── Trade logging ──────────────────────────────────────────────────────────
+
+def log_trade(
+    ticker: str,
+    strategy: str,
+    direction: str,
+    action: str,
+    size: float,
+    price: Optional[float] = None,
+    deal_id: Optional[str] = None,
+    deal_ref: Optional[str] = None,
+    pnl: Optional[float] = None,
+    notes: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Log a trade to the database."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO trades (timestamp, ticker, strategy, direction, action, size, price, deal_id, deal_ref, pnl, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), ticker, strategy, direction, action, size, price, deal_id, deal_ref, pnl, notes),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ─── Position tracking ─────────────────────────────────────────────────────
+
+def upsert_position(deal_id: str, ticker: str, strategy: str, direction: str,
+                    size: float, entry_price: float, entry_time: str,
+                    db_path: str = DB_PATH):
+    """Insert or update an open position."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO positions (deal_id, ticker, strategy, direction, size, entry_price, entry_time, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(deal_id) DO UPDATE SET
+             current_price=excluded.current_price, unrealised_pnl=excluded.unrealised_pnl, last_updated=excluded.last_updated""",
+        (deal_id, ticker, strategy, direction, size, entry_price, entry_time, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def remove_position(deal_id: str, db_path: str = DB_PATH):
+    """Remove a closed position."""
+    conn = get_conn(db_path)
+    conn.execute("DELETE FROM positions WHERE deal_id = ?", (deal_id,))
+    conn.commit()
+    conn.close()
+
+
+def update_position_price(deal_id: str, current_price: float, unrealised_pnl: float,
+                          db_path: str = DB_PATH):
+    """Update current price and unrealised P&L for an open position."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """UPDATE positions SET current_price=?, unrealised_pnl=?, last_updated=? WHERE deal_id=?""",
+        (current_price, unrealised_pnl, datetime.now().isoformat(), deal_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ─── Daily snapshots ───────────────────────────────────────────────────────
+
+def save_daily_snapshot(balance: float, equity: float, unrealised_pnl: float = 0,
+                        realised_pnl_today: float = 0, open_positions: int = 0,
+                        db_path: str = DB_PATH):
+    """Save end-of-day snapshot. Replaces if exists for today."""
+    today = date.today().isoformat()
+    conn = get_conn(db_path)
+
+    # Calculate drawdown from peak
+    peak_row = conn.execute("SELECT MAX(equity) as peak FROM daily_snapshots").fetchone()
+    peak = peak_row["peak"] if peak_row and peak_row["peak"] else equity
+    peak = max(peak, equity)
+    dd_pct = ((equity - peak) / peak * 100) if peak > 0 else 0
+
+    conn.execute(
+        """INSERT INTO daily_snapshots (date, balance, equity, unrealised_pnl, realised_pnl_today, open_positions, drawdown_pct)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(date) DO UPDATE SET
+             balance=excluded.balance, equity=excluded.equity, unrealised_pnl=excluded.unrealised_pnl,
+             realised_pnl_today=excluded.realised_pnl_today, open_positions=excluded.open_positions,
+             drawdown_pct=excluded.drawdown_pct""",
+        (today, balance, equity, unrealised_pnl, realised_pnl_today, open_positions, dd_pct),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ─── Option position tracking ─────────────────────────────────────────────
+
+def upsert_option_position(
+    spread_id: str, ticker: str, strategy: str, trade_type: str,
+    short_deal_id: str, long_deal_id: str,
+    short_strike: float, long_strike: float,
+    short_epic: str, long_epic: str,
+    spread_width: float, premium_collected: float, max_loss: float,
+    size: float, expiry_date: str = "",
+    db_path: str = DB_PATH,
+):
+    """Insert or update an open option spread position."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO option_positions
+           (spread_id, ticker, strategy, trade_type, entry_date, expiry_date,
+            short_deal_id, long_deal_id, short_strike, long_strike,
+            short_epic, long_epic, spread_width, premium_collected, max_loss,
+            size, status, last_updated)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?)
+           ON CONFLICT(spread_id) DO UPDATE SET
+             current_value=excluded.current_value, unrealised_pnl=excluded.unrealised_pnl,
+             last_updated=excluded.last_updated""",
+        (spread_id, ticker, strategy, trade_type,
+         datetime.now().isoformat(), expiry_date,
+         short_deal_id, long_deal_id, short_strike, long_strike,
+         short_epic, long_epic, spread_width, premium_collected, max_loss,
+         size, datetime.now().isoformat()),
+    )
+    conn.commit()
+    conn.close()
+
+
+def close_option_position(spread_id: str, exit_pnl: float, exit_reason: str,
+                           db_path: str = DB_PATH):
+    """Mark an option spread as closed with final P&L."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """UPDATE option_positions SET status='closed', exit_date=?, exit_pnl=?, exit_reason=?,
+           last_updated=? WHERE spread_id=?""",
+        (datetime.now().isoformat(), exit_pnl, exit_reason,
+         datetime.now().isoformat(), spread_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_open_option_positions(db_path: str = DB_PATH) -> list[dict]:
+    """Get all open option spread positions."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM option_positions WHERE status='open' ORDER BY entry_date DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_closed_option_positions(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Get closed option positions."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM option_positions WHERE status='closed' ORDER BY exit_date DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_all_option_positions(db_path: str = DB_PATH) -> list[dict]:
+    """Get all option positions (open + closed)."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM option_positions ORDER BY entry_date DESC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Shadow trade logging ────────────────────────────────────────────────
+
+def log_shadow_trade(
+    ticker: str, strategy: str, action: str,
+    short_strike: float = 0, long_strike: float = 0,
+    spread_width: float = 0, estimated_premium: float = 0,
+    max_loss: float = 0, size: float = 0,
+    reason: str = "", db_path: str = DB_PATH,
+):
+    """Log what the bot WOULD have traded in shadow mode."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO shadow_trades
+           (timestamp, ticker, strategy, action, short_strike, long_strike,
+            spread_width, estimated_premium, max_loss, size, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), ticker, strategy, action,
+         short_strike, long_strike, spread_width, estimated_premium,
+         max_loss, size, reason),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_shadow_trades(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Get recent shadow trades."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM shadow_trades ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Research persistence (options discovery + calibration) ───────────────
+
+def upsert_option_contracts(contracts: list[dict], db_path: str = DB_PATH) -> int:
+    """Upsert discovered option contracts by EPIC."""
+    if not contracts:
+        return 0
+
+    now = datetime.now().isoformat()
+    conn = get_conn(db_path)
+    count = 0
+    for c in contracts:
+        conn.execute(
+            """INSERT INTO option_contracts
+               (discovered_at, index_name, epic, instrument_name, option_type, expiry_type, expiry,
+                strike, status, bid, offer, mid, spread, min_deal_size, margin_factor,
+                margin_factor_unit, source, raw_payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(epic) DO UPDATE SET
+                 discovered_at=excluded.discovered_at,
+                 index_name=excluded.index_name,
+                 instrument_name=excluded.instrument_name,
+                 option_type=excluded.option_type,
+                 expiry_type=excluded.expiry_type,
+                 expiry=excluded.expiry,
+                 strike=excluded.strike,
+                 status=excluded.status,
+                 bid=excluded.bid,
+                 offer=excluded.offer,
+                 mid=excluded.mid,
+                 spread=excluded.spread,
+                 min_deal_size=excluded.min_deal_size,
+                 margin_factor=excluded.margin_factor,
+                 margin_factor_unit=excluded.margin_factor_unit,
+                 source=excluded.source,
+                 raw_payload=excluded.raw_payload""",
+            (
+                now,
+                c.get("index_name"),
+                c.get("epic"),
+                c.get("instrument_name"),
+                c.get("option_type"),
+                c.get("expiry_type"),
+                c.get("expiry"),
+                c.get("strike"),
+                c.get("status"),
+                c.get("bid"),
+                c.get("offer"),
+                c.get("mid"),
+                c.get("spread"),
+                c.get("min_deal_size"),
+                c.get("margin_factor"),
+                c.get("margin_factor_unit"),
+                c.get("source"),
+                c.get("raw_payload"),
+            ),
+        )
+        count += 1
+    conn.commit()
+    conn.close()
+    return count
+
+
+def get_option_contracts(
+    limit: int = 200,
+    index_name: Optional[str] = None,
+    expiry_type: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get discovered option contracts with optional filters."""
+    conn = get_conn(db_path)
+    query = "SELECT * FROM option_contracts"
+    where = []
+    params: list = []
+    if index_name:
+        where.append("index_name LIKE ?")
+        params.append(f"%{index_name}%")
+    if expiry_type:
+        where.append("expiry_type=?")
+        params.append(expiry_type)
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY discovered_at DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_option_contract_summary(db_path: str = DB_PATH) -> list[dict]:
+    """Get option contract counts grouped by index and expiry type."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        """SELECT
+               index_name,
+               expiry_type,
+               COUNT(*) AS contracts,
+               MAX(discovered_at) AS last_seen
+           FROM option_contracts
+           GROUP BY index_name, expiry_type
+           ORDER BY index_name ASC, expiry_type ASC"""
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def create_calibration_run(
+    run_id: str,
+    scope: str,
+    status: str = "running",
+    db_path: str = DB_PATH,
+):
+    """Create a calibration run record."""
+    now = datetime.now().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO calibration_runs
+           (id, created_at, updated_at, status, scope)
+           VALUES (?, ?, ?, ?, ?)""",
+        (run_id, now, now, status, scope),
+    )
+    conn.commit()
+    conn.close()
+
+
+def complete_calibration_run(
+    run_id: str,
+    status: str,
+    samples: int = 0,
+    overall_ratio: Optional[float] = None,
+    summary_payload: Optional[str] = None,
+    error: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Finalize a calibration run with summary/error."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """UPDATE calibration_runs
+           SET updated_at=?, status=?, samples=?, overall_ratio=?, summary_payload=?, error=?
+           WHERE id=?""",
+        (datetime.now().isoformat(), status, samples, overall_ratio, summary_payload, error, run_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def insert_calibration_points(run_id: str, points: list[dict], db_path: str = DB_PATH) -> int:
+    """Persist quote-level calibration points for a run."""
+    if not points:
+        return 0
+    now = datetime.now().isoformat()
+    conn = get_conn(db_path)
+    count = 0
+    for p in points:
+        conn.execute(
+            """INSERT INTO calibration_points
+               (run_id, timestamp, index_name, ticker, strike, otm_pct, expiry_type, dte, epic,
+                ig_bid, ig_offer, ig_mid, ig_spread, ig_spread_pct, bs_price, ratio_ig_vs_bs,
+                tradeable, rv, iv_est, underlying, raw_payload)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run_id,
+                now,
+                p.get("index"),
+                p.get("ticker"),
+                p.get("strike"),
+                p.get("otm_pct"),
+                p.get("expiry_type"),
+                p.get("dte"),
+                p.get("epic"),
+                p.get("ig_bid"),
+                p.get("ig_offer"),
+                p.get("ig_mid"),
+                p.get("ig_spread"),
+                p.get("ig_spread_pct"),
+                p.get("bs_price"),
+                p.get("ratio_ig_vs_bs"),
+                int(bool(p.get("tradeable", False))),
+                p.get("rv"),
+                p.get("iv_est"),
+                p.get("underlying"),
+                str(p),
+            ),
+        )
+        count += 1
+    conn.commit()
+    conn.close()
+    return count
+
+
+def get_calibration_runs(limit: int = 20, db_path: str = DB_PATH) -> list[dict]:
+    """Get recent calibration runs."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM calibration_runs ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_calibration_points(
+    run_id: str,
+    limit: int = 200,
+    index_name: Optional[str] = None,
+    ticker: Optional[str] = None,
+    expiry_type: Optional[str] = None,
+    strike_min: Optional[float] = None,
+    strike_max: Optional[float] = None,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent calibration points for a run with optional filters."""
+    conn = get_conn(db_path)
+    query = "SELECT * FROM calibration_points WHERE run_id=?"
+    params: list = [run_id]
+    if index_name:
+        query += " AND index_name LIKE ?"
+        params.append(f"%{index_name}%")
+    if ticker:
+        query += " AND ticker LIKE ?"
+        params.append(f"%{ticker}%")
+    if expiry_type:
+        query += " AND expiry_type=?"
+        params.append(expiry_type)
+    if strike_min is not None:
+        query += " AND strike>=?"
+        params.append(float(strike_min))
+    if strike_max is not None:
+        query += " AND strike<=?"
+        params.append(float(strike_max))
+    query += " ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_calibration_run(run_id: str, db_path: str = DB_PATH) -> Optional[dict]:
+    """Get a single calibration run by ID."""
+    conn = get_conn(db_path)
+    row = conn.execute(
+        "SELECT * FROM calibration_runs WHERE id=?",
+        (run_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# ─── Strategy parameter versioning + promotions ───────────────────────────
+
+VALID_PARAM_SET_STATUSES = {"shadow", "staged_live", "live", "archived"}
+
+
+def create_strategy_parameter_set(
+    strategy_key: str,
+    name: str,
+    parameters_payload: str,
+    status: str = "shadow",
+    source_run_id: Optional[str] = None,
+    notes: Optional[str] = None,
+    created_by: str = "operator",
+    db_path: str = DB_PATH,
+) -> dict:
+    """Create a new versioned strategy parameter set."""
+    clean_strategy = strategy_key.strip().lower()
+    clean_name = name.strip()
+    clean_status = status.strip().lower() or "shadow"
+    if clean_status not in VALID_PARAM_SET_STATUSES:
+        raise ValueError(f"Invalid status '{status}'")
+    if not clean_strategy:
+        raise ValueError("strategy_key is required")
+    if not clean_name:
+        raise ValueError("name is required")
+
+    now = datetime.now().isoformat()
+    set_id = str(uuid.uuid4())
+    conn = get_conn(db_path)
+    version_row = conn.execute(
+        "SELECT COALESCE(MAX(version), 0) AS current_version FROM strategy_parameter_sets WHERE strategy_key=?",
+        (clean_strategy,),
+    ).fetchone()
+    next_version = int(version_row["current_version"] or 0) + 1
+
+    conn.execute(
+        """INSERT INTO strategy_parameter_sets
+           (id, created_at, updated_at, strategy_key, name, version, status, source_run_id,
+            parameters_payload, notes, created_by)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            set_id,
+            now,
+            now,
+            clean_strategy,
+            clean_name,
+            next_version,
+            clean_status,
+            source_run_id,
+            parameters_payload,
+            notes,
+            created_by,
+        ),
+    )
+    row = conn.execute(
+        "SELECT * FROM strategy_parameter_sets WHERE id=?",
+        (set_id,),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+    return dict(row)
+
+
+def get_strategy_parameter_set(set_id: str, db_path: str = DB_PATH) -> Optional[dict]:
+    """Get one parameter set by ID."""
+    conn = get_conn(db_path)
+    row = conn.execute(
+        "SELECT * FROM strategy_parameter_sets WHERE id=?",
+        (set_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_strategy_parameter_sets(
+    limit: int = 50,
+    strategy_key: Optional[str] = None,
+    status: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent strategy parameter sets with optional filters."""
+    conn = get_conn(db_path)
+    query = "SELECT * FROM strategy_parameter_sets"
+    where: list[str] = []
+    params: list = []
+    if strategy_key:
+        where.append("strategy_key=?")
+        params.append(strategy_key.strip().lower())
+    if status:
+        where.append("status=?")
+        params.append(status.strip().lower())
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY created_at DESC, version DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_active_strategy_parameter_set(
+    strategy_key: str,
+    status: str = "live",
+    db_path: str = DB_PATH,
+) -> Optional[dict]:
+    """Get the newest active parameter set for one strategy and status."""
+    conn = get_conn(db_path)
+    row = conn.execute(
+        """SELECT * FROM strategy_parameter_sets
+           WHERE strategy_key=? AND status=?
+           ORDER BY version DESC, updated_at DESC
+           LIMIT 1""",
+        (strategy_key.strip().lower(), status.strip().lower()),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def promote_strategy_parameter_set(
+    set_id: str,
+    to_status: str,
+    actor: str,
+    acknowledgement: str,
+    note: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> dict:
+    """Promote/demote a parameter set and append a promotion audit record."""
+    target = to_status.strip().lower()
+    clean_actor = actor.strip() or "operator"
+    ack = acknowledgement.strip()
+    if target not in VALID_PARAM_SET_STATUSES:
+        return {"ok": False, "message": f"Invalid target status '{to_status}'."}
+    if not ack:
+        return {"ok": False, "message": "Acknowledgement is required for promotion actions."}
+
+    conn = get_conn(db_path)
+    current = conn.execute(
+        "SELECT * FROM strategy_parameter_sets WHERE id=?",
+        (set_id,),
+    ).fetchone()
+    if not current:
+        conn.close()
+        return {"ok": False, "message": f"Parameter set '{set_id}' not found."}
+
+    current_item = dict(current)
+    from_status = current_item.get("status")
+    strategy_key = current_item.get("strategy_key")
+    now = datetime.now().isoformat()
+
+    if target in {"staged_live", "live"}:
+        conn.execute(
+            """UPDATE strategy_parameter_sets
+               SET status='archived', updated_at=?
+               WHERE strategy_key=? AND status=? AND id<>?""",
+            (now, strategy_key, target, set_id),
+        )
+
+    conn.execute(
+        "UPDATE strategy_parameter_sets SET status=?, updated_at=? WHERE id=?",
+        (target, now, set_id),
+    )
+    conn.execute(
+        """INSERT INTO strategy_promotions
+           (timestamp, strategy_key, set_id, from_status, to_status, actor, acknowledgement, note)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (now, strategy_key, set_id, from_status, target, clean_actor, ack, note),
+    )
+    updated = conn.execute(
+        "SELECT * FROM strategy_parameter_sets WHERE id=?",
+        (set_id,),
+    ).fetchone()
+    conn.commit()
+    conn.close()
+    return {
+        "ok": True,
+        "message": f"Set {set_id[:8]} promoted from {from_status} to {target}.",
+        "item": dict(updated),
+        "from_status": from_status,
+        "to_status": target,
+    }
+
+
+def get_strategy_promotions(
+    limit: int = 50,
+    strategy_key: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent parameter promotion actions."""
+    conn = get_conn(db_path)
+    if strategy_key:
+        rows = conn.execute(
+            """SELECT * FROM strategy_promotions
+               WHERE strategy_key=?
+               ORDER BY timestamp DESC LIMIT ?""",
+            (strategy_key.strip().lower(), limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM strategy_promotions ORDER BY timestamp DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Job tracking (control-plane actions) ────────────────────────────────
+
+def create_job(job_id: str, job_type: str, status: str = "queued",
+               mode: Optional[str] = None, detail: Optional[str] = None,
+               db_path: str = DB_PATH):
+    """Create a new job record."""
+    now = datetime.now().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO jobs (id, created_at, updated_at, job_type, status, mode, detail)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (job_id, now, now, job_type, status, mode, detail),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_job(job_id: str, status: str, detail: Optional[str] = None,
+               result: Optional[str] = None, error: Optional[str] = None,
+               db_path: str = DB_PATH):
+    """Update an existing job record."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """UPDATE jobs
+           SET updated_at=?, status=?, detail=COALESCE(?, detail),
+               result=COALESCE(?, result), error=COALESCE(?, error)
+           WHERE id=?""",
+        (datetime.now().isoformat(), status, detail, result, error, job_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_jobs(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Get recent jobs."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_job(job_id: str, db_path: str = DB_PATH) -> Optional[dict]:
+    """Get one job by ID."""
+    conn = get_conn(db_path)
+    row = conn.execute(
+        "SELECT * FROM jobs WHERE id=?",
+        (job_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# ─── Order action state machine (execution reliability) ──────────────────
+
+def create_order_action(
+    action_id: str,
+    correlation_id: str,
+    action_type: str,
+    ticker: Optional[str] = None,
+    spread_id: Optional[str] = None,
+    max_attempts: int = 1,
+    request_payload: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Create an order action record."""
+    now = datetime.now().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO order_actions
+           (id, created_at, updated_at, correlation_id, action_type, status, ticker, spread_id,
+            attempt, max_attempts, request_payload)
+           VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?)""",
+        (action_id, now, now, correlation_id, action_type, ticker, spread_id, max_attempts, request_payload),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_order_action(
+    action_id: str,
+    status: str,
+    attempt: Optional[int] = None,
+    recoverable: Optional[bool] = None,
+    error_code: Optional[str] = None,
+    error_message: Optional[str] = None,
+    result_payload: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Transition an order action to a new state."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """UPDATE order_actions
+           SET updated_at=?,
+               status=?,
+               attempt=COALESCE(?, attempt),
+               recoverable=COALESCE(?, recoverable),
+               error_code=COALESCE(?, error_code),
+               error_message=COALESCE(?, error_message),
+               result_payload=COALESCE(?, result_payload)
+           WHERE id=?""",
+        (
+            datetime.now().isoformat(),
+            status,
+            attempt,
+            int(recoverable) if recoverable is not None else None,
+            error_code,
+            error_message,
+            result_payload,
+            action_id,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_order_actions(limit: int = 100, status: Optional[str] = None,
+                      db_path: str = DB_PATH) -> list[dict]:
+    """Get recent order actions, optionally filtered by status."""
+    conn = get_conn(db_path)
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM order_actions WHERE status=? ORDER BY created_at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT * FROM order_actions ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_order_actions_by_statuses(statuses: list[str], limit: int = 200,
+                                  db_path: str = DB_PATH) -> list[dict]:
+    """Get recent order actions for any status in `statuses`."""
+    if not statuses:
+        return []
+    placeholders = ",".join(["?"] * len(statuses))
+    sql = (
+        f"SELECT * FROM order_actions WHERE status IN ({placeholders}) "
+        "ORDER BY updated_at DESC LIMIT ?"
+    )
+    conn = get_conn(db_path)
+    rows = conn.execute(sql, (*statuses, limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def log_control_action(
+    action: str,
+    value: Optional[str] = None,
+    reason: Optional[str] = None,
+    actor: str = "operator",
+    metadata: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Persist an operator/system control action for audit trail."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO control_actions (timestamp, action, value, reason, actor, metadata)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), action, value, reason, actor, metadata),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_control_actions(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """Get recent control actions (operator/system acknowledgements)."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM control_actions ORDER BY timestamp DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_incidents(limit: int = 100, db_path: str = DB_PATH) -> list[dict]:
+    """
+    Return unified operational incidents from bot_events and failed order actions.
+    """
+    conn = get_conn(db_path)
+
+    events = conn.execute(
+        """SELECT
+               timestamp,
+               category,
+               headline AS title,
+               detail AS detail,
+               ticker,
+               strategy,
+               'bot_event' AS source,
+               NULL AS correlation_id
+           FROM bot_events
+           WHERE category IN ('ERROR', 'REJECTION')
+           ORDER BY timestamp DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+
+    actions = conn.execute(
+        """SELECT
+               updated_at AS timestamp,
+               CASE WHEN recoverable=1 THEN 'RETRYING' ELSE 'FAILED' END AS category,
+               action_type || ' failed' AS title,
+               COALESCE(error_message, result_payload, 'execution failure') AS detail,
+               ticker,
+               NULL AS strategy,
+               'order_action' AS source,
+               correlation_id
+           FROM order_actions
+           WHERE status IN ('failed', 'retrying')
+           ORDER BY updated_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    conn.close()
+
+    merged = [dict(r) for r in events] + [dict(r) for r in actions]
+    merged.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    return merged[:limit]
+
+
+# ─── Query helpers (for dashboard) ─────────────────────────────────────────
+
+def get_all_trades(db_path: str = DB_PATH) -> list[dict]:
+    conn = get_conn(db_path)
+    rows = conn.execute("SELECT * FROM trades ORDER BY timestamp DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_trades_by_strategy(strategy: str, db_path: str = DB_PATH) -> list[dict]:
+    conn = get_conn(db_path)
+    rows = conn.execute("SELECT * FROM trades WHERE strategy=? ORDER BY timestamp DESC", (strategy,)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_closed_trades(db_path: str = DB_PATH) -> list[dict]:
+    conn = get_conn(db_path)
+    rows = conn.execute("SELECT * FROM trades WHERE action='CLOSE' AND pnl IS NOT NULL ORDER BY timestamp DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_open_positions(db_path: str = DB_PATH) -> list[dict]:
+    conn = get_conn(db_path)
+    rows = conn.execute("SELECT * FROM positions ORDER BY entry_time DESC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_daily_snapshots(db_path: str = DB_PATH) -> list[dict]:
+    conn = get_conn(db_path)
+    rows = conn.execute("SELECT * FROM daily_snapshots ORDER BY date ASC").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_strategy_stats(db_path: str = DB_PATH) -> dict:
+    """Calculate per-strategy performance stats from closed trades."""
+    conn = get_conn(db_path)
+    strategies = conn.execute("SELECT DISTINCT strategy FROM trades").fetchall()
+    stats = {}
+
+    for row in strategies:
+        strat = row["strategy"]
+        closed = conn.execute(
+            "SELECT pnl FROM trades WHERE strategy=? AND action='CLOSE' AND pnl IS NOT NULL", (strat,)
+        ).fetchall()
+
+        if not closed:
+            stats[strat] = {"trades": 0, "total_pnl": 0, "win_rate": 0, "avg_pnl": 0,
+                            "best_trade": 0, "worst_trade": 0, "profit_factor": 0}
+            continue
+
+        pnls = [r["pnl"] for r in closed]
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p <= 0]
+        gross_profit = sum(wins) if wins else 0
+        gross_loss = abs(sum(losses)) if losses else 0.001
+
+        stats[strat] = {
+            "trades": len(pnls),
+            "total_pnl": round(sum(pnls), 2),
+            "win_rate": round(len(wins) / len(pnls) * 100, 1) if pnls else 0,
+            "avg_pnl": round(sum(pnls) / len(pnls), 2) if pnls else 0,
+            "best_trade": round(max(pnls), 2) if pnls else 0,
+            "worst_trade": round(min(pnls), 2) if pnls else 0,
+            "profit_factor": round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0,
+        }
+
+    conn.close()
+    return stats
+
+
+def get_summary(db_path: str = DB_PATH) -> dict:
+    """Overall portfolio summary."""
+    conn = get_conn(db_path)
+
+    total_trades = conn.execute("SELECT COUNT(*) as c FROM trades WHERE action='CLOSE'").fetchone()["c"]
+    total_pnl_row = conn.execute("SELECT SUM(pnl) as s FROM trades WHERE action='CLOSE' AND pnl IS NOT NULL").fetchone()
+    total_pnl = total_pnl_row["s"] if total_pnl_row["s"] else 0
+    open_count = conn.execute("SELECT COUNT(*) as c FROM positions").fetchone()["c"]
+
+    # Today's P&L
+    today = date.today().isoformat()
+    today_pnl_row = conn.execute(
+        "SELECT SUM(pnl) as s FROM trades WHERE action='CLOSE' AND pnl IS NOT NULL AND timestamp LIKE ?",
+        (f"{today}%",)
+    ).fetchone()
+    today_pnl = today_pnl_row["s"] if today_pnl_row["s"] else 0
+
+    # Latest snapshot
+    snap = conn.execute("SELECT * FROM daily_snapshots ORDER BY date DESC LIMIT 1").fetchone()
+
+    conn.close()
+
+    return {
+        "total_closed_trades": total_trades,
+        "total_pnl": round(total_pnl, 2),
+        "today_pnl": round(today_pnl, 2),
+        "open_positions": open_count,
+        "latest_balance": round(snap["balance"], 2) if snap else 0,
+        "latest_equity": round(snap["equity"], 2) if snap else 0,
+        "max_drawdown": round(snap["drawdown_pct"], 2) if snap else 0,
+    }
+
+
+# Initialise on import
+init_db()

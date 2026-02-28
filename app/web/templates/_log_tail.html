@@ -1,0 +1,8 @@
+<section class="card">
+  <h2>Bot Log Tail</h2>
+  {% if log_text %}
+    <pre class="log-tail">{{ log_text }}</pre>
+  {% else %}
+    <p class="muted">No bot log output yet.</p>
+  {% endif %}
+</section>

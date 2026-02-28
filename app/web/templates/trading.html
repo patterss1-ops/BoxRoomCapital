@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="section-head">
+    <h2>Trading Operations</h2>
+    <p>Execution and risk controls. Use advanced sections for less frequent manual actions.</p>
+  </div>
+
+  <div class="action-row">
+    <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Mode
+        <select name="mode">
+          <option value="shadow" {% if default_mode == "shadow" %}selected{% endif %}>Shadow</option>
+          <option value="live" {% if default_mode == "live" %}selected{% endif %}>Live</option>
+        </select>
+      </label>
+      <button type="submit" class="btn">Start Bot</button>
+    </form>
+
+    <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?">
+      <button type="submit" class="btn danger">Stop Bot</button>
+    </form>
+
+    <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn secondary">Pause</button>
+    </form>
+
+    <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn secondary">Resume</button>
+    </form>
+
+    <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML">
+      <input type="hidden" name="mode" value="shadow" />
+      <button type="submit" class="btn ghost">Run Scan</button>
+    </form>
+
+    <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn ghost">Reconcile</button>
+    </form>
+  </div>
+</section>
+
+<details class="card" open>
+  <summary>Risk Controls</summary>
+  <div class="action-grid">
+    <form hx-post="/api/actions/kill-switch-enable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Enable kill switch? New entries will be blocked.">
+      <label>Reason
+        <input type="text" name="reason" value="Manual operator kill switch" />
+      </label>
+      <button type="submit" class="btn danger">Enable Kill Switch</button>
+    </form>
+
+    <form hx-post="/api/actions/kill-switch-disable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Disable kill switch and allow entries again?">
+      <label>Reason
+        <input type="text" name="reason" value="Manual clear from control plane" />
+      </label>
+      <button type="submit" class="btn">Disable Kill Switch</button>
+    </form>
+
+    <form hx-post="/api/actions/risk-throttle" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Throttle (%)
+        <input type="number" name="throttle_pct" min="10" max="100" value="100" />
+      </label>
+      <label>Reason
+        <input type="text" name="reason" value="Manual risk throttle" />
+      </label>
+      <button type="submit" class="btn secondary">Set Throttle</button>
+    </form>
+
+    <form hx-post="/api/actions/cooldown-set" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Ticker
+        <input type="text" name="ticker" placeholder="SPY" />
+      </label>
+      <label>Minutes
+        <input type="number" name="minutes" min="1" value="30" />
+      </label>
+      <label>Reason
+        <input type="text" name="reason" value="Manual market cooldown" />
+      </label>
+      <button type="submit" class="btn secondary">Set Cooldown</button>
+    </form>
+
+    <form hx-post="/api/actions/cooldown-clear" hx-target="#action-result" hx-swap="innerHTML">
+      <label>Ticker
+        <input type="text" name="ticker" placeholder="SPY" />
+      </label>
+      <label>Reason
+        <input type="text" name="reason" value="Manual cooldown clear" />
+      </label>
+      <button type="submit" class="btn">Clear Cooldown</button>
+    </form>
+  </div>
+</details>
+
+<details class="card">
+  <summary>Advanced Manual Position Actions</summary>
+  <div class="action-grid">
+    <form hx-post="/api/actions/close-spread" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Close spread now?">
+      <label>Spread ID
+        <input type="text" name="spread_id" placeholder="SPY:abcd1234" />
+      </label>
+      <label>Ticker
+        <input type="text" name="ticker" placeholder="SPY" />
+      </label>
+      <label>Reason
+        <input type="text" name="reason" value="Manual close from control plane" />
+      </label>
+      <button type="submit" class="btn danger">Close Spread</button>
+    </form>
+  </div>
+</details>
+
+<section class="grid-2">
+  <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div id="order-actions-panel" hx-get="/fragments/order-actions" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+</section>
+
+<section class="grid-2">
+  <div id="reconcile-panel" hx-get="/fragments/reconcile-report" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+</section>
+{% endblock %}

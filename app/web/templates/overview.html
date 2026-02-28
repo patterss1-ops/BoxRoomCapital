@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero-grid">
+  <article class="kpi-card">
+    <p class="kpi-label">Engine</p>
+    <p class="kpi-value {% if status.running %}up{% else %}down{% endif %}">{{ "RUNNING" if status.running else "STOPPED" }}</p>
+    <p class="kpi-foot">Mode: {{ status.mode }}{% if status.paused %} (paused){% endif %}</p>
+  </article>
+  <article class="kpi-card">
+    <p class="kpi-label">Kill Switch</p>
+    <p class="kpi-value {% if status.kill_switch_active %}down{% else %}up{% endif %}">{{ "ON" if status.kill_switch_active else "OFF" }}</p>
+    <p class="kpi-foot">Throttle: {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</p>
+  </article>
+  <article class="kpi-card">
+    <p class="kpi-label">Open Spreads</p>
+    <p class="kpi-value">{{ status.open_spreads or 0 }}</p>
+    <p class="kpi-foot">Cooldowns: {{ status.cooldowns_count or 0 }}</p>
+  </article>
+  <article class="kpi-card">
+    <p class="kpi-label">Total P&L</p>
+    <p class="kpi-value">GBP {{ "%.2f"|format(summary.total_pnl or 0) }}</p>
+    <p class="kpi-foot">Today: GBP {{ "%.2f"|format(summary.today_pnl or 0) }}</p>
+  </article>
+</section>
+
+<section class="card">
+  <div class="section-head">
+    <h2>Quick Actions</h2>
+    <p>Core controls in one place. Advanced controls live on Trading.</p>
+  </div>
+  <div class="action-row">
+    <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
+      <input type="hidden" name="mode" value="shadow" />
+      <button type="submit" class="btn">Start Shadow</button>
+    </form>
+    <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
+      <input type="hidden" name="mode" value="live" />
+      <button type="submit" class="btn">Start Live</button>
+    </form>
+    <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?">
+      <button type="submit" class="btn danger">Stop</button>
+    </form>
+    <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn secondary">Pause</button>
+    </form>
+    <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn secondary">Resume</button>
+    </form>
+    <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML">
+      <input type="hidden" name="mode" value="shadow" />
+      <button type="submit" class="btn ghost">Run Scan</button>
+    </form>
+    <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn ghost">Reconcile</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid-3">
+  <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+</section>
+
+<section class="grid-2">
+  <div id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
+</section>
+{% endblock %}

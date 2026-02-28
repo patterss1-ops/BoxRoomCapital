@@ -1,0 +1,253 @@
+<section class="grid-2">
+  <section class="card">
+    <h2>Option Discovery Summary</h2>
+    {% if option_summary %}
+      <table>
+        <thead>
+          <tr>
+            <th>Index</th>
+            <th>Expiry Type</th>
+            <th>Contracts</th>
+            <th>Last Seen</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in option_summary %}
+          <tr>
+            <td>{{ row.index_name or "-" }}</td>
+            <td>{{ row.expiry_type or "-" }}</td>
+            <td>{{ row.contracts }}</td>
+            <td>{{ row.last_seen }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No discovered contracts persisted yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="card">
+    <h2>Calibration Runs</h2>
+    {% if calibration_runs %}
+      <table>
+        <thead>
+          <tr>
+            <th>Run ID</th>
+            <th>Status</th>
+            <th>Scope</th>
+            <th>Samples</th>
+            <th>Overall</th>
+            <th>Created</th>
+            <th>View</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for run in calibration_runs %}
+          <tr>
+            <td class="code">{{ run.id[:8] }}</td>
+            <td><span class="badge {{ run.status }}">{{ run.status }}</span></td>
+            <td>{{ run.scope or "-" }}</td>
+            <td>{{ run.samples or 0 }}</td>
+            <td>{{ "%.3f"|format(run.overall_ratio) if run.overall_ratio is not none else "-" }}</td>
+            <td>{{ run.created_at }}</td>
+            <td>
+              <button
+                class="btn secondary"
+                hx-get="/fragments/calibration-run?run_id={{ run.id }}"
+                hx-target="#calibration-run-detail"
+                hx-swap="innerHTML"
+              >Open</button>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No calibration runs yet.</p>
+    {% endif %}
+  </section>
+</section>
+
+<section class="card">
+  <h2>Calibration Run Detail</h2>
+  <form hx-get="/fragments/calibration-run" hx-target="#calibration-run-detail" hx-swap="innerHTML">
+    <label>Run ID
+      <input type="text" name="run_id" value="{{ latest_calibration_run_id }}" />
+    </label>
+    <label>Index
+      <input type="text" name="index_name" placeholder="US 500" />
+    </label>
+    <label>Ticker
+      <input type="text" name="ticker" placeholder="SPY" />
+    </label>
+    <label>Expiry Type
+      <select name="expiry_type">
+        <option value="" selected>all</option>
+        <option value="daily">daily</option>
+        <option value="weekly">weekly</option>
+        <option value="monthly">monthly</option>
+      </select>
+    </label>
+    <label>Strike Min
+      <input type="number" name="strike_min" step="1" />
+    </label>
+    <label>Strike Max
+      <input type="number" name="strike_max" step="1" />
+    </label>
+    <label>Limit
+      <input type="number" name="limit" value="200" min="1" max="1000" />
+    </label>
+    <button type="submit" class="btn secondary">Filter</button>
+  </form>
+  <div
+    id="calibration-run-detail"
+    hx-get="/fragments/calibration-run?run_id={{ latest_calibration_run_id }}"
+    hx-trigger="load"
+    hx-swap="innerHTML"
+  ></div>
+</section>
+
+<section class="card">
+  <h2>Recent Option Contracts</h2>
+  {% if option_contracts %}
+    <table>
+      <thead>
+        <tr>
+          <th>Index</th>
+          <th>EPIC</th>
+          <th>Type</th>
+          <th>Strike</th>
+          <th>Expiry</th>
+          <th>Bid</th>
+          <th>Offer</th>
+          <th>Status</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for c in option_contracts %}
+        <tr>
+          <td>{{ c.index_name or "-" }}</td>
+          <td class="code">{{ c.epic }}</td>
+          <td>{{ c.option_type or "-" }}</td>
+          <td>{{ "%.0f"|format(c.strike) if c.strike is not none else "-" }}</td>
+          <td>{{ c.expiry or "-" }}</td>
+          <td>{{ c.bid if c.bid is not none else "-" }}</td>
+          <td>{{ c.offer if c.offer is not none else "-" }}</td>
+          <td>{{ c.status or "-" }}</td>
+          <td>{{ c.source or "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No contracts to display.</p>
+  {% endif %}
+</section>
+
+<section class="grid-2">
+  <section class="card">
+    <h2>Active Parameter Sets</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Status</th>
+          <th>Set ID</th>
+          <th>Version</th>
+          <th>Name</th>
+          <th>Updated</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="badge shadow">shadow</span></td>
+          <td class="code">{{ active_shadow_set.id[:8] if active_shadow_set else "-" }}</td>
+          <td>{{ active_shadow_set.version if active_shadow_set else "-" }}</td>
+          <td>{{ active_shadow_set.name if active_shadow_set else "-" }}</td>
+          <td>{{ active_shadow_set.updated_at if active_shadow_set else "-" }}</td>
+        </tr>
+        <tr>
+          <td><span class="badge staged_live">staged_live</span></td>
+          <td class="code">{{ active_staged_set.id[:8] if active_staged_set else "-" }}</td>
+          <td>{{ active_staged_set.version if active_staged_set else "-" }}</td>
+          <td>{{ active_staged_set.name if active_staged_set else "-" }}</td>
+          <td>{{ active_staged_set.updated_at if active_staged_set else "-" }}</td>
+        </tr>
+        <tr>
+          <td><span class="badge live">live</span></td>
+          <td class="code">{{ active_live_set.id[:8] if active_live_set else "-" }}</td>
+          <td>{{ active_live_set.version if active_live_set else "-" }}</td>
+          <td>{{ active_live_set.name if active_live_set else "-" }}</td>
+          <td>{{ active_live_set.updated_at if active_live_set else "-" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <h2>Promotion Audit</h2>
+    {% if strategy_promotions %}
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Set</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Actor</th>
+            <th>Ack</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in strategy_promotions %}
+          <tr>
+            <td>{{ row.timestamp }}</td>
+            <td class="code">{{ row.set_id[:8] }}</td>
+            <td>{{ row.from_status or "-" }}</td>
+            <td>{{ row.to_status }}</td>
+            <td>{{ row.actor }}</td>
+            <td>{{ row.acknowledgement }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="muted">No promotion actions yet.</p>
+    {% endif %}
+  </section>
+</section>
+
+<section class="card">
+  <h2>Parameter Set Versions</h2>
+  {% if strategy_sets %}
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Version</th>
+          <th>Status</th>
+          <th>Name</th>
+          <th>Source Run</th>
+          <th>Created</th>
+          <th>Notes</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in strategy_sets %}
+        <tr>
+          <td class="code">{{ row.id[:8] }}</td>
+          <td>{{ row.version }}</td>
+          <td><span class="badge {{ row.status }}">{{ row.status }}</span></td>
+          <td>{{ row.name }}</td>
+          <td class="code">{{ row.source_run_id[:8] if row.source_run_id else "-" }}</td>
+          <td>{{ row.created_at }}</td>
+          <td>{{ row.notes or "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No strategy parameter sets yet.</p>
+  {% endif %}
+</section>

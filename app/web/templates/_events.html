@@ -1,0 +1,16 @@
+<section class="card">
+  <h2>Bot Events</h2>
+  {% if events %}
+    <ul class="events">
+    {% for event in events %}
+      <li>
+        <span class="stamp">{{ event.timestamp }}</span>
+        <span class="headline">{{ event.icon }} {{ event.headline }}</span>
+        {% if event.detail %}<div class="detail">{{ event.detail }}</div>{% endif %}
+      </li>
+    {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">No events yet.</p>
+  {% endif %}
+</section>
