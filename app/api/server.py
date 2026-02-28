@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from dataclasses import asdict, is_dataclass
 import json
 import threading
@@ -51,18 +52,24 @@ control = BotControlService(PROJECT_ROOT)
 research = ResearchService(PROJECT_ROOT)
 
 
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI):
+    init_db()
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Trading Bot Control Plane", version="1.0.0")
+    app = FastAPI(
+        title="Trading Bot Control Plane",
+        version="1.0.0",
+        lifespan=app_lifespan,
+    )
     app.include_router(ledger_router)
     app.mount(
         "/static",
         StaticFiles(directory=str(PROJECT_ROOT / "app" / "web" / "static")),
         name="static",
     )
-
-    @app.on_event("startup")
-    def _startup():
-        init_db()
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -510,6 +517,7 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def overview_page(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "overview.html",
             _page_context(request=request, page_key="overview", title="Overview | Trading Bot"),
         )
@@ -517,6 +525,7 @@ def create_app() -> FastAPI:
     @app.get("/overview", response_class=HTMLResponse)
     def overview_page_alias(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "overview.html",
             _page_context(request=request, page_key="overview", title="Overview | Trading Bot"),
         )
@@ -524,6 +533,7 @@ def create_app() -> FastAPI:
     @app.get("/trading", response_class=HTMLResponse)
     def trading_page(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "trading.html",
             _page_context(request=request, page_key="trading", title="Trading | Trading Bot"),
         )
@@ -531,6 +541,7 @@ def create_app() -> FastAPI:
     @app.get("/research", response_class=HTMLResponse)
     def research_page(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "research_page.html",
             _page_context(request=request, page_key="research", title="Research | Trading Bot"),
         )
@@ -538,6 +549,7 @@ def create_app() -> FastAPI:
     @app.get("/incidents", response_class=HTMLResponse)
     def incidents_page(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "incidents_page.html",
             _page_context(request=request, page_key="incidents", title="Incidents & Jobs | Trading Bot"),
         )
@@ -545,6 +557,7 @@ def create_app() -> FastAPI:
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "settings_page.html",
             _page_context(request=request, page_key="settings", title="Settings | Trading Bot"),
         )
@@ -553,6 +566,7 @@ def create_app() -> FastAPI:
     def legacy_single_page(request: Request):
         payload = build_status_payload()
         return TEMPLATES.TemplateResponse(
+            request,
             "index.html",
             {
                 "request": request,
@@ -580,6 +594,7 @@ def create_app() -> FastAPI:
         latest = get_incidents(limit=1)
         latest_incident = latest[0] if latest else None
         return TEMPLATES.TemplateResponse(
+            request,
             "_top_strip.html",
             {
                 "request": request,
@@ -592,6 +607,7 @@ def create_app() -> FastAPI:
     def status_fragment(request: Request):
         payload = build_status_payload()
         return TEMPLATES.TemplateResponse(
+            request,
             "_status.html",
             {
                 "request": request,
@@ -604,6 +620,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/jobs", response_class=HTMLResponse)
     def jobs_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "_jobs.html",
             {"request": request, "jobs": get_jobs(limit=20)},
         )
@@ -619,6 +636,7 @@ def create_app() -> FastAPI:
         item = get_job(selected_id) if selected_id else None
         parsed_result = _parse_job_result(item.get("result", "")) if item else None
         return TEMPLATES.TemplateResponse(
+            request,
             "_job_detail.html",
             {
                 "request": request,
@@ -630,6 +648,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/events", response_class=HTMLResponse)
     def events_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "_events.html",
             {"request": request, "events": get_bot_events(limit=25)},
         )
@@ -637,6 +656,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/order-actions", response_class=HTMLResponse)
     def order_actions_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "_order_actions.html",
             {"request": request, "order_actions": get_order_actions(limit=25)},
         )
@@ -647,6 +667,7 @@ def create_app() -> FastAPI:
         selected_id = intent_id.strip() or (intents[0]["intent_id"] if intents else "")
         selected_detail = get_order_intent_detail(selected_id) if selected_id else None
         return TEMPLATES.TemplateResponse(
+            request,
             "_intent_audit.html",
             {
                 "request": request,
@@ -659,6 +680,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/broker-health", response_class=HTMLResponse)
     def broker_health_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "_broker_health.html",
             {
                 "request": request,
@@ -669,6 +691,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/incidents", response_class=HTMLResponse)
     def incidents_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "_incidents.html",
             {"request": request, "incidents": get_incidents(limit=25)},
         )
@@ -676,6 +699,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/control-actions", response_class=HTMLResponse)
     def control_actions_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
+            request,
             "_control_actions.html",
             {"request": request, "control_actions": get_control_actions(limit=25)},
         )
@@ -684,6 +708,7 @@ def create_app() -> FastAPI:
     def reconcile_report_fragment(request: Request):
         report = control.reconcile_report().get("report", {})
         return TEMPLATES.TemplateResponse(
+            request,
             "_reconcile_report.html",
             {"request": request, "report": report},
         )
@@ -693,6 +718,7 @@ def create_app() -> FastAPI:
         calibration_runs = get_calibration_runs(limit=20)
         latest_calibration_run_id = calibration_runs[0]["id"] if calibration_runs else ""
         return TEMPLATES.TemplateResponse(
+            request,
             "_research.html",
             {
                 "request": request,
@@ -760,6 +786,7 @@ def create_app() -> FastAPI:
             "max_ratio": max(ratios) if ratios else None,
         }
         return TEMPLATES.TemplateResponse(
+            request,
             "_calibration_run_detail.html",
             {
                 "request": request,
@@ -784,6 +811,7 @@ def create_app() -> FastAPI:
         except FileNotFoundError:
             log_text = ""
         return TEMPLATES.TemplateResponse(
+            request,
             "_log_tail.html",
             {"request": request, "log_text": log_text},
         )
