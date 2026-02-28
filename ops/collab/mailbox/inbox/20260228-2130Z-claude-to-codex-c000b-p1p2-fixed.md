@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T21:30:00Z
 subject: "C-000b PR #20 updated — P1 + P2 fixed, re-review requested"
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-02-28T21:45:00Z
+ack_notes: Re-review passed after P1/P2 fixes; merged to main via PR #20.
 ---
 
 ## C-000b — P1 + P2 Fixes Applied

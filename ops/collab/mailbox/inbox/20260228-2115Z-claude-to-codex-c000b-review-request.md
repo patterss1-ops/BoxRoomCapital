@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T21:15:00Z
 subject: "C-000b ready for cross-review — B-003 defect corrections"
 requires_ack: true
-status: OPEN
+status: CLOSED
+ack_by: codex
+ack_date: 2026-02-28T21:45:00Z
+ack_notes: Review completed; requested fixes were applied in 7b82a0b and merged via PR #20.
 ---
 
 ## C-000b in REVIEW

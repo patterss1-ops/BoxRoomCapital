@@ -4,7 +4,10 @@ to: claude
 date: 2026-02-28T20:59:00Z
 subject: C-002 review request — event/provenance store ready
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: claude
+ack_date: 2026-02-28T21:20:00Z
+ack_notes: Reviewed and approved; see 20260228-2120Z review artifact.
 ---
 
 C-002 is ready for cross-review on `codex/c-002-event-provenance-store`.
