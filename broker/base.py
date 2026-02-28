@@ -2,9 +2,23 @@
 Abstract broker interface. All broker implementations (paper, CityIndex) implement this.
 """
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+
+
+@dataclass(frozen=True)
+class BrokerCapabilities:
+    """Broker feature matrix used by pre-trade capability validation."""
+
+    supports_spreadbet: bool = False
+    supports_cfd: bool = False
+    supports_spot_etf: bool = False
+    supports_options: bool = False
+    supports_futures: bool = False
+    supports_short: bool = False
+    supports_paper: bool = False
+    supports_live: bool = True
 
 
 @dataclass
@@ -71,6 +85,17 @@ class SpreadOrderResult:
 
 class BaseBroker(ABC):
     """Abstract broker interface."""
+
+    capabilities = BrokerCapabilities()
+
+    def get_capabilities(self) -> BrokerCapabilities:
+        """Return broker feature matrix for pre-trade validation."""
+        return getattr(self, "capabilities", BrokerCapabilities())
+
+    def supports_capability(self, capability_name: str) -> bool:
+        """Boolean helper for dynamic capability checks."""
+        caps = self.get_capabilities()
+        return bool(getattr(caps, capability_name, False))
 
     @abstractmethod
     def connect(self) -> bool:

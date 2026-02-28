@@ -8,7 +8,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from broker.base import BaseBroker, OrderResult, Position, AccountInfo
+from broker.base import BaseBroker, BrokerCapabilities, OrderResult, Position, AccountInfo
 import config
 
 logger = logging.getLogger(__name__)
@@ -16,6 +16,13 @@ logger = logging.getLogger(__name__)
 
 class PaperBroker(BaseBroker):
     """Paper trading broker that tracks positions and P&L in memory + CSV."""
+
+    capabilities = BrokerCapabilities(
+        supports_spot_etf=True,
+        supports_short=True,
+        supports_paper=True,
+        supports_live=False,
+    )
 
     def __init__(self, initial_capital: float = None):
         self.initial_capital = initial_capital or config.PORTFOLIO["initial_capital"]
