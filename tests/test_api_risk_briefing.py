@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -82,7 +83,20 @@ def test_risk_briefing_fragment_renders_state_and_alert(monkeypatch):
     assert "Fund drawdown breached hard limit." in response.text
 
 
-def test_api_risk_briefing_default_payload_is_unavailable():
+def test_api_risk_briefing_default_payload_is_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "calculate_fund_nav",
+        lambda: SimpleNamespace(
+            total_nav=0.0,
+            total_cash=0.0,
+            total_positions_value=0.0,
+            daily_return_pct=None,
+            drawdown_pct=0.0,
+            report_date="2026-02-28",
+        ),
+    )
+
     with TestClient(server.app) as client:
         response = client.get("/api/risk/briefing")
 
@@ -91,6 +105,62 @@ def test_api_risk_briefing_default_payload_is_unavailable():
     assert body["ok"] is False
     assert body["state"] == "unavailable"
     assert body["alerts"]
+
+
+def test_build_risk_briefing_payload_maps_live_contract(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "calculate_fund_nav",
+        lambda: SimpleNamespace(
+            total_nav=125000.0,
+            total_cash=35000.0,
+            total_positions_value=90000.0,
+            daily_return_pct=-0.4,
+            drawdown_pct=-2.3,
+            report_date="2026-02-28",
+        ),
+    )
+    monkeypatch.setattr(
+        server,
+        "get_risk_briefing",
+        lambda **_: {
+            "generated_at": "2026-02-28T20:15:00Z",
+            "status": "AMBER",
+            "fund_nav": 125000.0,
+            "day_pnl": -500.0,
+            "drawdown_pct": -2.3,
+            "gross_exposure_pct": 48.1,
+            "net_exposure_pct": 22.2,
+            "cash_buffer_pct": 28.0,
+            "open_risk_pct": 48.1,
+            "limits": [{"rule": "max_heat_pct", "current": 48.1}],
+            "alerts": [
+                {
+                    "severity": "warning",
+                    "code": "HEAT_ELEVATED",
+                    "message": "Heat elevated",
+                    "action": "reduce exposure",
+                }
+            ],
+        },
+    )
+
+    payload = server.build_risk_briefing_payload()
+    assert payload["ok"] is True
+    assert payload["state"] == "attention"
+    assert payload["summary"]["fund_nav"] == 125000.0
+    assert payload["alerts"][0]["severity"] == "warn"
+
+
+def test_build_risk_briefing_payload_handles_provider_error(monkeypatch):
+    def _raise():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(server, "calculate_fund_nav", _raise)
+    payload = server.build_risk_briefing_payload()
+    assert payload["ok"] is False
+    assert payload["state"] == "unavailable"
+    assert payload["alerts"][0]["code"] == "RISK_DATA_ERROR"
 
 
 def test_overview_page_includes_risk_briefing_panel():
