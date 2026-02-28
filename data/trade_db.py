@@ -149,6 +149,30 @@ def init_db(db_path: str = DB_PATH):
         CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at);
         CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);
 
+        CREATE TABLE IF NOT EXISTS research_events (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_ref TEXT,
+            retrieved_at TEXT NOT NULL,
+            event_timestamp TEXT,
+            symbol TEXT,
+            headline TEXT,
+            detail TEXT,
+            confidence REAL,
+            provenance_descriptor TEXT NOT NULL,
+            provenance_hash TEXT NOT NULL,
+            payload TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_research_events_created_at ON research_events(created_at);
+        CREATE INDEX IF NOT EXISTS idx_research_events_retrieved_at ON research_events(retrieved_at);
+        CREATE INDEX IF NOT EXISTS idx_research_events_event_type ON research_events(event_type);
+        CREATE INDEX IF NOT EXISTS idx_research_events_source ON research_events(source);
+        CREATE INDEX IF NOT EXISTS idx_research_events_prov_hash ON research_events(provenance_hash);
+
         CREATE TABLE IF NOT EXISTS order_actions (
             id TEXT PRIMARY KEY,
             created_at TEXT NOT NULL,
@@ -1288,6 +1312,95 @@ def get_job(job_id: str, db_path: str = DB_PATH) -> Optional[dict]:
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ─── Research event store (Phase C) ──────────────────────────────────────
+
+def upsert_research_event(
+    event_id: str,
+    event_type: str,
+    source: str,
+    retrieved_at: str,
+    provenance_descriptor: str,
+    provenance_hash: str,
+    source_ref: Optional[str] = None,
+    event_timestamp: Optional[str] = None,
+    symbol: Optional[str] = None,
+    headline: Optional[str] = None,
+    detail: Optional[str] = None,
+    confidence: Optional[float] = None,
+    payload: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Insert or update one normalized research event row."""
+    now = datetime.utcnow().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO research_events
+           (id, created_at, updated_at, event_type, source, source_ref, retrieved_at,
+            event_timestamp, symbol, headline, detail, confidence,
+            provenance_descriptor, provenance_hash, payload)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET
+             updated_at=excluded.updated_at,
+             event_type=excluded.event_type,
+             source=excluded.source,
+             source_ref=excluded.source_ref,
+             retrieved_at=excluded.retrieved_at,
+             event_timestamp=excluded.event_timestamp,
+             symbol=excluded.symbol,
+             headline=excluded.headline,
+             detail=excluded.detail,
+             confidence=excluded.confidence,
+             provenance_descriptor=excluded.provenance_descriptor,
+             provenance_hash=excluded.provenance_hash,
+             payload=excluded.payload""",
+        (
+            event_id,
+            now,
+            now,
+            event_type,
+            source,
+            source_ref,
+            retrieved_at,
+            event_timestamp,
+            symbol,
+            headline,
+            detail,
+            confidence,
+            provenance_descriptor,
+            provenance_hash,
+            payload,
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_research_events(
+    limit: int = 100,
+    event_type: Optional[str] = None,
+    source: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get recent research events with optional source/event_type filters."""
+    conn = get_conn(db_path)
+    query = "SELECT * FROM research_events"
+    where: list[str] = []
+    params: list[Any] = []
+    if event_type:
+        where.append("event_type=?")
+        params.append(event_type)
+    if source:
+        where.append("source=?")
+        params.append(source)
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY retrieved_at DESC, created_at DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ─── Order action state machine (execution reliability) ──────────────────

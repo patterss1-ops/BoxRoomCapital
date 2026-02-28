@@ -30,10 +30,10 @@ Defines file-scope locks for parallel execution.
 | B-003 | claude | exclusive | `risk/portfolio_risk.py`, `fund/nav.py`, `fund/report.py`, `data/trade_db.py` (fund/risk tables only), `tests/test_portfolio_risk.py`, `tests/test_fund_nav.py`, `tests/test_fund_report.py` | B-004 | B-003 then B-004 | released | 2026-02-28T20:36:00Z |
 | B-004 | codex | exclusive | `app/api/server.py` (risk briefing routes only), `app/web/templates/overview.html`, `app/web/templates/_risk_briefing.html`, `tests/test_api_risk_briefing.py` | B-001, B-003 | B-001/B-003 then B-004 | released | 2026-02-28T20:36:00Z |
 | B-005 | codex | emergency | `strategies/gtaa.py`, `strategies/dual_momentum.py`, `tests/test_strategy_gtaa.py`, `tests/test_strategy_dual_momentum.py`, `tests/test_strategies.py` | B-002 | B-005 hotfix first, then B-003 | released | 2026-02-28T20:36:00Z |
-| C-000a | codex | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/mailbox/inbox/**` | none | n/a | claimed | 2026-02-28T20:36:00Z |
+| C-000a | codex | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/mailbox/inbox/**` | none | n/a | released | 2026-02-28T20:55:00Z |
 | C-000b | claude | exclusive | `fund/report.py`, `risk/portfolio_risk.py`, `tests/test_fund_report.py`, `tests/test_portfolio_risk.py` | C-002 | C-000b then C-002 | unclaimed | 2026-02-28T20:36:00Z |
 | C-001 | claude | exclusive | `app/engine/orchestrator.py`, `execution/signal_adapter.py`, `tests/**orchestrator**`, `tests/**signal_adapter**` | C-003 | C-001 then C-003 | unclaimed | 2026-02-28T20:36:00Z |
-| C-002 | codex | shared | `intelligence/event_store.py`, `data/trade_db.py` (event/provenance tables only), `tests/**event_store**` | C-000b | C-000b then C-002 | unclaimed | 2026-02-28T20:36:00Z |
+| C-002 | codex | shared | `intelligence/event_store.py`, `data/trade_db.py` (event/provenance tables only), `tests/**event_store**` | C-000b | C-000b then C-002 | claimed | 2026-02-28T20:55:00Z |
 | C-003 | claude | exclusive | `app/engine/scheduler.py`, `tests/**scheduler**` | C-001 | C-001 then C-003 | unclaimed | 2026-02-28T20:36:00Z |
 | C-004 | codex | exclusive | `fund/promotion_gate.py`, `app/api/server.py` (promotion endpoints only), `app/web/templates/**promotion**`, `tests/**promotion**` | C-002 | C-002 then C-004 | unclaimed | 2026-02-28T20:36:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
