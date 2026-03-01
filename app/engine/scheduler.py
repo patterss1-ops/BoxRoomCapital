@@ -352,32 +352,14 @@ class DailyWorkflowScheduler:
             self._persist_state()
 
     def _dispatch_window(self, window: ScheduleWindow) -> SchedulerRunResult:
-        """Run the dispatch function for one schedule window."""
+        """Run the dispatch function for one schedule window.
+
+        The entire body is wrapped in try/except so that transient DB failures
+        (e.g. SQLite lock on create_job / log_event) cannot crash the scheduler
+        thread — they are captured in the result and logged.
+        """
         job_id = uuid.uuid4().hex[:12]
         started_at = datetime.utcnow().isoformat()
-
-        logger.info(
-            "Dispatching window '%s' — job %s (dry_run=%s)",
-            window.name, job_id, self._dry_run,
-        )
-
-        # Create job record
-        create_job(
-            job_id=job_id,
-            job_type="orchestration_cycle",
-            status="running",
-            mode="shadow" if self._dry_run else "live",
-            detail=f"Scheduled: {window.name}",
-            db_path=self._db_path,
-        )
-
-        log_event(
-            category="SCHEDULE",
-            headline=f"Orchestration dispatch: {window.name}",
-            detail=f"job_id={job_id}, dry_run={self._dry_run}",
-            db_path=self._db_path,
-        )
-
         result = SchedulerRunResult(
             window_name=window.name,
             job_id=job_id,
@@ -385,6 +367,28 @@ class DailyWorkflowScheduler:
         )
 
         try:
+            logger.info(
+                "Dispatching window '%s' — job %s (dry_run=%s)",
+                window.name, job_id, self._dry_run,
+            )
+
+            # Create job record
+            create_job(
+                job_id=job_id,
+                job_type="orchestration_cycle",
+                status="running",
+                mode="shadow" if self._dry_run else "live",
+                detail=f"Scheduled: {window.name}",
+                db_path=self._db_path,
+            )
+
+            log_event(
+                category="SCHEDULE",
+                headline=f"Orchestration dispatch: {window.name}",
+                detail=f"job_id={job_id}, dry_run={self._dry_run}",
+                db_path=self._db_path,
+            )
+
             orch_result = self._dispatch_fn(
                 window_name=window.name,
                 db_path=self._db_path,
@@ -428,18 +432,25 @@ class DailyWorkflowScheduler:
 
         except Exception as exc:
             result.error_message = str(exc)
-            update_job(
-                job_id=job_id,
-                status="failed",
-                error=str(exc),
-                db_path=self._db_path,
-            )
-            log_event(
-                category="ERROR",
-                headline=f"Orchestration failed: {window.name}",
-                detail=str(exc),
-                db_path=self._db_path,
-            )
+            # Best-effort DB updates — if these also fail, just log
+            try:
+                update_job(
+                    job_id=job_id,
+                    status="failed",
+                    error=str(exc),
+                    db_path=self._db_path,
+                )
+            except Exception:
+                logger.warning("Could not update job %s to failed", job_id)
+            try:
+                log_event(
+                    category="ERROR",
+                    headline=f"Orchestration failed: {window.name}",
+                    detail=str(exc),
+                    db_path=self._db_path,
+                )
+            except Exception:
+                logger.warning("Could not log error event for %s", window.name)
             logger.error(
                 "Window '%s' dispatch failed: %s", window.name, exc, exc_info=True,
             )
@@ -483,9 +494,10 @@ class DailyWorkflowScheduler:
                 return
             state = json.loads(raw)
             saved_date = state.get("date")
-            if saved_date == date.today().isoformat():
+            utc_today = datetime.utcnow().date()
+            if saved_date == utc_today.isoformat():
                 self._fired_today = set(state.get("fired", []))
-                self._today = date.today()
+                self._today = utc_today
                 logger.info(
                     "Recovered scheduler state: %d windows already fired today",
                     len(self._fired_today),

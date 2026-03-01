@@ -583,14 +583,14 @@ class TestTriggerNow:
 
 class TestStatePersistence:
     def test_persist_and_recover_same_day(self, db):
-        """State round-trips through DB when same day."""
+        """State round-trips through DB when same day (UTC)."""
         dispatch = make_dispatch_fn()
         sched = DailyWorkflowScheduler(
             dispatch_fn=dispatch, db_path=db, tick_interval=5.0,
         )
 
-        today = date.today()
-        sched._today = today
+        utc_today = datetime.utcnow().date()
+        sched._today = utc_today
         sched._fired_today = {"window_a", "window_b"}
         sched._persist_state()
 
@@ -601,14 +601,35 @@ class TestStatePersistence:
         sched2._recover_state()
 
         assert sched2._fired_today == {"window_a", "window_b"}
-        assert sched2._today == today
+        assert sched2._today == utc_today
+
+    def test_recover_uses_utc_not_local(self, db):
+        """P1 regression: recovery must compare against UTC date, not local."""
+        dispatch = make_dispatch_fn()
+
+        # Persist state with today's UTC date
+        utc_today = datetime.utcnow().date()
+        state = json.dumps({
+            "date": utc_today.isoformat(),
+            "fired": ["utc_window"],
+        })
+        save_strategy_state(_state_key("fired_today"), state, db_path=db)
+
+        sched = DailyWorkflowScheduler(
+            dispatch_fn=dispatch, db_path=db, tick_interval=5.0,
+        )
+        sched._recover_state()
+
+        # Must match since we used UTC date for both persist and recover
+        assert sched._fired_today == {"utc_window"}
+        assert sched._today == utc_today
 
     def test_stale_state_ignored(self, db):
         """State from a previous day is not loaded."""
         dispatch = make_dispatch_fn()
         # Manually save state with yesterday's date
         from datetime import timedelta
-        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        yesterday = (datetime.utcnow().date() - timedelta(days=1)).isoformat()
         state = json.dumps({"date": yesterday, "fired": ["old_window"]})
         save_strategy_state(_state_key("fired_today"), state, db_path=db)
 
@@ -888,3 +909,70 @@ class TestEventLogging:
 
         assert len(events) >= 1
         assert "boom" in events[0]["detail"]
+
+
+# ─── P1 regression: DB failure resilience ─────────────────────────────────
+
+class TestDBFailureResilience:
+    def test_create_job_failure_does_not_crash_dispatch(self, db):
+        """P1 regression: transient DB failure in create_job must not kill
+        the scheduler thread — _dispatch_window must catch it."""
+        dispatch = make_dispatch_fn()
+        window = ScheduleWindow(name="test", hour=14, minute=30, weekdays=frozenset())
+        sched = DailyWorkflowScheduler(
+            dispatch_fn=dispatch, schedule=[window],
+            db_path=db, tick_interval=5.0,
+        )
+
+        with patch("app.engine.scheduler.create_job", side_effect=OSError("DB locked")):
+            # Must NOT raise — should be captured in result
+            result = sched._dispatch_window(window)
+
+        assert result.success is False
+        assert "DB locked" in result.error_message
+        # Dispatch fn should NOT have been called since create_job failed first
+        dispatch.assert_not_called()
+
+    def test_log_event_failure_does_not_crash_dispatch(self, db):
+        """P1 regression: transient failure in pre-dispatch log_event must
+        not crash the scheduler thread."""
+        dispatch = make_dispatch_fn()
+        window = ScheduleWindow(name="test", hour=14, minute=30, weekdays=frozenset())
+        sched = DailyWorkflowScheduler(
+            dispatch_fn=dispatch, schedule=[window],
+            db_path=db, tick_interval=5.0,
+        )
+
+        call_count = 0
+
+        def failing_log_event(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # Fail on the first call (pre-dispatch), succeed on subsequent
+            if call_count == 1:
+                raise OSError("DB locked")
+
+        with patch("app.engine.scheduler.log_event", side_effect=failing_log_event):
+            result = sched._dispatch_window(window)
+
+        assert result.success is False
+        assert "DB locked" in result.error_message
+
+    def test_dispatch_survives_and_thread_continues(self, db):
+        """P1 regression: after a DB failure in one dispatch, the scheduler
+        loop must continue ticking — it must not exit permanently."""
+        dispatch = make_dispatch_fn()
+        window = ScheduleWindow(name="test", hour=14, minute=30, weekdays=frozenset())
+        sched = DailyWorkflowScheduler(
+            dispatch_fn=dispatch, schedule=[window],
+            db_path=db, tick_interval=5.0,
+        )
+
+        # First dispatch fails due to create_job error
+        with patch("app.engine.scheduler.create_job", side_effect=OSError("locked")):
+            result1 = sched._dispatch_window(window)
+        assert result1.success is False
+
+        # Second dispatch succeeds — proves the scheduler is still alive
+        result2 = sched._dispatch_window(window)
+        assert result2.success is True
