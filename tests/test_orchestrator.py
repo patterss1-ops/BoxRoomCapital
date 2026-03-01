@@ -672,6 +672,45 @@ class TestRouterIntegration:
         assert len(result.intents_created) == 1
         assert len(result.intents_rejected) == 0
 
+    def test_router_resolution_applies_to_intent_payload(self, db):
+        """Allowed router resolution must override slot broker/account in payload."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from broker.paper import PaperBroker
+        from execution.policy.capability_policy import RouteAccountType
+        from execution.router import AccountRouter, RouteConfigEntry
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            # Deliberately differs from router target.
+            config=_make_slot(account_type="SPREADBET", broker_target="ig"),
+            tickers=["SPY"],
+        )
+
+        router = AccountRouter(
+            route_map={
+                "default": RouteConfigEntry(
+                    broker_name="paper",
+                    account_type=RouteAccountType.PAPER,
+                )
+            },
+            brokers={"paper": PaperBroker()},
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            router=router,
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+        payload = result.intents_created[0]
+        assert payload["broker_target"] == "paper"
+        assert payload["account_type"] == "PAPER"
+
 
 # ─── Universe Data Passthrough Tests ──────────────────────────────────────
 

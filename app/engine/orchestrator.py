@@ -367,6 +367,11 @@ def _process_one_signal(
                 route_decision.reason_code, route_decision.message,
             )
             return
+        # Apply resolved broker/account lane so persisted payload matches
+        # the deterministic routing decision.
+        if route_decision.resolution is not None:
+            intent.account_type = route_decision.resolution.account_type
+            intent.broker_target = route_decision.resolution.broker_name
 
     # ── Pre-trade risk gate (entries only — exits always pass) ───────────
     if risk_ctx_dict is not None and not is_exit:
