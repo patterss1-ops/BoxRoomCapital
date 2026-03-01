@@ -234,33 +234,6 @@ class PortfolioManager:
 
         return False
 
-
-def resolve_portfolio_equity(
-    broker: BaseBroker,
-    db_path: str = DB_PATH,
-) -> float:
-    """
-    Resolve the best available equity for sizing/risk calculations.
-
-    Priority:
-      1. Live broker account equity (if available and > 0)
-      2. Ledger-derived live equity (latest synced cash + positions)
-      3. Static initial capital fallback
-    """
-    fallback = float(config.PORTFOLIO["initial_capital"])
-    try:
-        acct = broker.get_account_info()
-        if float(acct.equity) > 0:
-            return float(acct.equity)
-    except Exception:
-        pass
-
-    try:
-        from execution.reconciler import compute_live_equity
-        return float(compute_live_equity(default_equity=fallback, db_path=db_path))
-    except Exception:
-        return fallback
-
     def save_snapshot(self):
         """Save end-of-day snapshot to database."""
         try:
@@ -299,3 +272,30 @@ def resolve_portfolio_equity(
                 )
 
         return "\n".join(lines)
+
+
+def resolve_portfolio_equity(
+    broker: BaseBroker,
+    db_path: str = DB_PATH,
+) -> float:
+    """
+    Resolve the best available equity for sizing/risk calculations.
+
+    Priority:
+      1. Live broker account equity (if available and > 0)
+      2. Ledger-derived live equity (latest synced cash + positions)
+      3. Static initial capital fallback
+    """
+    fallback = float(config.PORTFOLIO["initial_capital"])
+    try:
+        acct = broker.get_account_info()
+        if float(acct.equity) > 0:
+            return float(acct.equity)
+    except Exception:
+        pass
+
+    try:
+        from execution.reconciler import compute_live_equity
+        return float(compute_live_equity(default_equity=fallback, db_path=db_path))
+    except Exception:
+        return fallback

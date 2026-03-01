@@ -9,6 +9,7 @@ from broker.base import AccountInfo, BaseBroker, Position
 from data import trade_db
 from execution import ledger
 from execution.reconciler import (
+    _position_to_ledger_row,
     account_info_equity,
     compute_live_equity,
     sync_broker_snapshot,
@@ -109,12 +110,33 @@ class TestReconciler:
         assert len(cash) == 1
         assert float(cash[0]["balance"]) == 10_000.0
 
-        # market_value from stub position: 2 * 500 = 1000
-        assert compute_live_equity(default_equity=0.0, db_path=db) == 11_000.0
+        # market_value includes unrealised PnL estimate: (2 * 500) + 100 = 1100
+        assert compute_live_equity(default_equity=0.0, db_path=db) == 11_100.0
+
+        fund_nav = ledger.get_nav_history(level="fund", level_id="fund", days=1, db_path=db)
+        assert len(fund_nav) == 1
+        assert float(fund_nav[0]["cash"]) == 10_000.0
+        assert float(fund_nav[0]["positions_value"]) == 1_100.0
+        assert float(fund_nav[0]["net_liquidation"]) == 11_100.0
 
     def test_compute_live_equity_falls_back_when_no_ledger_data(self, tmp_path):
         db = self._init_db(tmp_path)
         assert compute_live_equity(default_equity=12_345.0, db_path=db) == 12_345.0
+
+    def test_compute_live_equity_closes_connection_on_query_error(self, monkeypatch):
+        closed = {"value": False}
+
+        class BrokenConn:
+            def execute(self, *_args, **_kwargs):
+                raise RuntimeError("boom")
+
+            def close(self):
+                closed["value"] = True
+
+        monkeypatch.setattr("execution.reconciler.get_conn", lambda _db_path: BrokenConn())
+        result = compute_live_equity(default_equity=7_654.0, db_path="ignored.db")
+        assert result == 7_654.0
+        assert closed["value"] is True
 
     def test_sync_broker_snapshot_raises_on_connect_failure(self, tmp_path):
         db = self._init_db(tmp_path)
@@ -142,3 +164,31 @@ class TestReconciler:
         assert account_info_equity(None, fallback=1000.0) == 1000.0
         assert account_info_equity(AccountInfo(0.0, 0.0, 0.0, 0), fallback=1000.0) == 1000.0
         assert account_info_equity(AccountInfo(0.0, 5000.0, 0.0, 0), fallback=1000.0) == 5000.0
+
+    def test_position_market_value_estimate_uses_unrealised_pnl(self):
+        long_pos = Position(
+            ticker="SPY",
+            direction="long",
+            size=2.0,
+            entry_price=500.0,
+            entry_time=datetime.utcnow(),
+            strategy="gtaa",
+            unrealised_pnl=100.0,
+            deal_id="L-1",
+        )
+        short_pos = Position(
+            ticker="QQQ",
+            direction="short",
+            size=2.0,
+            entry_price=500.0,
+            entry_time=datetime.utcnow(),
+            strategy="dm",
+            unrealised_pnl=100.0,
+            deal_id="S-1",
+        )
+
+        long_row = _position_to_ledger_row(long_pos, sleeve="core", currency="GBP")
+        short_row = _position_to_ledger_row(short_pos, sleeve="core", currency="GBP")
+
+        assert long_row["market_value"] == 1_100.0
+        assert short_row["market_value"] == 900.0

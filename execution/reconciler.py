@@ -101,14 +101,27 @@ def sync_broker_snapshot(
     )
 
     # Keep a fund-level snapshot available for risk/equity lookups.
-    fund_equity = compute_live_equity(default_equity=0.0, db_path=db_path)
+    fund_cash = 0.0
+    fund_positions_value = 0.0
+    fund_equity = 0.0
+    conn = None
+    try:
+        conn = get_conn(db_path)
+        fund_cash, fund_positions_value = _read_live_components(conn)
+        fund_equity = fund_cash + fund_positions_value
+    except Exception as exc:
+        logger.warning("Failed to compute fund snapshot decomposition: %s", exc)
+    finally:
+        if conn is not None:
+            conn.close()
+
     if fund_equity > 0:
         ledger.save_nav_snapshot(
             level="fund",
             level_id="fund",
             net_liquidation=fund_equity,
-            cash=0.0,
-            positions_value=0.0,
+            cash=fund_cash,
+            positions_value=fund_positions_value,
             currency=acct.currency,
             db_path=db_path,
         )
@@ -133,8 +146,57 @@ def compute_live_equity(default_equity: float, db_path: str = DB_PATH) -> float:
 
     Falls back to ``default_equity`` when ledger data is unavailable.
     """
-    conn = get_conn(db_path)
+    conn = None
+    try:
+        conn = get_conn(db_path)
+        total_cash, positions_value = _read_live_components(conn)
+        live_equity = total_cash + positions_value
+        if live_equity > 0:
+            return live_equity
+    except Exception as exc:
+        logger.warning("Failed to compute live equity from ledger: %s", exc)
+    finally:
+        if conn is not None:
+            conn.close()
 
+    return float(default_equity)
+
+
+def _position_to_ledger_row(
+    position: Position,
+    sleeve: Optional[str],
+    currency: str,
+) -> dict[str, object]:
+    quantity = float(position.size or 0.0)
+    avg_cost = float(position.entry_price or 0.0)
+    unrealised_pnl = float(position.unrealised_pnl or 0.0)
+
+    # Estimate mark-to-market notional from entry notional + current unrealised PnL.
+    # For shorts, unrealised PnL has the opposite sign impact on notional.
+    direction = str(position.direction or "").lower()
+    if quantity <= 0:
+        market_value = 0.0
+    elif direction == "short":
+        market_value = max((quantity * avg_cost) - unrealised_pnl, 0.0)
+    else:
+        market_value = max((quantity * avg_cost) + unrealised_pnl, 0.0)
+
+    return {
+        "ticker": str(position.ticker),
+        "direction": str(position.direction),
+        "quantity": quantity,
+        "avg_cost": avg_cost,
+        "market_value": market_value,
+        "unrealised_pnl": unrealised_pnl,
+        "currency": currency,
+        "strategy": str(position.strategy or ""),
+        "sleeve": sleeve,
+        "con_id": str(position.deal_id or "") or None,
+    }
+
+
+def _read_live_components(conn) -> tuple[float, float]:
+    """Return latest (cash, positions_value) totals across active broker accounts."""
     pos_row = conn.execute(
         """SELECT COALESCE(SUM(CAST(bp.market_value AS REAL)), 0) as total_positions
            FROM broker_positions bp
@@ -156,35 +218,7 @@ def compute_live_equity(default_equity: float, db_path: str = DB_PATH) -> float:
            WHERE ba.is_active = 1"""
     ).fetchone()
     total_cash = float(cash_row["total_cash"]) if cash_row else 0.0
-    conn.close()
-
-    live_equity = total_cash + positions_value
-    if live_equity > 0:
-        return live_equity
-    return float(default_equity)
-
-
-def _position_to_ledger_row(
-    position: Position,
-    sleeve: Optional[str],
-    currency: str,
-) -> dict[str, object]:
-    quantity = float(position.size or 0.0)
-    avg_cost = float(position.entry_price or 0.0)
-    market_value = quantity * avg_cost
-
-    return {
-        "ticker": str(position.ticker),
-        "direction": str(position.direction),
-        "quantity": quantity,
-        "avg_cost": avg_cost,
-        "market_value": market_value,
-        "unrealised_pnl": float(position.unrealised_pnl or 0.0),
-        "currency": currency,
-        "strategy": str(position.strategy or ""),
-        "sleeve": sleeve,
-        "con_id": str(position.deal_id or "") or None,
-    }
+    return total_cash, positions_value
 
 
 def account_info_equity(acct: Optional[AccountInfo], fallback: float) -> float:
