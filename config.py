@@ -422,6 +422,57 @@ OPTIONS_SAFETY = {
     "max_contracts_per_trade": 20,    # Hard cap
 }
 
+# ─── STRATEGY SLOTS (D-001) ────────────────────────────────────────────────
+# Config-driven strategy slot definitions for the multi-strategy orchestrator.
+# Each slot binds a strategy class to tickers, a portfolio sleeve, broker target,
+# account type, and risk tags.  The pipeline module parses these into StrategySlot
+# objects consumed by the orchestrator (C-001) and scheduler (C-003).
+#
+# Fields:
+#   id              — Unique slot identifier (e.g. "gtaa_isa")
+#   strategy_class  — Registry key matching a registered BaseStrategy subclass
+#   strategy_version— Semver string for audit/provenance
+#   params          — Dict of constructor params (merged with strategy defaults)
+#   sleeve          — Portfolio sleeve name for risk/reporting attribution
+#   account_type    — Account routing lane: ISA, GIA, SPREADBET, PAPER
+#   broker_target   — Target broker: ig, ibkr, paper
+#   tickers         — List of ticker symbols this slot trades
+#   base_qty        — Base position quantity (scaled by signal.size_multiplier)
+#   risk_tags       — List of risk tag strings for pre-trade risk gate
+#   requirements    — Dict of StrategyRequirements fields (capability checks)
+#   enabled         — Boolean: False skips this slot entirely
+
+STRATEGY_SLOTS = [
+    {
+        "id": "gtaa_isa",
+        "strategy_class": "GTAAStrategy",
+        "strategy_version": "1.0",
+        "params": GTAA_PARAMS,
+        "sleeve": "sleeve_6_rotation",
+        "account_type": "ISA",
+        "broker_target": "ibkr",
+        "tickers": ["SPY", "EFA", "IEF", "VNQ", "DBC"],
+        "base_qty": 1.0,
+        "risk_tags": ["trend_following", "monthly_rebalance"],
+        "requirements": {"requires_spot_etf": True},
+        "enabled": True,
+    },
+    {
+        "id": "dual_momentum_isa",
+        "strategy_class": "DualMomentumStrategy",
+        "strategy_version": "1.0",
+        "params": DUAL_MOMENTUM_PARAMS,
+        "sleeve": "sleeve_6_rotation",
+        "account_type": "ISA",
+        "broker_target": "ibkr",
+        "tickers": ["SPY", "EFA", "AGG"],
+        "base_qty": 1.0,
+        "risk_tags": ["momentum", "monthly_rebalance"],
+        "requirements": {"requires_spot_etf": True},
+        "enabled": True,
+    },
+]
+
 # ─── TRADINGVIEW WEBHOOK INTAKE ────────────────────────────────────────────
 
 TRADINGVIEW_WEBHOOK_TOKEN = os.getenv("TRADINGVIEW_WEBHOOK_TOKEN", "")
