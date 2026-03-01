@@ -37,10 +37,10 @@ Defines file-scope locks for parallel execution.
 | C-002 | codex | shared | `intelligence/event_store.py`, `data/trade_db.py` (event/provenance tables only), `tests/**event_store**` | C-000b | C-000b then C-002 | released | 2026-03-01T15:05:31Z |
 | C-003 | claude | exclusive | `app/engine/scheduler.py`, `tests/**scheduler**` | C-001 | C-001 then C-003 | released | 2026-03-01T15:05:31Z |
 | C-004 | codex | exclusive | `fund/promotion_gate.py`, `app/api/server.py` (promotion endpoints only), `app/web/templates/**promotion**`, `tests/**promotion**` | C-002 | C-002 then C-004 | released | 2026-03-01T15:05:31Z |
-| D-001 | claude | exclusive | `app/engine/registry.py`, `app/engine/orchestrator.py`, `app/engine/scheduler.py`, `tests/**registry**`, `tests/**scheduler**`, `tests/**orchestrator**` | D-002 | D-001 before D-003; may run parallel to D-002 if scopes stay disjoint | unclaimed | 2026-03-01T15:29:51Z |
-| D-002 | codex | exclusive | `execution/dispatcher.py`, `data/order_intent_store.py`, `tests/test_dispatcher.py`, `tests/test_order_intent_lifecycle.py` | D-001 | D-002 before D-003/D-004 wiring | claimed | 2026-03-01T15:29:51Z |
-| D-003 | tbd | shared | `execution/**reconcile**`, `portfolio/manager.py`, `fund/nav.py`, `risk/**`, `tests/**reconcile**`, `tests/**equity**` | D-001, D-002 | D-001 and D-002 must merge first | unclaimed | 2026-03-01T15:29:51Z |
-| D-004 | tbd | shared | `tests/test_e2e_pipeline.py`, `notifications.py`, `app/api/server.py` (alerts surfaces only) | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | unclaimed | 2026-03-01T15:29:51Z |
+| D-001 | claude | exclusive | `config.py` (STRATEGY_SLOTS), `app/engine/pipeline.py`, `tests/test_pipeline.py` | D-002 | D-001 before D-003; may run parallel to D-002 if scopes stay disjoint | released | 2026-03-01T20:50:50Z |
+| D-002 | codex | exclusive | `execution/dispatcher.py`, `data/order_intent_store.py`, `tests/test_dispatcher.py`, `tests/test_order_intent_lifecycle.py` | D-001 | D-002 before D-003/D-004 wiring | released | 2026-03-01T20:50:33Z |
+| D-003 | codex | exclusive | `execution/reconciler.py`, `portfolio/manager.py`, `tests/test_reconciler.py`, `tests/test_portfolio_manager_live_equity.py` | D-001, D-002 | D-002 first; D-003 avoids D-001 scope overlap | released | 2026-03-01T20:54:08Z |
+| D-004 | claude | shared | `tests/test_e2e_pipeline.py`, `notifications.py`, `app/api/server.py` (alerts surfaces only) | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | claimed | 2026-03-01T20:56:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
 
 ## Claim protocol
