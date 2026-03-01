@@ -401,6 +401,49 @@ def get_order_intents(
     return items
 
 
+def get_dispatchable_order_intents(
+    limit: int = 100,
+    db_path: str = DB_PATH,
+) -> list[dict[str, Any]]:
+    """
+    Get queued/retrying intents that still have attempt budget remaining.
+
+    Returns oldest-first rows joined with order action retry metadata:
+      - `action_id`
+      - `max_attempts`
+      - `action_attempt`
+    """
+    ensure_order_intent_schema(db_path)
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        """SELECT oi.*,
+                  oa.max_attempts AS max_attempts,
+                  oa.attempt AS action_attempt
+           FROM order_intents oi
+           JOIN order_actions oa ON oi.action_id = oa.id
+           WHERE oi.status IN (?, ?)
+             AND oi.latest_attempt < oa.max_attempts
+           ORDER BY oi.created_at ASC
+           LIMIT ?""",
+        (
+            OrderIntentStatus.QUEUED.value,
+            OrderIntentStatus.RETRYING.value,
+            limit,
+        ),
+    ).fetchall()
+    conn.close()
+
+    items = []
+    for row in rows:
+        payload = dict(row)
+        payload["risk_tags"] = _json_load(payload.get("risk_tags"))
+        payload["metadata"] = _json_load(payload.get("metadata"))
+        payload["max_attempts"] = int(payload.get("max_attempts", 1) or 1)
+        payload["action_attempt"] = int(payload.get("action_attempt", 0) or 0)
+        items.append(payload)
+    return items
+
+
 def get_order_intent_attempts(intent_id: str, db_path: str = DB_PATH) -> list[dict[str, Any]]:
     """Get all attempts for one order intent in ascending attempt order."""
     ensure_order_intent_schema(db_path)
