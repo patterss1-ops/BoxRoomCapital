@@ -20,6 +20,7 @@ import config
 from app.api.ledger import router as ledger_router
 from app.engine.control import BotControlService
 from app.research.service import ResearchService
+from fund.promotion_gate import build_promotion_gate_report, validate_lane_transition
 from fund.nav import calculate_fund_nav
 from data.trade_db import (
     complete_calibration_run,
@@ -42,6 +43,7 @@ from data.trade_db import (
     get_option_contracts,
     get_order_actions,
     get_strategy_parameter_sets,
+    get_strategy_parameter_set,
     get_strategy_promotions,
     get_summary,
     init_db,
@@ -205,6 +207,16 @@ def create_app() -> FastAPI:
             "staged_live": get_active_strategy_parameter_set(strategy_key, status="staged_live"),
             "live": get_active_strategy_parameter_set(strategy_key, status="live"),
         }
+
+    @app.get("/api/strategy/promotion-gate")
+    def api_strategy_promotion_gate(
+        strategy_key: str = "ibs_credit_spreads",
+        cooldown_hours: int = 24,
+    ):
+        return build_promotion_gate_report(
+            strategy_key=strategy_key,
+            cooldown_hours=cooldown_hours,
+        )
 
     @app.get("/api/log-tail")
     def api_log_tail(lines: int = 200):
@@ -559,21 +571,61 @@ def create_app() -> FastAPI:
     ):
         clean_set_id = set_id.strip()
         clean_ack = acknowledgement.strip()
+        clean_target = target_status.strip().lower() or "staged_live"
         if not clean_set_id:
             return action_message("set_id is required.", ok=False)
         if not clean_ack:
             return action_message("acknowledgement is required.", ok=False)
+
+        set_item = get_strategy_parameter_set(clean_set_id)
+        if not set_item:
+            return action_message(f"Parameter set '{clean_set_id}' not found.", ok=False)
+
+        allowed, reason_codes = validate_lane_transition(
+            from_status=str(set_item.get("status") or ""),
+            to_status=clean_target,
+        )
+        if not allowed:
+            reasons = ", ".join(reason_codes) or "INVALID_LANE_TRANSITION"
+            return action_message(
+                f"Promotion blocked by 3-lane policy ({reasons}).",
+                ok=False,
+            )
+
+        if clean_target in {"staged_live", "live"}:
+            gate = build_promotion_gate_report(
+                strategy_key=str(set_item.get("strategy_key") or "ibs_credit_spreads"),
+            )
+            expected_action = (
+                "PROMOTE_SHADOW_TO_STAGED"
+                if clean_target == "staged_live"
+                else "PROMOTE_STAGED_TO_LIVE"
+            )
+            recommendation = gate.get("recommendation", {})
+            rec_action = str(recommendation.get("action") or "HOLD")
+            rec_target = recommendation.get("target_set_id")
+            rec_reasons = recommendation.get("reason_codes") or []
+            if rec_action != expected_action:
+                return action_message(
+                    f"Promotion blocked by gate ({rec_action}): {', '.join(rec_reasons) or 'NO_REASON'}",
+                    ok=False,
+                )
+            if rec_target and rec_target != clean_set_id:
+                return action_message(
+                    f"Promotion blocked by gate target mismatch (expected {str(rec_target)[:8]}).",
+                    ok=False,
+                )
 
         job_id = str(uuid.uuid4())
         create_job(
             job_id=job_id,
             job_type="strategy_params_promote",
             status="running",
-            detail=f"set={clean_set_id[:8]} -> {target_status}",
+            detail=f"set={clean_set_id[:8]} -> {clean_target}",
         )
         result = promote_strategy_parameter_set(
             set_id=clean_set_id,
-            to_status=target_status,
+            to_status=clean_target,
             actor=actor,
             acknowledgement=clean_ack,
             note=note.strip() or None,
@@ -837,6 +889,25 @@ def create_app() -> FastAPI:
                 ),
                 "active_live_set": get_active_strategy_parameter_set(
                     "ibs_credit_spreads", status="live"
+                ),
+                "promotion_gate": build_promotion_gate_report("ibs_credit_spreads"),
+            },
+        )
+
+    @app.get("/fragments/promotion-gate", response_class=HTMLResponse)
+    def promotion_gate_fragment(
+        request: Request,
+        strategy_key: str = "ibs_credit_spreads",
+        cooldown_hours: int = 24,
+    ):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_promotion_gate.html",
+            {
+                "request": request,
+                "report": build_promotion_gate_report(
+                    strategy_key=strategy_key,
+                    cooldown_hours=cooldown_hours,
                 ),
             },
         )
