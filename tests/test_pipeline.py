@@ -100,10 +100,19 @@ def db(tmp_path):
     db_path = str(tmp_path / "test.db")
     conn = sqlite3.connect(db_path)
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS fund_nav (
-            date TEXT PRIMARY KEY,
-            total_nav REAL,
-            sleeve_data TEXT
+        CREATE TABLE IF NOT EXISTS fund_daily_report (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_date TEXT NOT NULL UNIQUE,
+            total_nav REAL NOT NULL,
+            total_cash REAL NOT NULL DEFAULT 0,
+            total_positions_value REAL NOT NULL DEFAULT 0,
+            unrealised_pnl REAL NOT NULL DEFAULT 0,
+            realised_pnl REAL NOT NULL DEFAULT 0,
+            daily_return_pct REAL,
+            drawdown_pct REAL NOT NULL DEFAULT 0,
+            high_water_mark REAL NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'GBP',
+            created_at TEXT NOT NULL DEFAULT ''
         )
     """)
     conn.execute("""
@@ -510,11 +519,11 @@ class TestDispatchOrchestration:
             assert kwargs["equity"] == 50000.0
 
     def test_equity_from_db(self, db):
-        """When equity is None, reads from fund_nav table."""
+        """When equity is None, reads from fund_daily_report table."""
         # Insert a NAV record
         conn = sqlite3.connect(db)
         conn.execute(
-            "INSERT INTO fund_nav (date, total_nav) VALUES (?, ?)",
+            "INSERT INTO fund_daily_report (report_date, total_nav) VALUES (?, ?)",
             ("2026-03-01", 75000.0),
         )
         conn.commit()
@@ -595,14 +604,14 @@ class TestGetFundEquity:
     """Tests for the fund equity lookup helper."""
 
     def test_returns_latest_nav(self, db):
-        """Returns the most recent fund_nav total_nav value."""
+        """Returns the most recent fund_daily_report total_nav value."""
         conn = sqlite3.connect(db)
         conn.execute(
-            "INSERT INTO fund_nav (date, total_nav) VALUES (?, ?)",
+            "INSERT INTO fund_daily_report (report_date, total_nav) VALUES (?, ?)",
             ("2026-02-28", 50000.0),
         )
         conn.execute(
-            "INSERT INTO fund_nav (date, total_nav) VALUES (?, ?)",
+            "INSERT INTO fund_daily_report (report_date, total_nav) VALUES (?, ?)",
             ("2026-03-01", 55000.0),
         )
         conn.commit()
@@ -612,12 +621,12 @@ class TestGetFundEquity:
         assert result == 55000.0
 
     def test_returns_zero_when_empty(self, db):
-        """Returns 0.0 when fund_nav table is empty."""
+        """Returns 0.0 when fund_daily_report table is empty."""
         result = _get_fund_equity(db)
         assert result == 0.0
 
     def test_returns_zero_when_table_missing(self, tmp_path):
-        """Returns 0.0 when fund_nav table doesn't exist."""
+        """Returns 0.0 when fund_daily_report table doesn't exist."""
         db_path = str(tmp_path / "empty.db")
         conn = sqlite3.connect(db_path)
         conn.execute("CREATE TABLE dummy (id INTEGER)")

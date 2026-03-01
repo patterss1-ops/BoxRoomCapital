@@ -224,12 +224,12 @@ def _get_fund_equity(db_path: str) -> float:
 
     Returns 0.0 if unavailable (risk gate will be skipped).
     D-003 will provide a reliable live equity feed — until then,
-    this is best-effort from fund_nav snapshots.
+    this is best-effort from fund_daily_report snapshots.
     """
     try:
         conn = get_conn(db_path)
         row = conn.execute(
-            "SELECT total_nav FROM fund_nav ORDER BY date DESC LIMIT 1"
+            "SELECT total_nav FROM fund_daily_report ORDER BY report_date DESC LIMIT 1"
         ).fetchone()
         conn.close()
         if row:
