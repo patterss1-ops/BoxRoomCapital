@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from broker.base import AccountInfo, BaseBroker, OrderResult, Position
 from data import trade_db
 from data.order_intent_store import (
+    claim_order_intent_for_dispatch,
     create_order_intent_envelope,
     get_dispatchable_order_intents,
     get_order_intent,
@@ -125,6 +126,7 @@ class TestIntentDispatcher:
         assert summary.completed == 1
         assert summary.retried == 0
         assert summary.failed == 0
+        assert summary.claim_conflicts == 0
         assert stub.calls == [("place_long", "SPY", 2.0, "gtaa")]
 
         row = get_order_intent(intent_id, db_path=db)
@@ -189,6 +191,7 @@ class TestIntentDispatcher:
 
         assert summary.failed == 1
         assert summary.retried == 0
+        assert summary.claim_conflicts == 0
 
         row = get_order_intent(intent_id, db_path=db)
         assert row is not None
@@ -233,6 +236,73 @@ class TestIntentDispatcher:
         row = get_order_intent(intent_id, db_path=db)
         assert row is not None
         assert row["status"] == "retrying"
+        assert row["latest_attempt"] == 1
+
+    def test_atomic_claim_allows_only_one_dispatcher_winner(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=2)
+
+        first = claim_order_intent_for_dispatch(
+            intent_id=intent_id,
+            attempt=1,
+            actor="system",
+            request_payload={"worker": "a"},
+            db_path=db,
+        )
+        second = claim_order_intent_for_dispatch(
+            intent_id=intent_id,
+            attempt=1,
+            actor="system",
+            request_payload={"worker": "b"},
+            db_path=db,
+        )
+
+        assert first is True
+        assert second is False
+
+        row = get_order_intent(intent_id, db_path=db)
+        assert row is not None
+        assert row["status"] == "running"
+        assert row["latest_attempt"] == 1
+
+        transitions = get_order_intent_transitions(intent_id, db_path=db)
+        assert [t["to_status"] for t in transitions] == ["queued", "running"]
+
+    def test_persist_failure_after_submit_does_not_leave_running(self, tmp_path, monkeypatch):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, side="BUY", max_attempts=2)
+
+        stub = StubBroker([
+            OrderResult(success=True, order_id="ord-ok"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+
+        import execution.dispatcher as dispatcher_module
+
+        real_transition = dispatcher_module.transition_order_intent
+        state = {"raised": False}
+
+        def flaky_transition(*args, **kwargs):
+            if kwargs.get("status") == "completed" and not state["raised"]:
+                state["raised"] = True
+                raise RuntimeError("simulated completion write failure")
+            return real_transition(*args, **kwargs)
+
+        monkeypatch.setattr(dispatcher_module, "transition_order_intent", flaky_transition)
+
+        summary = dispatcher.run_once(limit=10)
+
+        assert summary.completed == 0
+        assert summary.failed == 1
+        assert summary.errors >= 1
+
+        row = get_order_intent(intent_id, db_path=db)
+        assert row is not None
+        assert row["status"] == "failed"
         assert row["latest_attempt"] == 1
 
     def test_dispatchable_query_orders_oldest_first(self, tmp_path):

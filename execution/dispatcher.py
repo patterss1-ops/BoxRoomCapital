@@ -18,6 +18,7 @@ from broker.ibkr import IBKRBroker
 from broker.ig import IGBroker
 from broker.paper import PaperBroker
 from data.order_intent_store import (
+    claim_order_intent_for_dispatch,
     get_dispatchable_order_intents,
     transition_order_intent,
 )
@@ -39,6 +40,7 @@ class DispatchRunSummary:
     retried: int = 0
     failed: int = 0
     errors: int = 0
+    claim_conflicts: int = 0
 
     def to_dict(self) -> dict[str, int]:
         return {
@@ -48,6 +50,7 @@ class DispatchRunSummary:
             "retried": self.retried,
             "failed": self.failed,
             "errors": self.errors,
+            "claim_conflicts": self.claim_conflicts,
         }
 
 
@@ -102,18 +105,16 @@ class IntentDispatcher:
             "instrument": row.get("instrument"),
         }
 
-        try:
-            transition_order_intent(
-                intent_id=intent_id,
-                status="running",
-                attempt=attempt,
-                actor=self.actor,
-                request_payload=request_payload,
-                db_path=self.db_path,
-            )
-        except Exception as exc:
-            summary.errors += 1
-            logger.exception("Could not transition intent %s to running: %s", intent_id, exc)
+        claimed = claim_order_intent_for_dispatch(
+            intent_id=intent_id,
+            attempt=attempt,
+            actor=self.actor,
+            request_payload=request_payload,
+            db_path=self.db_path,
+        )
+        if not claimed:
+            # Another dispatcher already claimed it, or status moved.
+            summary.claim_conflicts += 1
             return
 
         try:
@@ -123,15 +124,14 @@ class IntentDispatcher:
             payload = _order_result_payload(result)
 
             if result.success:
-                transition_order_intent(
+                persisted = self._persist_completed(
                     intent_id=intent_id,
-                    status="completed",
                     attempt=attempt,
-                    actor=self.actor,
                     response_payload=payload,
-                    db_path=self.db_path,
+                    summary=summary,
                 )
-                summary.completed += 1
+                if persisted:
+                    summary.completed += 1
                 return
 
             self._mark_failure(
@@ -153,6 +153,56 @@ class IntentDispatcher:
                 response_payload={"exception": str(exc)},
                 summary=summary,
             )
+
+    def _persist_completed(
+        self,
+        intent_id: str,
+        attempt: int,
+        response_payload: dict,
+        summary: DispatchRunSummary,
+    ) -> bool:
+        """
+        Persist successful submit as completed.
+
+        If completion persistence fails after broker submit, best-effort move to
+        terminal failed to prevent orphaned `running` intents being re-submitted.
+        """
+        try:
+            transition_order_intent(
+                intent_id=intent_id,
+                status="completed",
+                attempt=attempt,
+                actor=self.actor,
+                response_payload=response_payload,
+                db_path=self.db_path,
+            )
+            return True
+        except Exception as exc:
+            summary.errors += 1
+            logger.exception(
+                "Could not persist completed for %s after broker submit: %s",
+                intent_id, exc,
+            )
+            try:
+                transition_order_intent(
+                    intent_id=intent_id,
+                    status="failed",
+                    attempt=attempt,
+                    actor=self.actor,
+                    response_payload=response_payload,
+                    error_code="POST_SUBMIT_PERSIST_FAILED",
+                    error_message="broker submitted but completion persistence failed",
+                    recoverable=False,
+                    db_path=self.db_path,
+                )
+                summary.failed += 1
+            except Exception as fallback_exc:  # pragma: no cover - defensive path
+                summary.errors += 1
+                logger.exception(
+                    "Could not persist fallback failed state for %s: %s",
+                    intent_id, fallback_exc,
+                )
+            return False
 
     def _resolve_connected_broker(self, broker_name: str) -> BaseBroker:
         key = str(broker_name or "").strip().lower()
@@ -191,17 +241,25 @@ class IntentDispatcher:
         status = "retrying" if attempt < max_attempts else "failed"
         recoverable = attempt < max_attempts
 
-        transition_order_intent(
-            intent_id=intent_id,
-            status=status,
-            attempt=attempt,
-            actor=self.actor,
-            response_payload=response_payload,
-            error_code=error_code,
-            error_message=error_message,
-            recoverable=recoverable,
-            db_path=self.db_path,
-        )
+        try:
+            transition_order_intent(
+                intent_id=intent_id,
+                status=status,
+                attempt=attempt,
+                actor=self.actor,
+                response_payload=response_payload,
+                error_code=error_code,
+                error_message=error_message,
+                recoverable=recoverable,
+                db_path=self.db_path,
+            )
+        except Exception as exc:
+            summary.errors += 1
+            logger.exception(
+                "Could not persist failure transition for %s: %s",
+                intent_id, exc,
+            )
+            return
 
         if recoverable:
             summary.retried += 1

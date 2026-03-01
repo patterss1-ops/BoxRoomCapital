@@ -52,11 +52,11 @@ def _json_load(value: Optional[str]) -> Any:
 
 
 def _utc_now() -> str:
-    return datetime.now().isoformat()
+    return datetime.utcnow().isoformat()
 
 
 def _default_correlation_id(action_type: str, instrument: str) -> str:
-    stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     return f"{action_type}:{instrument}:{stamp}:{uuid.uuid4().hex[:8]}"
 
 
@@ -442,6 +442,131 @@ def get_dispatchable_order_intents(
         payload["action_attempt"] = int(payload.get("action_attempt", 0) or 0)
         items.append(payload)
     return items
+
+
+def claim_order_intent_for_dispatch(
+    intent_id: str,
+    attempt: int,
+    actor: str = "system",
+    request_payload: Any = None,
+    db_path: str = DB_PATH,
+) -> bool:
+    """
+    Atomically claim a queued/retrying intent and transition it to running.
+
+    Returns True only when this caller wins the claim. Returns False if another
+    dispatcher already claimed the intent or if the status is no longer dispatchable.
+    """
+    ensure_order_intent_schema(db_path)
+    actor_value = normalize_actor(actor)
+    attempt_value = int(attempt)
+    if attempt_value < 1:
+        raise ValueError("attempt must be >= 1")
+
+    now = _utc_now()
+    request_json = _json_dumps(request_payload)
+    conn = get_conn(db_path)
+    conn.execute("BEGIN IMMEDIATE")
+
+    row = conn.execute(
+        "SELECT * FROM order_intents WHERE intent_id=?",
+        (intent_id,),
+    ).fetchone()
+    if not row:
+        conn.rollback()
+        conn.close()
+        return False
+
+    current = dict(row)
+    from_status = normalize_status(current["status"])
+    if from_status not in {OrderIntentStatus.QUEUED, OrderIntentStatus.RETRYING}:
+        conn.rollback()
+        conn.close()
+        return False
+
+    # Guard against stale callers by requiring strictly increasing attempt.
+    latest_attempt = int(current.get("latest_attempt", 0) or 0)
+    if attempt_value <= latest_attempt:
+        conn.rollback()
+        conn.close()
+        return False
+
+    order_intent_update = conn.execute(
+        """UPDATE order_intents
+           SET updated_at=?, status=?, actor=?, latest_attempt=?
+           WHERE intent_id=?
+             AND status IN (?, ?)""",
+        (
+            now,
+            OrderIntentStatus.RUNNING.value,
+            actor_value,
+            attempt_value,
+            intent_id,
+            OrderIntentStatus.QUEUED.value,
+            OrderIntentStatus.RETRYING.value,
+        ),
+    )
+    if order_intent_update.rowcount != 1:
+        conn.rollback()
+        conn.close()
+        return False
+
+    action_id = str(current.get("action_id", "") or "")
+    action_update = conn.execute(
+        """UPDATE order_actions
+           SET updated_at=?, status=?, attempt=?, recoverable=0
+           WHERE id=?
+             AND status IN (?, ?)""",
+        (
+            now,
+            OrderIntentStatus.RUNNING.value,
+            attempt_value,
+            action_id,
+            OrderIntentStatus.QUEUED.value,
+            OrderIntentStatus.RETRYING.value,
+        ),
+    )
+    if action_update.rowcount != 1:
+        conn.rollback()
+        conn.close()
+        return False
+
+    conn.execute(
+        """INSERT INTO order_intent_attempts
+           (intent_id, attempt, created_at, updated_at, status, actor, request_payload)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(intent_id, attempt) DO UPDATE SET
+               updated_at=excluded.updated_at,
+               status=excluded.status,
+               actor=excluded.actor,
+               request_payload=COALESCE(excluded.request_payload, order_intent_attempts.request_payload)""",
+        (
+            intent_id,
+            attempt_value,
+            now,
+            now,
+            OrderIntentStatus.RUNNING.value,
+            actor_value,
+            request_json,
+        ),
+    )
+    conn.execute(
+        """INSERT INTO order_intent_transitions
+           (intent_id, transition_at, actor, from_status, to_status, attempt, request_payload)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            intent_id,
+            now,
+            actor_value,
+            from_status.value,
+            OrderIntentStatus.RUNNING.value,
+            attempt_value,
+            request_json,
+        ),
+    )
+    conn.commit()
+    conn.close()
+    return True
 
 
 def get_order_intent_attempts(intent_id: str, db_path: str = DB_PATH) -> list[dict[str, Any]]:
