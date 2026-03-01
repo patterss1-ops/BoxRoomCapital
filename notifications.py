@@ -103,6 +103,69 @@ class NotificationHandler:
         """Alert: something went wrong."""
         self.send(f"ERROR: {message}", icon="⚠️")
 
+    # ─── Pipeline / dispatch / reconciliation alerts (D-004) ──────────
+
+    def format_dispatch_summary(self, summary) -> str:
+        """Format a DispatchRunSummary into a human-readable message."""
+        d = summary.to_dict()
+        lines = [
+            "DISPATCH CYCLE",
+            f"  {d['discovered']} discovered, {d['processed']} processed",
+            f"  {d['completed']} completed, {d['retried']} retried, {d['failed']} failed",
+        ]
+        if d.get("errors", 0) > 0:
+            lines.append(f"  {d['errors']} errors")
+        if d.get("claim_conflicts", 0) > 0:
+            lines.append(f"  {d['claim_conflicts']} claim conflicts")
+        return "\n".join(lines)
+
+    def dispatch_alert(self, summary) -> bool:
+        """Send a dispatch cycle summary alert."""
+        msg = self.format_dispatch_summary(summary)
+        icon = "✅" if summary.failed == 0 and summary.errors == 0 else "⚠️"
+        return self.send(msg, icon=icon)
+
+    def format_pipeline_errors(self, result) -> Optional[str]:
+        """Format orchestration errors into a message, or None if clean."""
+        if not result.errors:
+            return None
+        n = len(result.errors)
+        lines = [f"PIPELINE RUN {result.run_id}: {n} error{'s' if n != 1 else ''}"]
+        for err in result.errors[:5]:
+            lines.append(
+                f"  {err.get('strategy_id', '?')}/{err.get('ticker', '?')}: "
+                f"{err.get('error', 'unknown')}"
+            )
+        if n > 5:
+            lines.append(f"  ... and {n - 5} more")
+        return "\n".join(lines)
+
+    def pipeline_error_alert(self, result) -> bool:
+        """Send an alert if the orchestration had errors."""
+        msg = self.format_pipeline_errors(result)
+        if msg is None:
+            return False
+        return self.send(msg, icon="🔴")
+
+    def format_reconciliation_summary(self, summary) -> str:
+        """Format a ReconcileSummary into a human-readable message."""
+        d = summary.to_dict()
+        return (
+            f"RECONCILIATION — {d['broker']}\n"
+            f"  Account: {d['account_id']}\n"
+            f"  {d['positions_synced']} positions synced "
+            f"(+{d['positions_inserted']} new, "
+            f"~{d['positions_updated']} updated, "
+            f"-{d['positions_removed']} removed)\n"
+            f"  Cash: {d['cash_balance']:,.2f}\n"
+            f"  Net liquidation: {d['net_liquidation']:,.2f}"
+        )
+
+    def reconciliation_alert(self, summary) -> bool:
+        """Send a reconciliation summary alert."""
+        msg = self.format_reconciliation_summary(summary)
+        return self.send(msg, icon="🔄")
+
     def _send_telegram(self, message: str) -> bool:
         """Send message via Telegram Bot API."""
         if not self.telegram_token or not self.telegram_chat_id:

@@ -40,7 +40,7 @@ Defines file-scope locks for parallel execution.
 | D-001 | claude | exclusive | `app/engine/registry.py`, `app/engine/orchestrator.py`, `app/engine/scheduler.py`, `tests/**registry**`, `tests/**scheduler**`, `tests/**orchestrator**` | D-002 | D-001 before D-003; may run parallel to D-002 if scopes stay disjoint | unclaimed | 2026-03-01T15:29:51Z |
 | D-002 | codex | exclusive | `execution/dispatcher.py`, `data/order_intent_store.py`, `tests/test_dispatcher.py`, `tests/test_order_intent_lifecycle.py` | D-001 | D-002 before D-003/D-004 wiring | claimed | 2026-03-01T15:29:51Z |
 | D-003 | tbd | shared | `execution/**reconcile**`, `portfolio/manager.py`, `fund/nav.py`, `risk/**`, `tests/**reconcile**`, `tests/**equity**` | D-001, D-002 | D-001 and D-002 must merge first | unclaimed | 2026-03-01T15:29:51Z |
-| D-004 | tbd | shared | `tests/test_e2e_pipeline.py`, `notifications.py`, `app/api/server.py` (alerts surfaces only) | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | unclaimed | 2026-03-01T15:29:51Z |
+| D-004 | claude | exclusive | `tests/test_e2e_pipeline.py`, `notifications.py` | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | claimed | 2026-03-01T21:15:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
 
 ## Claim protocol
