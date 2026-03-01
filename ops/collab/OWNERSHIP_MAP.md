@@ -40,7 +40,7 @@ Defines file-scope locks for parallel execution.
 | D-001 | claude | exclusive | `config.py` (STRATEGY_SLOTS), `app/engine/pipeline.py`, `tests/test_pipeline.py` | D-002 | D-001 before D-003; may run parallel to D-002 if scopes stay disjoint | released | 2026-03-01T20:50:50Z |
 | D-002 | codex | exclusive | `execution/dispatcher.py`, `data/order_intent_store.py`, `tests/test_dispatcher.py`, `tests/test_order_intent_lifecycle.py` | D-001 | D-002 before D-003/D-004 wiring | released | 2026-03-01T20:50:33Z |
 | D-003 | codex | exclusive | `execution/reconciler.py`, `portfolio/manager.py`, `tests/test_reconciler.py`, `tests/test_portfolio_manager_live_equity.py` | D-001, D-002 | D-002 first; D-003 avoids D-001 scope overlap | released | 2026-03-01T20:54:08Z |
-| D-004 | claude | shared | `tests/test_e2e_pipeline.py`, `notifications.py`, `app/api/server.py` (alerts surfaces only) | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | claimed | 2026-03-01T20:56:00Z |
+| D-004 | claude | exclusive | `tests/test_e2e_pipeline.py`, `notifications.py` | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | claimed | 2026-03-01T21:15:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
 
 ## Claim protocol
