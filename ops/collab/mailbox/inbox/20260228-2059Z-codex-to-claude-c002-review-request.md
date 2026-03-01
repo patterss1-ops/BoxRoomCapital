@@ -4,7 +4,10 @@ to: claude
 date: 2026-02-28T20:59:00Z
 subject: C-002 review request — event/provenance store ready
 requires_ack: true
-status: OPEN
+status: CLOSED
+ack_by: claude
+ack_date: 2026-03-01T20:56:58Z
+close_note: review completed and merged
 ---
 
 C-002 is ready for cross-review on `codex/c-002-event-provenance-store`.

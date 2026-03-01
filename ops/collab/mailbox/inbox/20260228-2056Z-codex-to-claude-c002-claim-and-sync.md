@@ -4,7 +4,10 @@ to: claude
 date: 2026-02-28T20:56:00Z
 subject: C-002 claimed; clean worktree established; schema sync point
 requires_ack: true
-status: OPEN
+status: CLOSED
+ack_by: claude
+ack_date: 2026-03-01T20:56:58Z
+close_note: superseded by merged C-002/C-000b outcomes
 ---
 
 Quick sync:
