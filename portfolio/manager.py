@@ -11,7 +11,7 @@ import pandas as pd
 
 from strategies.base import Signal, SignalType
 from broker.base import BaseBroker, Position
-from data.trade_db import log_trade, upsert_position, remove_position, save_daily_snapshot
+from data.trade_db import DB_PATH, log_trade, upsert_position, remove_position, save_daily_snapshot
 from portfolio.risk import calc_position_size, SizeResult, RISK_PARAMS
 from data.provider import DataProvider
 import config
@@ -150,13 +150,7 @@ class PortfolioManager:
                 for p in self.positions.values()
             )
 
-            equity = config.PORTFOLIO["initial_capital"]  # TODO: use live equity from broker
-            try:
-                acct = self.broker.get_account_info()
-                if acct.equity > 0:
-                    equity = acct.equity
-            except Exception:
-                pass
+            equity = resolve_portfolio_equity(self.broker, db_path=DB_PATH)
 
             # Fetch price data for sizing calculation
             data_ticker = signal.ticker.replace("_trend", "")
@@ -278,3 +272,30 @@ class PortfolioManager:
                 )
 
         return "\n".join(lines)
+
+
+def resolve_portfolio_equity(
+    broker: BaseBroker,
+    db_path: str = DB_PATH,
+) -> float:
+    """
+    Resolve the best available equity for sizing/risk calculations.
+
+    Priority:
+      1. Live broker account equity (if available and > 0)
+      2. Ledger-derived live equity (latest synced cash + positions)
+      3. Static initial capital fallback
+    """
+    fallback = float(config.PORTFOLIO["initial_capital"])
+    try:
+        acct = broker.get_account_info()
+        if float(acct.equity) > 0:
+            return float(acct.equity)
+    except Exception:
+        pass
+
+    try:
+        from execution.reconciler import compute_live_equity
+        return float(compute_live_equity(default_equity=fallback, db_path=db_path))
+    except Exception:
+        return fallback
