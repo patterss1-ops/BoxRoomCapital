@@ -16,9 +16,25 @@ from typing import Any, Optional
 from data.trade_db import DB_PATH, get_conn
 from execution.order_intent import OrderIntent
 from execution.signal_adapter import StrategySlotConfig, signal_to_order_intent
+from risk.pre_trade_gate import (
+    RiskContext,
+    RiskDecision,
+    RiskLimits,
+    RiskOrderRequest,
+    evaluate_pre_trade_risk,
+)
 from strategies.base import BaseStrategy, Signal, SignalType
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Default risk limits (conservative) ──────────────────────────────────
+
+DEFAULT_RISK_LIMITS = RiskLimits(
+    max_position_pct_equity=15.0,
+    max_sleeve_pct_equity=40.0,
+    max_correlated_pct_equity=60.0,
+)
 
 
 @dataclass
@@ -98,20 +114,82 @@ def _get_bars_in_trade(ticker: str, strategy_id: str, db_path: str) -> int:
         return 0
 
 
+def _build_risk_context(equity: float, db_path: str) -> RiskContext:
+    """Build a RiskContext snapshot from current portfolio state."""
+    conn = get_conn(db_path)
+
+    # Per-ticker exposure
+    ticker_rows = conn.execute(
+        """SELECT UPPER(bp.ticker) as ticker,
+                  SUM(ABS(CAST(bp.market_value AS REAL))) as exposure
+           FROM broker_positions bp
+           JOIN broker_accounts ba ON bp.broker_account_id = ba.id
+           WHERE ba.is_active = 1
+           GROUP BY UPPER(bp.ticker)"""
+    ).fetchall()
+    ticker_exposure = {r["ticker"]: float(r["exposure"]) for r in ticker_rows}
+
+    # Per-sleeve exposure
+    sleeve_rows = conn.execute(
+        """SELECT COALESCE(bp.sleeve, 'unassigned') as sleeve,
+                  SUM(ABS(CAST(bp.market_value AS REAL))) as exposure
+           FROM broker_positions bp
+           JOIN broker_accounts ba ON bp.broker_account_id = ba.id
+           WHERE ba.is_active = 1
+           GROUP BY COALESCE(bp.sleeve, 'unassigned')"""
+    ).fetchall()
+    sleeve_exposure = {r["sleeve"]: float(r["exposure"]) for r in sleeve_rows}
+
+    conn.close()
+
+    return RiskContext(
+        equity=equity if equity > 0 else 1.0,  # Guard against zero equity
+        ticker_exposure_notional=ticker_exposure,
+        sleeve_exposure_notional=sleeve_exposure,
+    )
+
+
+def _prefetch_universe_data(
+    slots: list[StrategySlot],
+    data_provider: Any,
+) -> dict[str, Any]:
+    """Pre-fetch OHLC data for all tickers across all slots.
+
+    Returns a dict of ticker → DataFrame.  Strategies like DualMomentum
+    require cross-asset data (universe_data kwarg) so we fetch everything
+    up front and pass it through.
+    """
+    all_tickers: set[str] = set()
+    for slot in slots:
+        all_tickers.update(slot.tickers)
+    universe: dict[str, Any] = {}
+    for ticker in all_tickers:
+        try:
+            df = data_provider.get_daily_bars(ticker)
+            if df is not None and not df.empty:
+                universe[ticker] = df
+        except Exception as exc:
+            logger.warning("Failed to fetch data for %s: %s", ticker, exc)
+    return universe
+
+
 def run_orchestration_cycle(
     slots: list[StrategySlot],
     db_path: str = DB_PATH,
     dry_run: bool = False,
     data_provider: Any = None,
+    equity: float = 0.0,
+    risk_limits: Optional[RiskLimits] = None,
 ) -> OrchestrationResult:
     """Run one orchestration cycle across all registered strategy slots.
 
     For each slot, for each ticker:
       1. Fetch current position from the broker ledger
       2. Fetch OHLC data via the data provider
-      3. Generate a signal from the strategy
+      3. Generate a signal from the strategy (with universe_data for cross-asset strategies)
       4. If actionable, convert to OrderIntent
-      5. Persist the intent (or log as shadow trade if dry_run)
+      5. Validate through pre-trade risk gate
+      6. Persist the intent (or log as shadow trade if dry_run)
 
     Each slot runs in its own error boundary — one failure does not
     kill the cycle.
@@ -121,6 +199,8 @@ def run_orchestration_cycle(
         db_path: Database path for position lookups and intent persistence.
         dry_run: If True, log shadow trades instead of persisting intents.
         data_provider: DataProvider instance for OHLC bars (lazy-imported if None).
+        equity: Current fund equity for risk calculations. If 0, risk gate is skipped.
+        risk_limits: Hard risk limits. Defaults to conservative limits.
 
     Returns:
         OrchestrationResult summarising all signals, intents, and errors.
@@ -133,6 +213,16 @@ def run_orchestration_cycle(
         from data.provider import DataProvider
         data_provider = DataProvider()
 
+    limits = risk_limits or DEFAULT_RISK_LIMITS
+
+    # Build risk context if equity is provided
+    risk_ctx: Optional[RiskContext] = None
+    if equity > 0:
+        risk_ctx = _build_risk_context(equity, db_path)
+
+    # Pre-fetch all universe data so cross-asset strategies get what they need
+    universe_data = _prefetch_universe_data(slots, data_provider)
+
     for slot in slots:
         for ticker in slot.tickers:
             try:
@@ -142,7 +232,9 @@ def run_orchestration_cycle(
                     result=result,
                     db_path=db_path,
                     dry_run=dry_run,
-                    data_provider=data_provider,
+                    universe_data=universe_data,
+                    risk_ctx=risk_ctx,
+                    risk_limits=limits,
                 )
             except Exception as exc:
                 error_entry = {
@@ -174,14 +266,16 @@ def _process_one_signal(
     result: OrchestrationResult,
     db_path: str,
     dry_run: bool,
-    data_provider: Any,
+    universe_data: dict[str, Any],
+    risk_ctx: Optional[RiskContext],
+    risk_limits: RiskLimits,
 ) -> None:
     """Generate and process one signal for a (strategy, ticker) pair."""
     position = _get_current_position(ticker, db_path)
     bars = _get_bars_in_trade(ticker, slot.config.strategy_id, db_path)
 
-    df = data_provider.get_daily_bars(ticker)
-    if df is None or df.empty:
+    df = universe_data.get(ticker)
+    if df is None or (hasattr(df, "empty") and df.empty):
         raise ValueError(f"No OHLC data available for {ticker}")
 
     signal = slot.strategy.generate_signal(
@@ -189,6 +283,7 @@ def _process_one_signal(
         df=df,
         current_position=position,
         bars_in_trade=bars,
+        universe_data=universe_data,
     )
 
     signal_entry = {
@@ -204,6 +299,31 @@ def _process_one_signal(
         return
 
     intent = signal_to_order_intent(signal, slot.config)
+
+    # ── Pre-trade risk gate ──────────────────────────────────────────────
+    if risk_ctx is not None:
+        risk_request = RiskOrderRequest(
+            ticker=ticker,
+            sleeve=slot.config.sleeve,
+            order_exposure_notional=intent.qty * 100.0,  # Approximate notional
+        )
+        decision = evaluate_pre_trade_risk(
+            request=risk_request,
+            context=risk_ctx,
+            limits=risk_limits,
+        )
+        if not decision.approved:
+            result.intents_rejected.append({
+                **intent.to_payload(),
+                "reject_rule": decision.rule_id,
+                "reject_message": decision.message,
+            })
+            logger.warning(
+                "Risk gate rejected %s/%s: %s — %s",
+                slot.config.strategy_id, ticker,
+                decision.rule_id, decision.message,
+            )
+            return
 
     if dry_run:
         from data.trade_db import log_shadow_trade

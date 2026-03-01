@@ -76,6 +76,23 @@ class StubStrategy(BaseStrategy):
         )
 
 
+class UniverseAwareStubStrategy(BaseStrategy):
+    """Test strategy that checks universe_data is passed."""
+
+    @property
+    def name(self) -> str:
+        return "universe_aware"
+
+    def generate_signal(self, ticker, df, current_position, bars_in_trade, **kwargs):
+        universe_data = kwargs.get("universe_data", {})
+        if not universe_data:
+            return Signal(SignalType.NONE, ticker, self.name, "no universe data")
+        return Signal(
+            SignalType.LONG_ENTRY, ticker, self.name,
+            f"got {len(universe_data)} tickers in universe",
+        )
+
+
 class ErrorStrategy(BaseStrategy):
     """Test strategy that always raises."""
 
@@ -250,7 +267,6 @@ class TestOrchestrationCycle:
         from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
 
         good_signal = _make_signal(SignalType.LONG_ENTRY, ticker="SPY")
-        bad_signal = _make_signal(SignalType.LONG_ENTRY, ticker="EFA")
 
         slots = [
             StrategySlot(
@@ -395,3 +411,148 @@ class TestOrchestrationCycle:
         shadows = get_shadow_trades(limit=10, db_path=db)
         assert len(shadows) == 1
         assert shadows[0]["action"] == "close"
+
+
+# ─── Risk Gate Integration Tests ──────────────────────────────────────────
+
+
+class TestRiskGateIntegration:
+    def test_risk_gate_rejects_oversized_position(self, db):
+        """Intent should be rejected when position exceeds max_position_pct_equity."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from risk.pre_trade_gate import RiskLimits
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(base_qty=100.0),  # Large position
+            tickers=["SPY"],
+        )
+
+        # Tiny equity so the position exceeds limits
+        tight_limits = RiskLimits(
+            max_position_pct_equity=5.0,
+            max_sleeve_pct_equity=20.0,
+            max_correlated_pct_equity=30.0,
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            equity=1000.0,  # 100 qty * 100 notional = 10000 → 1000% of 1000 equity
+            risk_limits=tight_limits,
+        )
+
+        assert len(result.signals) == 1
+        assert len(result.intents_created) == 0
+        assert len(result.intents_rejected) == 1
+        assert result.intents_rejected[0]["reject_rule"] == "MAX_POSITION_PCT_EQUITY"
+
+    def test_risk_gate_approves_within_limits(self, db):
+        """Intent should pass when position is within limits."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from risk.pre_trade_gate import RiskLimits
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(base_qty=1.0),  # Small position
+            tickers=["SPY"],
+        )
+
+        generous_limits = RiskLimits(
+            max_position_pct_equity=50.0,
+            max_sleeve_pct_equity=80.0,
+            max_correlated_pct_equity=90.0,
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            equity=100000.0,  # 1 qty * 100 = 100 notional → 0.1% of 100k
+            risk_limits=generous_limits,
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+    def test_no_equity_skips_risk_gate(self, db):
+        """When equity=0 (default), risk gate is skipped entirely."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(base_qty=1000.0),  # Would fail risk gate
+            tickers=["SPY"],
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            # equity defaults to 0 → risk gate skipped
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+
+# ─── Universe Data Passthrough Tests ──────────────────────────────────────
+
+
+class TestUniverseDataPassthrough:
+    def test_universe_data_passed_to_strategy(self, db):
+        """Strategy should receive universe_data with all pre-fetched tickers."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+
+        slot = StrategySlot(
+            strategy=UniverseAwareStubStrategy(),
+            config=_make_slot(strategy_id="universe_aware"),
+            tickers=["SPY"],
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+        )
+
+        # UniverseAwareStubStrategy returns LONG_ENTRY if universe_data is present
+        assert len(result.signals) == 1
+        assert result.signals[0]["signal_type"] == "long_entry"
+        assert "got" in result.signals[0]["reason"]
+
+    def test_multi_slot_universe_includes_all_tickers(self, db):
+        """Universe data should contain tickers from ALL slots."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+
+        slots = [
+            StrategySlot(
+                strategy=UniverseAwareStubStrategy(),
+                config=_make_slot(strategy_id="universe_aware"),
+                tickers=["SPY"],
+            ),
+            StrategySlot(
+                strategy=StubStrategy(_make_signal(SignalType.NONE)),
+                config=_make_slot(strategy_id="gtaa"),
+                tickers=["EFA", "IEF"],
+            ),
+        ]
+
+        result = run_orchestration_cycle(
+            slots=slots,
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+        )
+
+        # UniverseAwareStub should see 3 tickers in universe (SPY, EFA, IEF)
+        spy_signal = [s for s in result.signals if s["ticker"] == "SPY"][0]
+        assert "3 tickers" in spy_signal["reason"]
