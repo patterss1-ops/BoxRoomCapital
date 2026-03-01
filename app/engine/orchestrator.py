@@ -1,12 +1,13 @@
 """Strategy orchestration engine — wires signals to execution intents.
 
 C-001: Runs registered strategies, converts signals to OrderIntents,
-validates through routing and pre-trade risk, and persists approved
+validates through account routing, pre-trade risk, and persists approved
 intents for downstream execution.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -15,10 +16,12 @@ from typing import Any, Optional
 
 from data.trade_db import DB_PATH, get_conn
 from execution.order_intent import OrderIntent
+from execution.policy.capability_policy import StrategyRequirements
+from execution.policy.route_policy import RoutePolicyState
+from execution.router import AccountRouter, RouteIntent
 from execution.signal_adapter import StrategySlotConfig, signal_to_order_intent
 from risk.pre_trade_gate import (
     RiskContext,
-    RiskDecision,
     RiskLimits,
     RiskOrderRequest,
     evaluate_pre_trade_risk,
@@ -66,6 +69,9 @@ class StrategySlot:
     strategy: BaseStrategy
     config: StrategySlotConfig
     tickers: list[str]
+    requirements: StrategyRequirements = field(
+        default_factory=StrategyRequirements,
+    )
 
 
 def _get_current_position(ticker: str, db_path: str) -> float:
@@ -114,11 +120,14 @@ def _get_bars_in_trade(ticker: str, strategy_id: str, db_path: str) -> int:
         return 0
 
 
-def _build_risk_context(equity: float, db_path: str) -> RiskContext:
-    """Build a RiskContext snapshot from current portfolio state."""
+def _build_risk_context(equity: float, db_path: str) -> dict:
+    """Build mutable risk context dicts from current portfolio state.
+
+    Returns a plain dict (not frozen RiskContext) so the orchestrator can
+    accumulate intra-cycle exposure as intents are approved.
+    """
     conn = get_conn(db_path)
 
-    # Per-ticker exposure
     ticker_rows = conn.execute(
         """SELECT UPPER(bp.ticker) as ticker,
                   SUM(ABS(CAST(bp.market_value AS REAL))) as exposure
@@ -129,7 +138,6 @@ def _build_risk_context(equity: float, db_path: str) -> RiskContext:
     ).fetchall()
     ticker_exposure = {r["ticker"]: float(r["exposure"]) for r in ticker_rows}
 
-    # Per-sleeve exposure
     sleeve_rows = conn.execute(
         """SELECT COALESCE(bp.sleeve, 'unassigned') as sleeve,
                   SUM(ABS(CAST(bp.market_value AS REAL))) as exposure
@@ -142,11 +150,39 @@ def _build_risk_context(equity: float, db_path: str) -> RiskContext:
 
     conn.close()
 
+    return {
+        "equity": equity if equity > 0 else 1.0,
+        "ticker_exposure": ticker_exposure,
+        "sleeve_exposure": sleeve_exposure,
+    }
+
+
+def _make_frozen_risk_context(ctx: dict) -> RiskContext:
+    """Snapshot the mutable risk context into a frozen RiskContext."""
     return RiskContext(
-        equity=equity if equity > 0 else 1.0,  # Guard against zero equity
-        ticker_exposure_notional=ticker_exposure,
-        sleeve_exposure_notional=sleeve_exposure,
+        equity=ctx["equity"],
+        ticker_exposure_notional=dict(ctx["ticker_exposure"]),
+        sleeve_exposure_notional=dict(ctx["sleeve_exposure"]),
     )
+
+
+def _estimate_notional(
+    intent: OrderIntent,
+    universe_data: dict[str, Any],
+) -> float:
+    """Estimate order notional from the latest close price × quantity.
+
+    Falls back to qty alone if no price data is available.
+    """
+    df = universe_data.get(intent.instrument)
+    if df is not None and hasattr(df, "iloc") and len(df) > 0:
+        try:
+            last_close = float(df["Close"].iloc[-1])
+            return intent.qty * last_close
+        except (KeyError, IndexError, TypeError):
+            pass
+    # Fallback: qty is the notional (e.g., spreadbet stake-per-point)
+    return intent.qty
 
 
 def _prefetch_universe_data(
@@ -155,7 +191,7 @@ def _prefetch_universe_data(
 ) -> dict[str, Any]:
     """Pre-fetch OHLC data for all tickers across all slots.
 
-    Returns a dict of ticker → DataFrame.  Strategies like DualMomentum
+    Returns a dict of ticker -> DataFrame.  Strategies like DualMomentum
     require cross-asset data (universe_data kwarg) so we fetch everything
     up front and pass it through.
     """
@@ -180,19 +216,22 @@ def run_orchestration_cycle(
     data_provider: Any = None,
     equity: float = 0.0,
     risk_limits: Optional[RiskLimits] = None,
+    router: Optional[AccountRouter] = None,
+    policy_state: Optional[RoutePolicyState] = None,
 ) -> OrchestrationResult:
     """Run one orchestration cycle across all registered strategy slots.
 
     For each slot, for each ticker:
       1. Fetch current position from the broker ledger
       2. Fetch OHLC data via the data provider
-      3. Generate a signal from the strategy (with universe_data for cross-asset strategies)
+      3. Generate a signal from the strategy (with universe_data)
       4. If actionable, convert to OrderIntent
-      5. Validate through pre-trade risk gate
-      6. Persist the intent (or log as shadow trade if dry_run)
+      5. Validate through account router (if provided)
+      6. Validate through pre-trade risk gate (entries only; exits always pass)
+      7. Persist the intent (or log as shadow trade if dry_run)
 
-    Each slot runs in its own error boundary — one failure does not
-    kill the cycle.
+    The risk context accumulates intra-cycle: each approved intent's
+    notional is added to ticker/sleeve exposure before evaluating the next.
 
     Args:
         slots: Strategy slots to execute.
@@ -201,6 +240,8 @@ def run_orchestration_cycle(
         data_provider: DataProvider instance for OHLC bars (lazy-imported if None).
         equity: Current fund equity for risk calculations. If 0, risk gate is skipped.
         risk_limits: Hard risk limits. Defaults to conservative limits.
+        router: Optional AccountRouter for route/capability validation.
+        policy_state: Optional RoutePolicyState (kill switch, cooldowns).
 
     Returns:
         OrchestrationResult summarising all signals, intents, and errors.
@@ -215,10 +256,10 @@ def run_orchestration_cycle(
 
     limits = risk_limits or DEFAULT_RISK_LIMITS
 
-    # Build risk context if equity is provided
-    risk_ctx: Optional[RiskContext] = None
+    # Build mutable risk context if equity is provided
+    risk_ctx_dict: Optional[dict] = None
     if equity > 0:
-        risk_ctx = _build_risk_context(equity, db_path)
+        risk_ctx_dict = _build_risk_context(equity, db_path)
 
     # Pre-fetch all universe data so cross-asset strategies get what they need
     universe_data = _prefetch_universe_data(slots, data_provider)
@@ -233,8 +274,10 @@ def run_orchestration_cycle(
                     db_path=db_path,
                     dry_run=dry_run,
                     universe_data=universe_data,
-                    risk_ctx=risk_ctx,
+                    risk_ctx_dict=risk_ctx_dict,
                     risk_limits=limits,
+                    router=router,
+                    policy_state=policy_state,
                 )
             except Exception as exc:
                 error_entry = {
@@ -267,8 +310,10 @@ def _process_one_signal(
     db_path: str,
     dry_run: bool,
     universe_data: dict[str, Any],
-    risk_ctx: Optional[RiskContext],
+    risk_ctx_dict: Optional[dict],
     risk_limits: RiskLimits,
+    router: Optional[AccountRouter],
+    policy_state: Optional[RoutePolicyState],
 ) -> None:
     """Generate and process one signal for a (strategy, ticker) pair."""
     position = _get_current_position(ticker, db_path)
@@ -299,13 +344,38 @@ def _process_one_signal(
         return
 
     intent = signal_to_order_intent(signal, slot.config)
+    is_exit = signal.signal_type in (SignalType.LONG_EXIT, SignalType.SHORT_EXIT)
 
-    # ── Pre-trade risk gate ──────────────────────────────────────────────
-    if risk_ctx is not None:
+    # ── Account router validation ────────────────────────────────────────
+    if router is not None:
+        route_intent = RouteIntent(
+            strategy_id=slot.config.strategy_id,
+            sleeve=slot.config.sleeve,
+            ticker=ticker,
+            requirements=slot.requirements,
+        )
+        route_decision = router.resolve(route_intent, policy_state=policy_state)
+        if not route_decision.allowed:
+            result.intents_rejected.append({
+                **intent.to_payload(),
+                "reject_rule": route_decision.reason_code,
+                "reject_message": route_decision.message,
+            })
+            logger.warning(
+                "Router rejected %s/%s: %s — %s",
+                slot.config.strategy_id, ticker,
+                route_decision.reason_code, route_decision.message,
+            )
+            return
+
+    # ── Pre-trade risk gate (entries only — exits always pass) ───────────
+    if risk_ctx_dict is not None and not is_exit:
+        notional = _estimate_notional(intent, universe_data)
+        risk_ctx = _make_frozen_risk_context(risk_ctx_dict)
         risk_request = RiskOrderRequest(
             ticker=ticker,
             sleeve=slot.config.sleeve,
-            order_exposure_notional=intent.qty * 100.0,  # Approximate notional
+            order_exposure_notional=notional,
         )
         decision = evaluate_pre_trade_risk(
             request=risk_request,
@@ -325,12 +395,22 @@ def _process_one_signal(
             )
             return
 
+        # ── Accumulate intra-cycle exposure ──────────────────────────────
+        tk = ticker.upper()
+        risk_ctx_dict["ticker_exposure"][tk] = (
+            risk_ctx_dict["ticker_exposure"].get(tk, 0.0) + notional
+        )
+        risk_ctx_dict["sleeve_exposure"][slot.config.sleeve] = (
+            risk_ctx_dict["sleeve_exposure"].get(slot.config.sleeve, 0.0) + notional
+        )
+
+    # ── Persist / shadow-log ─────────────────────────────────────────────
     if dry_run:
         from data.trade_db import log_shadow_trade
         log_shadow_trade(
             ticker=ticker,
             strategy=slot.config.strategy_id,
-            action="open" if signal.signal_type in (SignalType.LONG_ENTRY, SignalType.SHORT_ENTRY) else "close",
+            action="open" if not is_exit else "close",
             size=intent.qty,
             reason=signal.reason,
             db_path=db_path,
@@ -341,7 +421,6 @@ def _process_one_signal(
         })
         return
 
-    # Persist intent via the order intent store
     from data.order_intent_store import create_order_intent_envelope
     envelope = create_order_intent_envelope(
         intent=intent,

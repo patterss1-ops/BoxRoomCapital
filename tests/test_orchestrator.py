@@ -429,7 +429,7 @@ class TestRiskGateIntegration:
             tickers=["SPY"],
         )
 
-        # Tiny equity so the position exceeds limits
+        # StubDataProvider returns Close=102.0, so notional = 100 * 102 = 10200
         tight_limits = RiskLimits(
             max_position_pct_equity=5.0,
             max_sleeve_pct_equity=20.0,
@@ -441,7 +441,7 @@ class TestRiskGateIntegration:
             db_path=db,
             dry_run=True,
             data_provider=StubDataProvider(),
-            equity=1000.0,  # 100 qty * 100 notional = 10000 → 1000% of 1000 equity
+            equity=1000.0,  # 10200 notional → 1020% of 1000 equity
             risk_limits=tight_limits,
         )
 
@@ -473,7 +473,7 @@ class TestRiskGateIntegration:
             db_path=db,
             dry_run=True,
             data_provider=StubDataProvider(),
-            equity=100000.0,  # 1 qty * 100 = 100 notional → 0.1% of 100k
+            equity=100000.0,  # 1 * 102 = 102 notional → 0.1% of 100k
             risk_limits=generous_limits,
         )
 
@@ -497,6 +497,176 @@ class TestRiskGateIntegration:
             dry_run=True,
             data_provider=StubDataProvider(),
             # equity defaults to 0 → risk gate skipped
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+    def test_exit_signal_bypasses_risk_gate(self, db):
+        """P1-2 regression: exit signals must never be blocked by risk gate."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from risk.pre_trade_gate import RiskLimits
+
+        signal = _make_signal(SignalType.LONG_EXIT, reason="SMA crossunder")
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(base_qty=100.0),
+            tickers=["SPY"],
+        )
+
+        # Very tight limits that would reject an entry
+        tight_limits = RiskLimits(
+            max_position_pct_equity=1.0,
+            max_sleeve_pct_equity=2.0,
+            max_correlated_pct_equity=3.0,
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            equity=100.0,  # Tiny equity — would reject entries
+            risk_limits=tight_limits,
+        )
+
+        # Exit must pass despite tight limits
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+    def test_intra_cycle_cumulative_risk(self, db):
+        """P1-3 regression: two entries in same sleeve must accumulate exposure."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from risk.pre_trade_gate import RiskLimits
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+
+        # Two separate slots in the same sleeve
+        slot_a = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(strategy_id="strat_a", base_qty=10.0),
+            tickers=["SPY"],
+        )
+        slot_b = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(strategy_id="strat_b", base_qty=10.0),
+            tickers=["EFA"],
+        )
+
+        # Sleeve limit of 25%: each entry is 10 * 102 = 1020 notional.
+        # With equity=5000, each is 20.4% individually (under 25%).
+        # Combined = 40.8% which exceeds 25%.
+        limits = RiskLimits(
+            max_position_pct_equity=50.0,
+            max_sleeve_pct_equity=25.0,
+            max_correlated_pct_equity=90.0,
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot_a, slot_b],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            equity=5000.0,
+            risk_limits=limits,
+        )
+
+        # First should pass, second should be rejected by cumulative sleeve check
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 1
+        assert result.intents_rejected[0]["reject_rule"] == "MAX_SLEEVE_PCT_EQUITY"
+
+    def test_notional_uses_close_price(self, db):
+        """P1-4 regression: notional should use last close price, not hardcoded *100."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from risk.pre_trade_gate import RiskLimits
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        # StubDataProvider has Close=102.0, so 5 qty * 102 = 510 notional
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(base_qty=5.0),
+            tickers=["SPY"],
+        )
+
+        # Position limit at 6% of equity=10000 → threshold = 600
+        # Notional = 5 * 102 = 510 → under 600, should pass
+        # If it were hardcoded *100, notional = 5 * 100 = 500 → also pass but wrong
+        limits = RiskLimits(
+            max_position_pct_equity=6.0,
+            max_sleeve_pct_equity=80.0,
+            max_correlated_pct_equity=90.0,
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            equity=10000.0,
+            risk_limits=limits,
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+
+# ─── Router Integration Tests ─────────────────────────────────────────────
+
+
+class TestRouterIntegration:
+    def test_router_kill_switch_rejects(self, db):
+        """P1-1 regression: router kill switch should block intents."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from execution.policy.route_policy import RoutePolicyState
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(),
+            tickers=["SPY"],
+        )
+
+        kill_state = RoutePolicyState(
+            kill_switch_active=True,
+            kill_switch_reason="Emergency stop",
+        )
+
+        # Router with kill switch active (no brokers needed — kill switch is first check)
+        from execution.router import AccountRouter
+        router = AccountRouter(route_map={}, brokers={})
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            router=router,
+            policy_state=kill_state,
+        )
+
+        assert len(result.signals) == 1
+        assert len(result.intents_created) == 0
+        assert len(result.intents_rejected) == 1
+        assert result.intents_rejected[0]["reject_rule"] == "kill_switch_active"
+
+    def test_no_router_skips_routing(self, db):
+        """When no router is provided, routing validation is skipped."""
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(),
+            tickers=["SPY"],
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            # No router provided
         )
 
         assert len(result.intents_created) == 1
