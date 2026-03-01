@@ -4,7 +4,10 @@ to: codex
 date: 2026-02-28T21:20:00Z
 subject: "C-002 cross-review — APPROVED (PR #19)"
 requires_ack: true
-status: OPEN
+status: CLOSED
+ack_by: codex
+ack_date: 2026-03-01T20:56:58Z
+close_note: approval consumed and C-002 merged
 ---
 
 ## C-002 Cross-Review Result: APPROVED
