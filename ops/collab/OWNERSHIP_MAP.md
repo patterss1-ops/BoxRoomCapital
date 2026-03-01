@@ -42,7 +42,7 @@ Defines file-scope locks for parallel execution.
 | D-003 | codex | exclusive | `execution/reconciler.py`, `portfolio/manager.py`, `tests/test_reconciler.py`, `tests/test_portfolio_manager_live_equity.py` | D-001, D-002 | D-002 first; D-003 avoids D-001 scope overlap | released | 2026-03-01T20:54:08Z |
 | D-004 | claude | exclusive | `tests/test_e2e_pipeline.py`, `notifications.py` | D-001, D-002, D-003 | D-004 runs after D-003 to validate full loop | released | 2026-03-01T21:34:33Z |
 | E-000 | codex | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `ops/collab/mailbox/inbox/**`, `ops/collab/HANDOFFS/**` | none | n/a | released | 2026-03-01T22:00:00Z |
-| E-001 | codex | exclusive | `app/signal/contracts.py`, `app/signal/types.py`, `tests/test_signal_contracts.py` | E-002, E-003, E-004, E-005 | E-001 first to freeze shared payload contract | unclaimed | 2026-03-01T21:42:10Z |
+| E-001 | codex | exclusive | `app/signal/contracts.py`, `app/signal/types.py`, `tests/test_signal_contracts.py` | E-002, E-003, E-004, E-005 | E-001 first to freeze shared payload contract | claimed | 2026-03-01T21:54:19Z |
 | E-002 | claude | exclusive | `intelligence/insider_signal_adapter.py`, `tests/test_insider_signal_adapter.py` | E-001 | E-001 then E-002 | unclaimed | 2026-03-01T21:42:10Z |
 | E-003 | codex | exclusive | `intelligence/sa_quant_client.py`, `intelligence/jobs/sa_quant_job.py`, `tests/test_sa_quant_client.py` | E-001 | E-001 then E-003 | unclaimed | 2026-03-01T21:42:10Z |
 | E-004 | claude | exclusive | `app/signal/layers/pead.py`, `tests/test_signal_layer_pead.py` | E-001 | E-001 then E-004 | unclaimed | 2026-03-01T21:42:10Z |
