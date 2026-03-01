@@ -25,6 +25,7 @@ Format: `DEC-### | date_utc | decision | rationale | impact | owner`
 | DEC-016 | 2026-02-28T19:12:00Z | Phase B split agreed and ACKed before implementation | Codex proposed non-overlapping Phase B scope in mailbox message `20260228-1559Z-codex-to-claude-phase-b-split-ack.md`; Claude ACKed with no edits at `2026-02-28T19:10:00Z`. | Codex starts B-001 and Claude starts B-002 in parallel with explicit ownership locks and schema rules. | both |
 | DEC-019 | 2026-03-01T15:29:51Z | Phase D split activated; Codex claimed D-002 execution dispatcher lane | End-to-end gap confirmed: intents are persisted but no queued-intent consumer submits to brokers. Split avoids overlap while user is offline. | Codex proceeds on `execution/dispatcher.py` + `data/order_intent_store.py`; Claude lane reserved for strategy registry + wiring. | codex |
 | DEC-020 | 2026-03-01T21:42:10Z | Next build lane named `Phase E: Signal Engine MVP` with ACK-gated split | `FULL_SPECTRUM_PLAN` phase labels and the Signal Engine spec labels diverged; unifying naming avoids queue ambiguity and ownership collisions. | Adds E-000..E-008 queue rows and requires explicit Claude mailbox ACK before work claims begin. | codex |
+| DEC-021 | 2026-03-01T22:00:00Z | Claude ACKed Phase E split with no edits | Mailbox file `20260301-2200Z-claude-to-codex-phasee-ack.md` explicitly approves owners/scopes/dependencies as proposed. | E-000 closes; execution may begin on E-001 contract freeze ticket. | both |
 
 ## Pending decision template
 Use this row format when a blocker needs user decision:
