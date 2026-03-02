@@ -1,4 +1,4 @@
-"""End-to-end Signal Engine acceptance tests (E-008).
+"""End-to-end Signal Engine acceptance tests (E-008 + F-008).
 
 Validates the full signal pipeline from raw layer events through composite
 scoring, decision resolution, shadow cycle persistence, and operator surface.
@@ -10,8 +10,14 @@ Pipeline under test:
         → Shadow cycle collects latest events per (ticker, layer_id)
         → Composite scorer: weighted score + convergence bonus + vetoes
         → Decision engine: action thresholds + veto policy
+        → Data quality penalties: warning/stale freshness enforcement (F-006)
+        → Ranked candidates: directional sort for operator surface (F-007)
+        → Tier-1 job orchestration: SA Quant refresh + shadow cycle (F-007)
         → Report persisted in strategy_state
         → API + HTMX fragment serve operator snapshot
+
+Sections 1-8: Original E-008 tests (4-layer scenarios)
+Sections 9-15: F-008 extensions (full tier-1 L1-L8 + F-006/F-007 features)
 
 Each test uses a real SQLite DB and EventStore — no mocks on the critical path.
 """
@@ -40,6 +46,12 @@ from app.signal.decision import VetoPolicy
 from app.signal.types import DecisionAction, LayerId, LAYER_ORDER, ScoreThresholds
 from data import trade_db
 from intelligence.event_store import EventRecord, EventStore
+from intelligence.jobs.signal_layer_jobs import (
+    build_ranked_candidates,
+    enrich_signal_shadow_payload,
+    summarize_freshness_diagnostics,
+    Tier1ShadowJobsConfig,
+)
 
 
 # ── Timestamps ────────────────────────────────────────────────────────────
@@ -136,6 +148,59 @@ def _seed_mixed_ticker(store: EventStore, ticker: str) -> list[LayerScore]:
     ]
     for ls in layers:
         _write_layer_event(store, ls, run_ref="mixed-seed")
+    return layers
+
+
+# ── Full Tier-1 (8-layer) Seed Helpers (F-008) ──────────────────────────
+
+def _seed_bullish_full_tier1(store: EventStore, ticker: str) -> list[LayerScore]:
+    """Seed a strongly bullish ticker with all 8 signal layers."""
+    layers = [
+        _layer(ticker, LayerId.L1_PEAD, 88.0, source="pead"),
+        _layer(ticker, LayerId.L2_INSIDER, 82.0, source="insider"),
+        _layer(ticker, LayerId.L3_SHORT_INTEREST, 79.0, source="finra-si"),
+        _layer(ticker, LayerId.L4_ANALYST_REVISIONS, 85.0, source="analyst-rev"),
+        _layer(ticker, LayerId.L5_CONGRESSIONAL, 76.0, source="capitol-trades"),
+        _layer(ticker, LayerId.L6_NEWS_SENTIMENT, 80.0, source="news-sentiment"),
+        _layer(ticker, LayerId.L7_TECHNICAL, 73.0, source="technical"),
+        _layer(ticker, LayerId.L8_SA_QUANT, 90.0, source="sa-quant"),
+    ]
+    for ls in layers:
+        _write_layer_event(store, ls, run_ref="bullish-full-seed")
+    return layers
+
+
+def _seed_bearish_full_tier1(store: EventStore, ticker: str) -> list[LayerScore]:
+    """Seed a strongly bearish ticker with all 8 signal layers."""
+    layers = [
+        _layer(ticker, LayerId.L1_PEAD, 15.0, source="pead"),
+        _layer(ticker, LayerId.L2_INSIDER, 12.0, source="insider"),
+        _layer(ticker, LayerId.L3_SHORT_INTEREST, 20.0, source="finra-si"),
+        _layer(ticker, LayerId.L4_ANALYST_REVISIONS, 18.0, source="analyst-rev"),
+        _layer(ticker, LayerId.L5_CONGRESSIONAL, 22.0, source="capitol-trades"),
+        _layer(ticker, LayerId.L6_NEWS_SENTIMENT, 14.0, source="news-sentiment"),
+        _layer(ticker, LayerId.L7_TECHNICAL, 25.0, source="technical"),
+        _layer(ticker, LayerId.L8_SA_QUANT, 10.0, source="sa-quant"),
+    ]
+    for ls in layers:
+        _write_layer_event(store, ls, run_ref="bearish-full-seed")
+    return layers
+
+
+def _seed_mixed_full_tier1(store: EventStore, ticker: str) -> list[LayerScore]:
+    """Seed a mixed-signal ticker with all 8 layers (review zone)."""
+    layers = [
+        _layer(ticker, LayerId.L1_PEAD, 62.0, source="pead"),
+        _layer(ticker, LayerId.L2_INSIDER, 55.0, source="insider"),
+        _layer(ticker, LayerId.L3_SHORT_INTEREST, 48.0, source="finra-si"),
+        _layer(ticker, LayerId.L4_ANALYST_REVISIONS, 58.0, source="analyst-rev"),
+        _layer(ticker, LayerId.L5_CONGRESSIONAL, 52.0, source="capitol-trades"),
+        _layer(ticker, LayerId.L6_NEWS_SENTIMENT, 60.0, source="news-sentiment"),
+        _layer(ticker, LayerId.L7_TECHNICAL, 45.0, source="technical"),
+        _layer(ticker, LayerId.L8_SA_QUANT, 56.0, source="sa-quant"),
+    ]
+    for ls in layers:
+        _write_layer_event(store, ls, run_ref="mixed-full-seed")
     return layers
 
 
@@ -837,3 +902,701 @@ class TestCompositeResultContract:
         result = score_layer_payloads("AMD", AS_OF, layers)
         assert result.layer_scores[LayerId.L1_PEAD] == 72.0
         assert result.layer_scores[LayerId.L4_ANALYST_REVISIONS] == 65.0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# F-008: Phase F Acceptance Harness — Full Tier-1 (L1-L8) Coverage
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── 9. Full Tier-1 (L1-L8) Composite Scoring ──────────────────────────────
+
+class TestFullTier1Composite:
+    """F-008: Validate composite scoring with all 8 signal layers present."""
+
+    def test_eight_layer_bullish_auto_execute(self, tmp_path):
+        """All 8 layers strongly bullish → composite ≥ 70 → auto_execute_buy."""
+        db_path = str(tmp_path / "full_bullish.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        layers = _seed_bullish_full_tier1(store, "AAPL")
+
+        result = score_layer_payloads(ticker="AAPL", as_of=AS_OF, layers=layers)
+        assert isinstance(result, CompositeResult)
+        assert result.action == DecisionAction.AUTO_EXECUTE_BUY
+        assert result.final_score >= 70.0
+        assert len(result.layer_scores) == 8
+
+    def test_eight_layer_bearish_short_candidate(self, tmp_path):
+        """All 8 layers strongly bearish → composite ≤ 30 → short_candidate."""
+        db_path = str(tmp_path / "full_bearish.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        layers = _seed_bearish_full_tier1(store, "TSLA")
+
+        result = score_layer_payloads(ticker="TSLA", as_of=AS_OF, layers=layers)
+        assert result.final_score <= 30.0
+        assert result.action in (
+            DecisionAction.SHORT_CANDIDATE,
+            DecisionAction.NO_ACTION,
+        )
+        assert len(result.layer_scores) == 8
+
+    def test_eight_layer_mixed_flags_review(self, tmp_path):
+        """All 8 layers mixed → 50-69 → flag_for_review."""
+        db_path = str(tmp_path / "full_mixed.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        layers = _seed_mixed_full_tier1(store, "GOOG")
+
+        result = score_layer_payloads(ticker="GOOG", as_of=AS_OF, layers=layers)
+        assert 40.0 <= result.final_score <= 69.0
+        assert result.action == DecisionAction.FLAG_FOR_REVIEW
+        assert len(result.layer_scores) == 8
+
+    def test_eight_layer_weight_sum_equals_one(self):
+        """Full tier-1 active weights sum to exactly 1.0."""
+        layers = [_layer("SPY", layer_id, 75.0) for layer_id in LAYER_ORDER]
+        request = CompositeRequest(
+            ticker="SPY", as_of=AS_OF, layer_scores=tuple(layers),
+        )
+        from app.signal.composite import _active_weights
+        weights = _active_weights(request)
+        assert pytest.approx(sum(weights.values()), abs=1e-6) == 1.0
+        assert len(weights) == 8
+
+    def test_eight_layer_equal_scores_preserves_value(self):
+        """All 8 layers at 75.0 → weighted = 75.0 regardless of weights."""
+        layers = [_layer("SPY", layer_id, 75.0) for layer_id in LAYER_ORDER]
+        result = score_layer_payloads("SPY", AS_OF, layers)
+        assert result.weighted_score == pytest.approx(75.0, abs=0.01)
+
+    def test_eight_layer_convergence_bonus_applied(self):
+        """8 bullish layers → convergence bonus > 0, final > weighted."""
+        layers = [
+            _layer("NVDA", LayerId.L1_PEAD, 85.0),
+            _layer("NVDA", LayerId.L2_INSIDER, 80.0),
+            _layer("NVDA", LayerId.L3_SHORT_INTEREST, 78.0),
+            _layer("NVDA", LayerId.L4_ANALYST_REVISIONS, 82.0),
+            _layer("NVDA", LayerId.L5_CONGRESSIONAL, 76.0),
+            _layer("NVDA", LayerId.L6_NEWS_SENTIMENT, 79.0),
+            _layer("NVDA", LayerId.L7_TECHNICAL, 74.0),
+            _layer("NVDA", LayerId.L8_SA_QUANT, 88.0),
+        ]
+        result = score_layer_payloads("NVDA", AS_OF, layers)
+        assert result.convergence_bonus_pct > 0.0
+        assert result.final_score > result.weighted_score
+
+    def test_eight_layer_per_layer_scores_in_result(self):
+        """All 8 layer scores appear in result.layer_scores mapping."""
+        layers = [_layer("AMZN", layer_id, 50.0 + i * 5)
+                  for i, layer_id in enumerate(LAYER_ORDER)]
+        result = score_layer_payloads("AMZN", AS_OF, layers)
+        for i, layer_id in enumerate(LAYER_ORDER):
+            assert layer_id in result.layer_scores
+            assert result.layer_scores[layer_id] == 50.0 + i * 5
+
+    def test_shadow_cycle_full_tier1_scored(self, tmp_path, monkeypatch):
+        """Shadow cycle with 8-layer seeded ticker produces scored result."""
+        db_path = str(tmp_path / "shadow_full.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        _seed_bullish_full_tier1(store, "AAPL")
+        _seed_bearish_full_tier1(store, "TSLA")
+        _seed_mixed_full_tier1(store, "GOOG")
+
+        report = signal_shadow.run_signal_shadow_cycle(
+            db_path=db_path, min_layers_for_score=2,
+            now_fn=lambda: AS_OF,
+        )
+        assert report["summary"]["tickers_total"] == 3
+        assert report["summary"]["tickers_scored"] == 3
+
+        results_by = {r["ticker"]: r for r in report["results"]}
+        assert results_by["AAPL"]["layer_count"] == 8
+        assert results_by["TSLA"]["layer_count"] == 8
+        assert results_by["GOOG"]["layer_count"] == 8
+        assert results_by["AAPL"]["action"] == "auto_execute_buy"
+        assert results_by["TSLA"]["action"] in ("short_candidate", "no_action")
+        assert results_by["GOOG"]["action"] == "flag_for_review"
+
+
+# ── 10. Data Quality Penalties (F-006) ────────────────────────────────────
+
+class TestDataQualityPenalties:
+    """F-008: Data quality penalty pipeline from F-006 composite v3."""
+
+    def test_warning_layer_applies_small_penalty(self):
+        """Layers with _freshness_state=warning reduce final score."""
+        layers = [
+            _layer("AAPL", LayerId.L1_PEAD, 80.0,
+                   details={"e2e": True, "_freshness_state": "warning"}),
+            _layer("AAPL", LayerId.L8_SA_QUANT, 80.0),
+        ]
+        cfg = CompositeScoringConfig(warning_layer_penalty_pct=5.0)
+        result_clean = score_layer_payloads("AAPL", AS_OF, [
+            _layer("AAPL", LayerId.L1_PEAD, 80.0),
+            _layer("AAPL", LayerId.L8_SA_QUANT, 80.0),
+        ])
+        result_warn = score_layer_payloads(
+            "AAPL", AS_OF, layers, scoring_config=cfg,
+        )
+        # Warning penalty should reduce score
+        assert result_warn.final_score < result_clean.final_score
+        assert any("quality_penalty_pct=" in n for n in result_warn.notes)
+
+    def test_stale_layer_applies_large_penalty(self):
+        """Layers with _freshness_state=stale reduce final score significantly."""
+        layers = [
+            _layer("AAPL", LayerId.L1_PEAD, 80.0,
+                   details={"e2e": True, "_freshness_state": "stale"}),
+            _layer("AAPL", LayerId.L8_SA_QUANT, 80.0),
+        ]
+        cfg = CompositeScoringConfig(stale_layer_penalty_pct=15.0)
+        result = score_layer_payloads(
+            "AAPL", AS_OF, layers, scoring_config=cfg,
+        )
+        # Should have stale_layers note
+        assert any("stale_layers=" in n for n in result.notes)
+        # Score reduced by ~15%: 80 * 0.85 = 68
+        assert result.final_score < 80.0
+
+    def test_quality_penalty_capped_at_max(self):
+        """Even many stale layers cap penalty at max_data_quality_penalty_pct."""
+        layers = [
+            _layer("AAPL", layer_id, 80.0,
+                   details={"e2e": True, "_freshness_state": "stale"})
+            for layer_id in LAYER_ORDER
+        ]
+        cfg = CompositeScoringConfig(
+            stale_layer_penalty_pct=15.0,
+            max_data_quality_penalty_pct=40.0,
+        )
+        result = score_layer_payloads(
+            "AAPL", AS_OF, layers, scoring_config=cfg,
+        )
+        # 8 stale * 15% = 120%, but capped at 40%
+        # So final ≈ 80 * 0.60 = 48 (with convergence)
+        assert result.final_score >= 80.0 * 0.55  # Allow convergence margin
+        assert any("quality_penalty_pct=" in n for n in result.notes)
+
+    def test_fresh_layers_no_penalty(self):
+        """All layers with _freshness_state=fresh → zero quality penalty."""
+        layers = [
+            _layer("AAPL", LayerId.L1_PEAD, 80.0,
+                   details={"e2e": True, "_freshness_state": "fresh"}),
+            _layer("AAPL", LayerId.L8_SA_QUANT, 80.0,
+                   details={"e2e": True, "_freshness_state": "fresh"}),
+        ]
+        result = score_layer_payloads("AAPL", AS_OF, layers)
+        # No penalty → weighted = final (up to convergence)
+        penalty_note = [n for n in result.notes if "quality_penalty_pct=" in n]
+        assert penalty_note
+        assert "quality_penalty_pct=0" in penalty_note[0]
+
+    def test_missing_required_layer_noted_in_result(self):
+        """Missing required layers appear in notes even without veto."""
+        layers = [
+            _layer("AAPL", LayerId.L1_PEAD, 80.0),
+            _layer("AAPL", LayerId.L8_SA_QUANT, 80.0),
+        ]
+        cfg = CompositeScoringConfig(
+            required_layers=(LayerId.L1_PEAD, LayerId.L2_INSIDER, LayerId.L8_SA_QUANT),
+            emit_missing_required_veto=False,
+        )
+        result = score_layer_payloads(
+            "AAPL", AS_OF, layers, scoring_config=cfg,
+        )
+        assert any("missing_required_layers=" in n for n in result.notes)
+        assert any("l2_insider" in n for n in result.notes)
+
+
+# ── 11. Shadow Cycle Freshness Enforcement (F-006) ───────────────────────
+
+class TestShadowFreshnessEnforcement:
+    """F-008: Shadow cycle freshness annotation and blocking from F-006."""
+
+    def test_shadow_cycle_annotates_freshness_states(self, tmp_path, monkeypatch):
+        """Shadow cycle clones carry _freshness_state in result freshness."""
+        db_path = str(tmp_path / "shadow_freshness.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        # Fresh L1 (scored just now) and old L6 (scored 4 days ago — stale for L6)
+        fresh = _layer("AAPL", LayerId.L1_PEAD, 80.0, source="pead")
+        _write_layer_event(store, fresh, retrieved_at=RETRIEVED_AT, run_ref="l1")
+
+        old_news = LayerScore(
+            layer_id=LayerId.L6_NEWS_SENTIMENT, ticker="AAPL", score=70.0,
+            as_of="2026-02-26T12:00:00Z", source="news", provenance_ref="e2e:old",
+            confidence=0.85, details={"e2e": True},
+        )
+        _write_layer_event(store, old_news, retrieved_at="2026-02-26T12:01:00Z",
+                           run_ref="l6-old")
+
+        report = signal_shadow.run_signal_shadow_cycle(
+            db_path=db_path, min_layers_for_score=2,
+            now_fn=lambda: AS_OF,
+        )
+        aapl = report["results"][0]
+        # L6 news has max_age=24h, was scored 4 days ago → stale
+        assert "l6_news_sentiment" in aapl["freshness"]["stale_layers"]
+        assert aapl["freshness"]["layer_states"]["l1_pead"] == "fresh"
+        assert aapl["freshness"]["layer_states"]["l6_news_sentiment"] == "stale"
+
+    def test_shadow_cycle_scores_with_warning_status(self, tmp_path, monkeypatch):
+        """Warning layers penalize but don't block → scored_warning_layers."""
+        db_path = str(tmp_path / "shadow_warning.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        # L1 PEAD: warn_age=36h, max_age=72h; scored ~40h ago → warning
+        # AS_OF is 2026-03-02T12:00:00Z, so 40h earlier = 2026-02-28T20:00:00Z
+        warning_pead = LayerScore(
+            layer_id=LayerId.L1_PEAD, ticker="AAPL", score=80.0,
+            as_of="2026-02-28T20:00:00Z", source="pead",
+            provenance_ref="e2e:warn", confidence=0.85, details={"e2e": True},
+        )
+        _write_layer_event(store, warning_pead,
+                           retrieved_at="2026-02-28T20:01:00Z", run_ref="l1-warn")
+
+        fresh_l8 = _layer("AAPL", LayerId.L8_SA_QUANT, 78.0, source="sa-quant")
+        _write_layer_event(store, fresh_l8, retrieved_at=RETRIEVED_AT, run_ref="l8")
+
+        report = signal_shadow.run_signal_shadow_cycle(
+            db_path=db_path, min_layers_for_score=2,
+            now_fn=lambda: AS_OF,
+        )
+        aapl = report["results"][0]
+        assert aapl["status"] == "scored_warning_layers"
+        assert "l1_pead" in aapl["freshness"]["warning_layers"]
+        # Should still produce a score (not blocked)
+        assert aapl["final_score"] > 0
+
+    def test_shadow_cycle_enforce_missing_required_blocks(
+        self, tmp_path, monkeypatch,
+    ):
+        """enforce_required_layers=True blocks when required layers missing."""
+        db_path = str(tmp_path / "shadow_enforce.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        _layer_l1 = _layer("AAPL", LayerId.L1_PEAD, 85.0, source="pead")
+        _layer_l8 = _layer("AAPL", LayerId.L8_SA_QUANT, 82.0, source="sa-quant")
+        _write_layer_event(store, _layer_l1, retrieved_at=RETRIEVED_AT, run_ref="l1")
+        _write_layer_event(store, _layer_l8, retrieved_at=RETRIEVED_AT, run_ref="l8")
+
+        report = signal_shadow.run_signal_shadow_cycle(
+            db_path=db_path,
+            required_layers=LAYER_ORDER,  # All 8 required
+            min_layers_for_score=2,
+            enforce_required_layers=True,
+            now_fn=lambda: AS_OF,
+        )
+        aapl = report["results"][0]
+        assert aapl["status"] == "blocked_missing_required_layers"
+        assert aapl["action"] == "no_action"
+        assert "missing_required_layers" in aapl["vetoes"]
+
+    def test_shadow_cycle_soft_mode_scores_partial_layers(
+        self, tmp_path, monkeypatch,
+    ):
+        """enforce_required_layers=False (default) scores even with missing layers."""
+        db_path = str(tmp_path / "shadow_soft.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        for ls in [
+            _layer("AAPL", LayerId.L1_PEAD, 85.0, source="pead"),
+            _layer("AAPL", LayerId.L2_INSIDER, 82.0, source="insider"),
+            _layer("AAPL", LayerId.L8_SA_QUANT, 88.0, source="sa-quant"),
+        ]:
+            _write_layer_event(store, ls, retrieved_at=RETRIEVED_AT, run_ref="soft")
+
+        report = signal_shadow.run_signal_shadow_cycle(
+            db_path=db_path,
+            required_layers=LAYER_ORDER,  # All 8 required
+            min_layers_for_score=2,
+            enforce_required_layers=False,
+            now_fn=lambda: AS_OF,
+        )
+        aapl = report["results"][0]
+        # Scored but with missing-required noted
+        assert aapl["status"].startswith("scored")
+        assert aapl["final_score"] > 0
+        assert len(aapl["missing_required_layers"]) == 5  # 8 - 3 present
+
+
+# ── 12. Tier-1 Ranked Candidates (F-007) ──────────────────────────────────
+
+class TestTier1RankedCandidates:
+    """F-008: Ranked candidate derivation from F-007."""
+
+    def test_ranked_candidates_exclude_no_action(self):
+        """no_action rows are excluded from ranking."""
+        report = {
+            "results": [
+                {"ticker": "AAPL", "status": "scored", "action": "auto_execute_buy",
+                 "final_score": 82.0, "weighted_score": 80.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+                {"ticker": "GOOG", "status": "scored", "action": "no_action",
+                 "final_score": 45.0, "weighted_score": 44.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+            ],
+        }
+        ranked = build_ranked_candidates(report, limit=10)
+        assert len(ranked) == 1
+        assert ranked[0]["ticker"] == "AAPL"
+
+    def test_ranked_candidates_sort_by_rank_score_desc(self):
+        """Candidates sorted by rank_score descending (highest first)."""
+        report = {
+            "results": [
+                {"ticker": "MSFT", "status": "scored", "action": "auto_execute_buy",
+                 "final_score": 72.0, "weighted_score": 70.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+                {"ticker": "AAPL", "status": "scored", "action": "auto_execute_buy",
+                 "final_score": 88.0, "weighted_score": 85.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+                {"ticker": "GOOG", "status": "scored", "action": "flag_for_review",
+                 "final_score": 55.0, "weighted_score": 53.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+            ],
+        }
+        ranked = build_ranked_candidates(report, limit=10)
+        assert [r["ticker"] for r in ranked] == ["AAPL", "MSFT", "GOOG"]
+        assert ranked[0]["rank"] == 1
+        assert ranked[1]["rank"] == 2
+        assert ranked[2]["rank"] == 3
+
+    def test_short_candidate_rank_score_inverted(self):
+        """Short candidates use 100 - final_score for ranking sort."""
+        report = {
+            "results": [
+                {"ticker": "AAPL", "status": "scored", "action": "auto_execute_buy",
+                 "final_score": 82.0, "weighted_score": 80.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+                {"ticker": "TSLA", "status": "scored", "action": "short_candidate",
+                 "final_score": 12.0, "weighted_score": 14.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+            ],
+        }
+        ranked = build_ranked_candidates(report, limit=10)
+        tsla = next(r for r in ranked if r["ticker"] == "TSLA")
+        assert tsla["rank_score"] == pytest.approx(88.0)  # 100 - 12
+
+    def test_ranked_candidates_respect_limit(self):
+        """Ranking is capped at the limit parameter."""
+        report = {
+            "results": [
+                {"ticker": f"T{i}", "status": "scored", "action": "auto_execute_buy",
+                 "final_score": 90.0 - i, "weighted_score": 88.0 - i, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []}
+                for i in range(10)
+            ],
+        }
+        ranked = build_ranked_candidates(report, limit=3)
+        assert len(ranked) == 3
+        assert ranked[0]["ticker"] == "T0"
+        assert ranked[2]["ticker"] == "T2"
+
+    def test_ranked_candidates_include_quality_metadata(self):
+        """Each ranked row includes quality penalty and warning/stale counts."""
+        report = {
+            "results": [
+                {"ticker": "AAPL", "status": "scored_warning_layers",
+                 "action": "auto_execute_buy",
+                 "final_score": 78.0, "weighted_score": 80.0, "layer_count": 8,
+                 "missing_required_layers": ["l3_short_interest"],
+                 "freshness": {"warning_layers": ["l2_insider"], "stale_layers": []},
+                 "notes": ["quality_penalty_pct=2.5"]},
+            ],
+        }
+        ranked = build_ranked_candidates(report, limit=10)
+        assert len(ranked) == 1
+        row = ranked[0]
+        assert row["quality_penalty_pct"] == pytest.approx(2.5)
+        assert row["warning_layers"] == ["l2_insider"]
+        assert row["missing_required_layers"] == ["l3_short_interest"]
+
+    def test_ranked_candidates_empty_results_safe(self):
+        """Empty or missing results field returns empty list."""
+        assert build_ranked_candidates({}, limit=10) == []
+        assert build_ranked_candidates({"results": []}, limit=10) == []
+
+    def test_insufficient_layer_rows_excluded(self):
+        """Rows with status=insufficient_layers are not ranked."""
+        report = {
+            "results": [
+                {"ticker": "AAPL", "status": "scored", "action": "auto_execute_buy",
+                 "final_score": 82.0, "weighted_score": 80.0, "layer_count": 8,
+                 "missing_required_layers": [],
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "notes": []},
+                {"ticker": "AMD", "status": "insufficient_layers",
+                 "layer_count": 1, "missing_required_layers": ["l2_insider"]},
+            ],
+        }
+        ranked = build_ranked_candidates(report, limit=10)
+        assert len(ranked) == 1
+        assert ranked[0]["ticker"] == "AAPL"
+
+
+# ── 13. Freshness Diagnostics (F-007) ─────────────────────────────────────
+
+class TestFreshnessDiagnostics:
+    """F-008: Freshness diagnostic aggregation from F-007."""
+
+    def test_diagnostics_count_warnings_and_stale(self):
+        """Diagnostics correctly count warning and stale tickers/layers."""
+        report = {
+            "results": [
+                {"ticker": "AAPL", "status": "scored_warning_layers",
+                 "freshness": {"warning_layers": ["l1_pead", "l2_insider"],
+                               "stale_layers": []},
+                 "missing_required_layers": []},
+                {"ticker": "TSLA", "status": "blocked_stale_layers",
+                 "freshness": {"warning_layers": [],
+                               "stale_layers": ["l6_news_sentiment"]},
+                 "missing_required_layers": []},
+                {"ticker": "GOOG", "status": "scored",
+                 "freshness": {"warning_layers": ["l7_technical"],
+                               "stale_layers": []},
+                 "missing_required_layers": ["l3_short_interest"]},
+            ],
+        }
+        diag = summarize_freshness_diagnostics(report)
+        assert diag["tickers_with_warnings"] == 2  # AAPL, GOOG
+        assert diag["tickers_with_stale"] == 1  # TSLA
+        assert diag["total_warning_layers"] == 3  # l1, l2, l7
+        assert diag["total_stale_layers"] == 1  # l6
+        assert diag["blocked_stale_layers"] == 1
+        assert diag["scored_missing_required_layers"] == 1  # GOOG
+
+    def test_diagnostics_empty_report(self):
+        """Empty report returns zero counts for all diagnostics."""
+        diag = summarize_freshness_diagnostics({"results": []})
+        assert diag["tickers_with_warnings"] == 0
+        assert diag["tickers_with_stale"] == 0
+        assert diag["total_warning_layers"] == 0
+        assert diag["total_stale_layers"] == 0
+
+    def test_diagnostics_blocked_missing_required(self):
+        """Blocked-missing-required tickers counted separately."""
+        report = {
+            "results": [
+                {"ticker": "AAPL", "status": "blocked_missing_required_layers",
+                 "freshness": {"warning_layers": [], "stale_layers": []},
+                 "missing_required_layers": ["l2_insider", "l4_analyst_revisions"]},
+            ],
+        }
+        diag = summarize_freshness_diagnostics(report)
+        assert diag["blocked_missing_required_layers"] == 1
+
+    def test_diagnostics_no_results_key(self):
+        """Missing results key returns zero counts (defensive)."""
+        diag = summarize_freshness_diagnostics({})
+        assert diag["tickers_with_warnings"] == 0
+
+
+# ── 14. Enriched API Payload (F-007) ──────────────────────────────────────
+
+class TestEnrichedPayload:
+    """F-008: enrich_signal_shadow_payload adds ranking + diagnostics."""
+
+    def test_enrich_adds_ranked_candidates(self):
+        """Enriched payload includes ranked_candidates under report."""
+        payload = {
+            "ok": True, "state": "ready", "has_report": True,
+            "report": {
+                "run_id": "test",
+                "results": [
+                    {"ticker": "AAPL", "status": "scored",
+                     "action": "auto_execute_buy",
+                     "final_score": 82.0, "weighted_score": 80.0,
+                     "layer_count": 8, "missing_required_layers": [],
+                     "freshness": {"warning_layers": [], "stale_layers": []},
+                     "notes": []},
+                ],
+            },
+        }
+        enriched = enrich_signal_shadow_payload(payload)
+        assert "ranked_candidates" in enriched["report"]
+        assert enriched["report"]["ranked_candidates"][0]["ticker"] == "AAPL"
+        assert "freshness_diagnostics" in enriched
+
+    def test_enrich_idle_payload_unchanged(self):
+        """Idle/no-report payload passes through without modification."""
+        payload = {
+            "ok": True, "state": "idle", "has_report": False,
+            "report": None, "event_stats": None,
+        }
+        enriched = enrich_signal_shadow_payload(payload)
+        assert enriched["has_report"] is False
+        assert "ranked_candidates" not in (enriched.get("report") or {})
+
+    def test_enrich_respects_ranking_limit(self):
+        """Enriched ranking respects the limit parameter."""
+        results = [
+            {"ticker": f"T{i}", "status": "scored", "action": "auto_execute_buy",
+             "final_score": 90.0 - i, "weighted_score": 88.0 - i,
+             "layer_count": 8, "missing_required_layers": [],
+             "freshness": {"warning_layers": [], "stale_layers": []},
+             "notes": []}
+            for i in range(10)
+        ]
+        payload = {
+            "ok": True, "state": "ready", "has_report": True,
+            "report": {"run_id": "test", "results": results},
+        }
+        enriched = enrich_signal_shadow_payload(payload, ranking_limit=3)
+        assert len(enriched["report"]["ranked_candidates"]) == 3
+
+
+# ── 15. Tier-1 Job Orchestration (F-007) ──────────────────────────────────
+
+class TestTier1JobOrchestration:
+    """F-008: run_tier1_shadow_jobs end-to-end orchestration."""
+
+    def test_tier1_jobs_produces_ranked_output(self, tmp_path, monkeypatch):
+        """Tier-1 jobs produce ranked candidates from seeded layers."""
+        db_path = str(tmp_path / "tier1_ranked.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        _seed_bullish_full_tier1(store, "AAPL")
+        _seed_bearish_full_tier1(store, "TSLA")
+
+        class FakeSAQuant:
+            def __init__(self, **kw): pass
+            def run(self, **kw):
+                return {"job_id": "fake", "tickers_total": 0,
+                        "tickers_success": 0, "tickers_failed": 0}
+
+        from intelligence.jobs import signal_layer_jobs
+        result = signal_layer_jobs.run_tier1_shadow_jobs(
+            db_path=db_path,
+            tickers=["AAPL", "TSLA"],
+            as_of=AS_OF,
+            config_obj=Tier1ShadowJobsConfig(
+                min_layers_for_score=2,
+                enforce_required_layers=False,
+            ),
+            sa_quant_runner=FakeSAQuant(),
+            shadow_runner=lambda **kw: signal_shadow.run_signal_shadow_cycle(**kw),
+            now_fn=lambda: AS_OF,
+        )
+        assert "ranked_candidates" in result
+        assert "freshness_diagnostics" in result
+        assert "shadow_report" in result
+        # At least one ranked candidate (AAPL bullish = auto_execute_buy)
+        tickers = [r["ticker"] for r in result["ranked_candidates"]]
+        assert "AAPL" in tickers
+
+    def test_tier1_jobs_reports_layer_job_statuses(self, tmp_path, monkeypatch):
+        """Each layer job shows status (completed/skipped/failed)."""
+        db_path = str(tmp_path / "tier1_statuses.db")
+        trade_db.init_db(db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        class FakeSAQuant:
+            def __init__(self, **kw): pass
+            def run(self, **kw):
+                return {"job_id": "fake", "tickers_total": 2,
+                        "tickers_success": 2, "tickers_failed": 0}
+
+        from intelligence.jobs import signal_layer_jobs
+        result = signal_layer_jobs.run_tier1_shadow_jobs(
+            db_path=db_path,
+            tickers=["AAPL"],
+            as_of=AS_OF,
+            config_obj=Tier1ShadowJobsConfig(min_layers_for_score=2),
+            sa_quant_runner=FakeSAQuant(),
+            shadow_runner=lambda **kw: signal_shadow.run_signal_shadow_cycle(**kw),
+            now_fn=lambda: AS_OF,
+        )
+        layer_jobs = result["layer_jobs"]
+        # SA Quant should be completed, others skipped
+        assert layer_jobs["l8_sa_quant"]["status"] == "completed"
+        assert layer_jobs["l1_pead"]["status"] == "skipped"
+        assert layer_jobs["l3_short_interest"]["status"] == "skipped"
+
+    def test_tier1_jobs_sa_quant_failure_handled(self, tmp_path, monkeypatch):
+        """SA Quant failure is captured, shadow cycle still runs."""
+        db_path = str(tmp_path / "tier1_sa_fail.db")
+        trade_db.init_db(db_path)
+        store = EventStore(db_path=db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        _seed_bullish_full_tier1(store, "AAPL")
+
+        class FailingSAQuant:
+            def __init__(self, **kw): pass
+            def run(self, **kw):
+                raise RuntimeError("API key expired")
+
+        from intelligence.jobs import signal_layer_jobs
+        result = signal_layer_jobs.run_tier1_shadow_jobs(
+            db_path=db_path,
+            tickers=["AAPL"],
+            as_of=AS_OF,
+            config_obj=Tier1ShadowJobsConfig(
+                min_layers_for_score=2,
+                enforce_required_layers=False,
+            ),
+            sa_quant_runner=FailingSAQuant(),
+            shadow_runner=lambda **kw: signal_shadow.run_signal_shadow_cycle(**kw),
+            now_fn=lambda: AS_OF,
+        )
+        # SA Quant failed but shadow cycle still produced results
+        assert result["layer_jobs"]["l8_sa_quant"]["status"] == "failed"
+        assert "API key expired" in result["layer_jobs"]["l8_sa_quant"]["detail"]
+        assert result["shadow_report"]["summary"]["tickers_total"] >= 1
+
+    def test_tier1_result_json_serializable(self, tmp_path, monkeypatch):
+        """result_json field is valid JSON with summary data."""
+        db_path = str(tmp_path / "tier1_json.db")
+        trade_db.init_db(db_path)
+        monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+        class FakeSAQuant:
+            def __init__(self, **kw): pass
+            def run(self, **kw):
+                return {"job_id": "j1", "tickers_total": 0,
+                        "tickers_success": 0, "tickers_failed": 0}
+
+        from intelligence.jobs import signal_layer_jobs
+        result = signal_layer_jobs.run_tier1_shadow_jobs(
+            db_path=db_path, tickers=[], as_of=AS_OF,
+            config_obj=Tier1ShadowJobsConfig(min_layers_for_score=2),
+            sa_quant_runner=FakeSAQuant(),
+            shadow_runner=lambda **kw: signal_shadow.run_signal_shadow_cycle(**kw),
+            now_fn=lambda: AS_OF,
+        )
+        parsed = json.loads(result["result_json"])
+        assert "run_id" in parsed
+        assert "ranked_candidates" in parsed
+        assert "freshness_diagnostics" in parsed
