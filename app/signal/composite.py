@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, Mapping, Optional, Sequence, Tuple
 
-from app.signal.contracts import CompositeRequest, CompositeResult, build_composite_result
+from app.signal.contracts import CompositeRequest, CompositeResult
 from app.signal.decision import (
     VetoPolicy,
     extract_layer_vetoes,
@@ -162,25 +162,37 @@ def evaluate_composite(
     score_map = request.score_map()
     bonus_pct = compute_convergence_bonus(score_map, config=scoring_config)
     vetoes = evaluate_vetoes(request, external_vetoes=external_vetoes, config=scoring_config)
-
-    uncapped_final = weighted * (1.0 + (bonus_pct / 100.0))
+    direction, _, _ = _convergence_direction(score_map, scoring_config)
+    multiplier = 1.0
+    if bonus_pct > 0.0:
+        if direction == "bearish":
+            # Bearish convergence should push score lower, away from neutral.
+            multiplier = 1.0 - (bonus_pct / 100.0)
+        elif direction == "bullish":
+            multiplier = 1.0 + (bonus_pct / 100.0)
+    uncapped_final = weighted * multiplier
+    final_score = max(0.0, min(100.0, uncapped_final))
     action = resolve_action(
-        final_score=uncapped_final,
+        final_score=final_score,
         thresholds=request.thresholds,
         vetoes=vetoes,
         policy=veto_policy,
     )
 
-    return build_composite_result(
-        request=request,
-        weighted_score=weighted,
-        convergence_bonus_pct=bonus_pct,
-        vetoes=vetoes,
+    return CompositeResult(
+        ticker=request.ticker,
+        as_of=request.as_of,
+        weighted_score=float(weighted),
+        convergence_bonus_pct=float(bonus_pct),
+        final_score=float(final_score),
+        action=action,
+        layer_scores=request.score_map(),
+        vetoes=tuple(vetoes or ()),
         notes=(
             f"active_layers={len(request.layer_scores)}",
             f"bonus_pct={round(bonus_pct, 4)}",
+            f"bonus_direction={direction}",
         ),
-        action=action,
     )
 
 

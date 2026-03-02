@@ -74,10 +74,10 @@ def resolve_action(
         return base
 
     veto_set = set(normalized)
-    if veto_set.intersection(policy.force_short_vetoes):
-        return DecisionAction.SHORT_CANDIDATE
-
     if veto_set.intersection(policy.hard_block_vetoes):
         return DecisionAction.NO_ACTION
+
+    if veto_set.intersection(policy.force_short_vetoes):
+        return DecisionAction.SHORT_CANDIDATE
 
     return base

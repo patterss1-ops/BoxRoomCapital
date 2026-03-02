@@ -166,6 +166,17 @@ class TestDecisionResolution:
         )
         assert action == DecisionAction.SHORT_CANDIDATE
 
+    def test_hard_block_veto_has_priority_over_force_short(self):
+        thresholds = ScoreThresholds(auto_execute_gte=70, review_gte=50, short_lte=30)
+        policy = VetoPolicy(force_short_vetoes=("macro_risk_off",))
+        action = resolve_action(
+            final_score=95.0,
+            thresholds=thresholds,
+            vetoes=("macro_risk_off", "kill_switch_active"),
+            policy=policy,
+        )
+        assert action == DecisionAction.NO_ACTION
+
 
 class TestCompositeIntegration:
     def test_evaluate_composite_applies_bonus_and_action(self):
@@ -195,6 +206,20 @@ class TestCompositeIntegration:
 
         assert "insider_sell_cluster" in result.vetoes
         assert result.action == DecisionAction.NO_ACTION
+
+    def test_bearish_bonus_decreases_score_and_can_trigger_short(self):
+        req = _request(
+            _layer(LayerId.L1_PEAD, 31.0),
+            _layer(LayerId.L2_INSIDER, 31.0),
+            _layer(LayerId.L4_ANALYST_REVISIONS, 31.0),
+            _layer(LayerId.L8_SA_QUANT, 31.0),
+        )
+        result = evaluate_composite(req)
+
+        # Regression: bearish convergence bonus must reduce score (not increase it).
+        assert result.convergence_bonus_pct > 0.0
+        assert result.final_score < result.weighted_score
+        assert result.action == DecisionAction.SHORT_CANDIDATE
 
     def test_score_layer_payloads_wrapper(self):
         result = score_layer_payloads(
