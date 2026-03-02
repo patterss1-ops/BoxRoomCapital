@@ -14,9 +14,13 @@ Academic and practitioner evidence:
     setups and bearish risk.
 
 Score composition:
-  1. Level Score (0-30): absolute SI% relative to shares outstanding
-  2. Trend Score (0-35): direction & magnitude of SI change
-  3. Days-to-Cover Score (0-20): squeeze pressure signal
+  1. Trend Score (0-35): direction & magnitude of SI change — the
+     primary directional signal.
+  2. Level Score (0-30): absolute SI% — amplifies the trend signal.
+     High SI + covering = strong squeeze setup (full points).
+     High SI + increasing = deep bearish control (inverted to 0).
+  3. Days-to-Cover Score (0-20): squeeze pressure — only additive
+     when trend is bullish (covering); inverted when bearish.
   4. Consistency Score (0-15): multi-period trend confirmation
 
 Data source:  FINRA bi-monthly short-interest settlement reports,
@@ -138,12 +142,39 @@ def _trend_score(
         return config.trend_neutral_score  # tiny increase
 
 
-def _dtc_score(days_to_cover: float, config: ShortInterestScoringConfig) -> float:
-    """Score based on days-to-cover (squeeze pressure indicator)."""
+def _dtc_raw(days_to_cover: float, config: ShortInterestScoringConfig) -> float:
+    """Raw DTC magnitude (before direction modulation)."""
     for min_dtc, points in config.dtc_breakpoints:
         if days_to_cover >= min_dtc:
             return points
     return 0.0
+
+
+def _direction_multiplier(change_pct: Optional[float]) -> float:
+    """Return a multiplier in [0, 1] that modulates level/dtc by trend.
+
+    When shorts are covering (negative change) → 1.0 (full amplification).
+    When no trend data → 0.5 (neutral).
+    When shorts are increasing (positive change) → 0.0 (suppress level/dtc).
+
+    This ensures that high SI% and high DTC only boost the score when
+    the trend is bullish (covering), and suppress it when bearish
+    (shorts piling in).
+    """
+    if change_pct is None:
+        return 0.5
+    if change_pct <= -10.0:
+        return 1.0     # strong covering → full amplification
+    elif change_pct <= -2.0:
+        return 0.8      # moderate covering
+    elif change_pct <= 0.0:
+        return 0.6      # slight covering
+    elif change_pct <= 2.0:
+        return 0.4      # slight increase
+    elif change_pct <= 10.0:
+        return 0.2      # moderate increase
+    else:
+        return 0.0      # shorts piling in → suppress level/dtc
 
 
 def _consistency_score(
@@ -237,10 +268,13 @@ def score_short_interest(
     # Use most recent snapshot for scoring
     latest = max(eligible, key=lambda s: s.settlement_date)
 
-    # Compute sub-scores
-    level = _level_score(latest.short_interest_pct, config)
+    # Compute sub-scores.
+    # Level and DTC are modulated by trend direction: they amplify
+    # squeeze setups (covering) but are suppressed when shorts pile in.
     trend = _trend_score(latest.short_interest_change_pct, config)
-    dtc = _dtc_score(latest.days_to_cover, config)
+    dir_mult = _direction_multiplier(latest.short_interest_change_pct)
+    level = round(_level_score(latest.short_interest_pct, config) * dir_mult, 2)
+    dtc = round(_dtc_raw(latest.days_to_cover, config) * dir_mult, 2)
     consistency = _consistency_score(list(eligible), config)
 
     raw_score = level + trend + dtc + consistency

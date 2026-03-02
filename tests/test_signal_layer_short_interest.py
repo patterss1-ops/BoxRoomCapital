@@ -116,32 +116,41 @@ class TestNoData:
         assert score.details["short_interest_change_pct"] is None
 
 
-# ── Level scoring ─────────────────────────────────────────────────────
+# ── Level scoring (direction-modulated) ───────────────────────────────
 
 class TestLevelScoring:
-    def test_extreme_si_pct_scores_max_level(self):
-        # 20%+ SI → 30 points
-        snap = _snap(short_interest=25_000_000, shares_outstanding=100_000_000)
+    """Level sub-score is modulated by trend direction.
+
+    With the default _snap() (prior 12M → 10M = -16.7% covering),
+    dir_mult = 1.0, so raw level passes through unchanged.
+    """
+
+    def test_extreme_si_pct_with_covering_trend(self):
+        # 25% SI + covering from 35M → -28.6% → dir_mult = 1.0 → raw 30 * 1.0 = 30
+        snap = _snap(short_interest=25_000_000, shares_outstanding=100_000_000,
+                     prior_short_interest=35_000_000)
         score = score_short_interest("GME", [snap], AS_OF)
         assert score.details["sub_scores"]["level"] == 30.0
 
-    def test_high_si_pct_scores_25(self):
-        # 15% SI → 25 points
-        snap = _snap(short_interest=15_000_000, shares_outstanding=100_000_000)
+    def test_extreme_si_pct_with_increasing_trend_suppressed(self):
+        # 25% SI + massive increase → raw 30 * 0.0 = 0 (suppressed!)
+        snap = _snap(short_interest=25_000_000, shares_outstanding=100_000_000,
+                     prior_short_interest=10_000_000)  # +150% increase
         score = score_short_interest("GME", [snap], AS_OF)
-        assert score.details["sub_scores"]["level"] == 25.0
+        assert score.details["sub_scores"]["level"] == 0.0
 
-    def test_moderate_si_pct_scores_20(self):
-        # 10% SI → 20 points
+    def test_moderate_si_pct_with_covering(self):
+        # 10% SI + covering → raw 20 * 1.0 = 20
         snap = _snap(short_interest=10_000_000, shares_outstanding=100_000_000)
         score = score_short_interest("GME", [snap], AS_OF)
         assert score.details["sub_scores"]["level"] == 20.0
 
-    def test_low_si_pct_scores_low(self):
-        # 1% SI → 3 points (falls to lowest bucket)
-        snap = _snap(short_interest=1_000_000, shares_outstanding=100_000_000)
+    def test_level_with_no_prior_data_uses_neutral_mult(self):
+        # 10% SI + no prior → raw 20 * 0.5 = 10
+        snap = _snap(short_interest=10_000_000, shares_outstanding=100_000_000,
+                     prior_short_interest=None)
         score = score_short_interest("GME", [snap], AS_OF)
-        assert score.details["sub_scores"]["level"] == 3.0
+        assert score.details["sub_scores"]["level"] == 10.0
 
 
 # ── Trend scoring ─────────────────────────────────────────────────────
@@ -177,26 +186,39 @@ class TestTrendScoring:
         assert score.details["sub_scores"]["trend"] == DEFAULT_CONFIG.trend_neutral_score
 
 
-# ── Days-to-Cover scoring ────────────────────────────────────────────
+# ── Days-to-Cover scoring (direction-modulated) ──────────────────────
 
 class TestDaysToCovertScoring:
-    def test_extreme_dtc_scores_max(self):
-        # 10M short / 500K daily vol = 20 DTC
+    """DTC sub-score is modulated by trend direction.
+
+    Default _snap() has -16.7% covering → dir_mult = 1.0.
+    """
+
+    def test_extreme_dtc_with_covering_scores_max(self):
+        # 20 DTC + covering trend → raw 20 * 1.0 = 20
         snap = _snap(short_interest=10_000_000, avg_daily_volume=500_000.0)
         score = score_short_interest("GME", [snap], AS_OF)
         assert score.details["sub_scores"]["dtc"] == 20.0
 
-    def test_high_dtc_scores_16(self):
-        # 7M short / 1M daily vol = 7 DTC
+    def test_extreme_dtc_with_increase_suppressed(self):
+        # 20 DTC + massive increase → raw 20 * 0.0 = 0 (suppressed!)
+        snap = _snap(short_interest=10_000_000, avg_daily_volume=500_000.0,
+                     prior_short_interest=5_000_000)  # +100% increase
+        score = score_short_interest("GME", [snap], AS_OF)
+        assert score.details["sub_scores"]["dtc"] == 0.0
+
+    def test_moderate_dtc_with_covering(self):
+        # 7 DTC + covering → raw 16 * 1.0 = 16
         snap = _snap(short_interest=7_000_000, avg_daily_volume=1_000_000.0)
         score = score_short_interest("GME", [snap], AS_OF)
         assert score.details["sub_scores"]["dtc"] == 16.0
 
-    def test_low_dtc_scores_low(self):
-        # 1M short / 5M daily vol = 0.2 DTC
-        snap = _snap(short_interest=1_000_000, avg_daily_volume=5_000_000.0)
+    def test_dtc_with_no_prior_uses_neutral_mult(self):
+        # 20 DTC + no prior → raw 20 * 0.5 = 10
+        snap = _snap(short_interest=10_000_000, avg_daily_volume=500_000.0,
+                     prior_short_interest=None)
         score = score_short_interest("GME", [snap], AS_OF)
-        assert score.details["sub_scores"]["dtc"] == 1.0
+        assert score.details["sub_scores"]["dtc"] == 10.0
 
 
 # ── Consistency scoring ──────────────────────────────────────────────
@@ -245,7 +267,14 @@ class TestConsistencyScoring:
 
 class TestCompositeScenarios:
     def test_squeeze_candidate_scores_high(self):
-        """High SI + large short covering + high DTC → very high score."""
+        """High SI + large short covering + high DTC → very high score.
+
+        20% SI → raw level 30, -33% covering → dir_mult 1.0 → level 30
+        Trend = 35 (massive covering)
+        DTC = 13.3 → raw 20 * 1.0 = 20
+        Consistency = 5 (single snapshot)
+        Total = 30 + 35 + 20 + 5 = 90
+        """
         snap = _snap(
             short_interest=20_000_000,
             avg_daily_volume=1_500_000.0,
@@ -253,11 +282,18 @@ class TestCompositeScenarios:
             prior_short_interest=30_000_000,  # -33% covering
         )
         score = score_short_interest("GME", [snap], AS_OF)
-        # Level=30 + Trend=35 + DTC=20 + Consistency=5 = 90
         assert score.score >= 80.0
 
     def test_bearish_pileup_scores_low(self):
-        """Rising shorts + moderate SI → lower score."""
+        """Rising shorts + moderate SI → very low score.
+
+        P1 FIX: level and DTC are now suppressed when shorts increase.
+        10% SI → raw level 20, +100% increase → dir_mult 0.0 → level 0
+        Trend = 0 (max bearish)
+        DTC = 2.0 → raw 4 * 0.0 = 0
+        Consistency = 5
+        Total = 0 + 0 + 0 + 5 = 5
+        """
         snap = _snap(
             short_interest=10_000_000,
             avg_daily_volume=5_000_000.0,
@@ -265,11 +301,33 @@ class TestCompositeScenarios:
             prior_short_interest=5_000_000,  # +100% increase
         )
         score = score_short_interest("GME", [snap], AS_OF)
-        # Level=20 + Trend=0 + DTC=4 + Consistency=5 = 29
-        assert score.score <= 35.0
+        assert score.score <= 10.0  # was 35 pre-fix — now properly bearish
+
+    def test_codex_repro_bearish_pileup_20pct_si(self):
+        """Codex P1 repro: 20% SI, +100% increase, 20 DTC → must score LOW.
+
+        Before fix: level=30, trend=0, dtc=20, consistency=5 → 55 (wrong!)
+        After fix: level=0 (30*0.0), trend=0, dtc=0 (20*0.0), consistency=5 → 5
+        """
+        snap = _snap(
+            short_interest=20_000_000,
+            avg_daily_volume=1_000_000.0,
+            shares_outstanding=100_000_000,
+            prior_short_interest=10_000_000,  # +100% increase
+        )
+        score = score_short_interest("GME", [snap], AS_OF)
+        # This is the exact scenario Codex flagged — must be ≤ 10
+        assert score.score <= 10.0
 
     def test_neutral_low_si_mid_score(self):
-        """Low SI with no trend data → middling score."""
+        """Low SI with no trend data → middling score.
+
+        2% SI → raw level 8, no prior → dir_mult 0.5 → level 4
+        Trend = 15 (neutral)
+        DTC = 0.4 → raw 1 * 0.5 = 0.5
+        Consistency = 5
+        Total ≈ 24.5
+        """
         snap = _snap(
             short_interest=2_000_000,
             avg_daily_volume=5_000_000.0,
@@ -277,7 +335,7 @@ class TestCompositeScenarios:
             prior_short_interest=None,
         )
         score = score_short_interest("GME", [snap], AS_OF)
-        assert 20.0 <= score.score <= 50.0
+        assert 15.0 <= score.score <= 40.0
 
 
 # ── Batch scoring ────────────────────────────────────────────────────
