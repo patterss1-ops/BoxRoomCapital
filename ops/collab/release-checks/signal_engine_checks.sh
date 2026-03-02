@@ -9,8 +9,14 @@
 # Exit codes:
 #   0  All checks passed — Signal Engine is promotion-ready.
 #   1  One or more checks failed — do NOT promote.
+#
+# Gate strategy: All pytest checks use exit-code gating (exit 0 = green,
+# non-zero = failures). Output is captured for display but never used to
+# determine pass/fail — only the exit code matters.
 
-set -euo pipefail
+set -uo pipefail
+# NOTE: -e is NOT set because we need to capture non-zero pytest exits
+# without aborting the script. Each check handles its own error path.
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 cd "$ROOT_DIR"
@@ -22,25 +28,41 @@ pass() { PASS=$((PASS + 1)); echo "  ✓ $1"; }
 fail() { FAIL=$((FAIL + 1)); echo "  ✗ $1"; }
 header() { echo ""; echo "── $1 ──"; }
 
+# run_pytest <label> <pytest-args...>
+#
+# Runs pytest with the given arguments and gates on exit code only.
+# Captures the summary line for display but does NOT use it for pass/fail.
+run_pytest() {
+  local label="$1"
+  shift
+  local output
+  output=$(python3 -m pytest -q "$@" 2>&1) || true
+  local rc=${PIPESTATUS[0]:-$?}
+
+  # Re-run to get the actual exit code (output capture masks it)
+  python3 -m pytest -q "$@" > /dev/null 2>&1
+  rc=$?
+
+  local summary
+  summary=$(echo "$output" | tail -1)
+
+  if [[ $rc -eq 0 ]]; then
+    pass "$label ($summary)"
+  else
+    fail "$label ($summary)"
+  fi
+}
+
 # ── 1. Full regression suite ──────────────────────────────────────────────
 
 header "Full Regression Suite"
-if python3 -m pytest -q tests/ 2>&1 | tail -1 | grep -q "passed"; then
-  TOTAL=$(python3 -m pytest -q tests/ 2>&1 | tail -1)
-  pass "Full suite green: $TOTAL"
-else
-  fail "Full test suite has failures"
-fi
+run_pytest "Full suite" tests/
 
 # ── 2. Signal Engine contracts (E-001) ────────────────────────────────────
 
 header "Signal Engine Contracts (E-001)"
 if [[ -f tests/test_signal_contracts.py ]]; then
-  if python3 -m pytest -q tests/test_signal_contracts.py 2>&1 | tail -1 | grep -q "passed"; then
-    pass "Contract tests pass"
-  else
-    fail "Contract tests have failures"
-  fi
+  run_pytest "Contract tests" tests/test_signal_contracts.py
 else
   fail "tests/test_signal_contracts.py not found"
 fi
@@ -59,11 +81,7 @@ layer_tests=(
 for entry in "${layer_tests[@]}"; do
   IFS=":" read -r test_file label <<< "$entry"
   if [[ -f "$test_file" ]]; then
-    if python3 -m pytest -q "$test_file" 2>&1 | tail -1 | grep -q "passed"; then
-      pass "$label"
-    else
-      fail "$label has failures"
-    fi
+    run_pytest "$label" "$test_file"
   else
     fail "$label — $test_file not found"
   fi
@@ -73,11 +91,7 @@ done
 
 header "Composite Scorer + Veto Engine (E-006)"
 if [[ -f tests/test_signal_composite.py ]]; then
-  if python3 -m pytest -q tests/test_signal_composite.py 2>&1 | tail -1 | grep -q "passed"; then
-    pass "Composite scorer tests pass"
-  else
-    fail "Composite scorer tests have failures"
-  fi
+  run_pytest "Composite scorer tests" tests/test_signal_composite.py
 else
   fail "tests/test_signal_composite.py not found"
 fi
@@ -86,11 +100,7 @@ fi
 
 header "Shadow Pipeline + Operator Surface (E-007)"
 if [[ -f tests/test_signal_shadow_api.py ]]; then
-  if python3 -m pytest -q tests/test_signal_shadow_api.py 2>&1 | tail -1 | grep -q "passed"; then
-    pass "Shadow pipeline tests pass"
-  else
-    fail "Shadow pipeline tests have failures"
-  fi
+  run_pytest "Shadow pipeline tests" tests/test_signal_shadow_api.py
 else
   fail "tests/test_signal_shadow_api.py not found"
 fi
@@ -99,11 +109,7 @@ fi
 
 header "E2E Acceptance Harness (E-008)"
 if [[ -f tests/test_signal_engine_e2e.py ]]; then
-  if python3 -m pytest -q tests/test_signal_engine_e2e.py 2>&1 | tail -1 | grep -q "passed"; then
-    pass "E2E acceptance tests pass"
-  else
-    fail "E2E acceptance tests have failures"
-  fi
+  run_pytest "E2E acceptance tests" tests/test_signal_engine_e2e.py
 else
   fail "tests/test_signal_engine_e2e.py not found"
 fi
@@ -174,11 +180,7 @@ existing_tests=(
 for entry in "${existing_tests[@]}"; do
   IFS=":" read -r test_file label <<< "$entry"
   if [[ -f "$test_file" ]]; then
-    if python3 -m pytest -q "$test_file" 2>&1 | tail -1 | grep -q "passed"; then
-      pass "$label — no regressions"
-    else
-      fail "$label — regression detected"
-    fi
+    run_pytest "$label — no regressions" "$test_file"
   else
     # Not all test files may exist; skip gracefully.
     echo "  - $label ($test_file not present, skipping)"
