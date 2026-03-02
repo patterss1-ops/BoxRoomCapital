@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Signal Engine Phase E release checks.
+# Signal Engine Phase E + F release checks.
 #
 # Validates all Signal Engine components are functional before promotion
 # from shadow-only to staged/live pipeline integration.
+#
+# Sections 1-9:  Phase E components (E-001..E-008)
+# Sections 10-14: Phase F components (F-001..F-008)
 #
 # Usage:  bash ops/collab/release-checks/signal_engine_checks.sh
 #
@@ -53,6 +56,10 @@ run_pytest() {
   fi
 }
 
+# ══════════════════════════════════════════════════════════════════════════
+# PHASE E CHECKS (E-001..E-008)
+# ══════════════════════════════════════════════════════════════════════════
+
 # ── 1. Full regression suite ──────────────────────────────────────────────
 
 header "Full Regression Suite"
@@ -69,16 +76,16 @@ fi
 
 # ── 3. Layer adapters (E-002, E-003, E-004, E-005) ───────────────────────
 
-header "Layer Adapters"
+header "Phase E Layer Adapters"
 
-layer_tests=(
+layer_tests_e=(
   "tests/test_insider_signal_adapter.py:L2 Insider adapter (E-002)"
   "tests/test_sa_quant_client.py:L8 SA Quant adapter (E-003)"
   "tests/test_signal_layer_pead.py:L1 PEAD scorer (E-004)"
   "tests/test_signal_layer_analyst_revisions.py:L4 Analyst Revisions (E-005)"
 )
 
-for entry in "${layer_tests[@]}"; do
+for entry in "${layer_tests_e[@]}"; do
   IFS=":" read -r test_file label <<< "$entry"
   if [[ -f "$test_file" ]]; then
     run_pytest "$label" "$test_file"
@@ -105,20 +112,54 @@ else
   fail "tests/test_signal_shadow_api.py not found"
 fi
 
-# ── 6. End-to-end acceptance harness (E-008) ─────────────────────────────
+# ── 6. End-to-end acceptance harness (E-008 + F-008) ─────────────────────
 
-header "E2E Acceptance Harness (E-008)"
+header "E2E Acceptance Harness (E-008 + F-008)"
 if [[ -f tests/test_signal_engine_e2e.py ]]; then
   run_pytest "E2E acceptance tests" tests/test_signal_engine_e2e.py
 else
   fail "tests/test_signal_engine_e2e.py not found"
 fi
 
-# ── 7. Module import smoke tests ─────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# PHASE F CHECKS (F-001..F-008)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 7. Layer Registry (F-001) ─────────────────────────────────────────────
+
+header "Layer Registry (F-001)"
+if [[ -f tests/test_signal_layer_registry.py ]]; then
+  run_pytest "Layer registry tests" tests/test_signal_layer_registry.py
+else
+  fail "tests/test_signal_layer_registry.py not found"
+fi
+
+# ── 8. Phase F Layer Adapters (F-002..F-005) ──────────────────────────────
+
+header "Phase F Layer Adapters"
+
+layer_tests_f=(
+  "tests/test_signal_layer_short_interest.py:L3 Short Interest (F-002)"
+  "tests/test_signal_layer_congressional.py:L5 Congressional (F-003)"
+  "tests/test_signal_layer_news_sentiment.py:L6 News Sentiment (F-004)"
+  "tests/test_signal_layer_technical_overlay.py:L7 Technical Overlay (F-005)"
+)
+
+for entry in "${layer_tests_f[@]}"; do
+  IFS=":" read -r test_file label <<< "$entry"
+  if [[ -f "$test_file" ]]; then
+    run_pytest "$label" "$test_file"
+  else
+    fail "$label — $test_file not found"
+  fi
+done
+
+# ── 9. Phase F Module Import Smoke Tests ──────────────────────────────────
 
 header "Module Import Smoke Tests"
 
 modules=(
+  # Phase E modules
   "app.signal.types"
   "app.signal.contracts"
   "app.signal.composite"
@@ -129,6 +170,16 @@ modules=(
   "intelligence.event_store"
   "intelligence.insider_signal_adapter"
   "intelligence.sa_quant_client"
+  # Phase F modules
+  "app.signal.layer_registry"
+  "app.signal.layers.short_interest"
+  "app.signal.layers.congressional"
+  "app.signal.layers.news_sentiment"
+  "app.signal.layers.technical_overlay"
+  "intelligence.jobs.signal_layer_jobs"
+  "intelligence.finra_short_interest"
+  "intelligence.capitol_trades_client"
+  "intelligence.news_sentiment"
 )
 
 for mod in "${modules[@]}"; do
@@ -139,11 +190,12 @@ for mod in "${modules[@]}"; do
   fi
 done
 
-# ── 8. Source file presence ───────────────────────────────────────────────
+# ── 10. Source File Presence ──────────────────────────────────────────────
 
 header "Source File Presence"
 
 source_files=(
+  # Phase E source files
   "app/signal/types.py"
   "app/signal/contracts.py"
   "app/signal/composite.py"
@@ -157,6 +209,16 @@ source_files=(
   "intelligence/sa_quant_client.py"
   "intelligence/jobs/sa_quant_job.py"
   "app/web/templates/_signal_engine.html"
+  # Phase F source files
+  "app/signal/layer_registry.py"
+  "app/signal/layers/short_interest.py"
+  "app/signal/layers/congressional.py"
+  "app/signal/layers/news_sentiment.py"
+  "app/signal/layers/technical_overlay.py"
+  "intelligence/finra_short_interest.py"
+  "intelligence/capitol_trades_client.py"
+  "intelligence/news_sentiment.py"
+  "intelligence/jobs/signal_layer_jobs.py"
 )
 
 for f in "${source_files[@]}"; do
@@ -167,7 +229,7 @@ for f in "${source_files[@]}"; do
   fi
 done
 
-# ── 9. No existing test regressions ──────────────────────────────────────
+# ── 11. No existing test regressions ─────────────────────────────────────
 
 header "Pre-existing Test Suites"
 
