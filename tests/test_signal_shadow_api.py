@@ -15,6 +15,7 @@ from app.signal.contracts import LayerScore
 from app.signal.types import LayerId
 from data import trade_db
 from intelligence.event_store import EventRecord, EventStore
+from intelligence.jobs import signal_layer_jobs
 
 
 class ImmediateThread:
@@ -141,6 +142,78 @@ def test_signal_shadow_action_persists_job_lifecycle(tmp_path, monkeypatch):
     assert "shadow123" in (job["result"] or "")
 
 
+def test_signal_tier1_action_persists_job_lifecycle(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "signal_tier1_jobs.db")
+    trade_db.init_db(db_path)
+    _bind_job_db(monkeypatch, db_path)
+    monkeypatch.setattr(server.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(
+        server,
+        "run_tier1_shadow_jobs",
+        lambda: {
+            "run_id": "tier1abc",
+            "shadow_report": {"summary": {"tickers_total": 3, "tickers_scored": 2}},
+            "ranked_candidates": [{"ticker": "AAPL"}, {"ticker": "MSFT"}],
+            "freshness_diagnostics": {"blocked_stale_layers": 1},
+        },
+    )
+
+    with TestClient(server.app) as client:
+        response = client.post("/api/actions/signal-tier1-run")
+
+    assert response.status_code == 200
+    assert "Queued tier-1 shadow run" in response.text
+
+    jobs = trade_db.get_jobs(limit=5, db_path=db_path)
+    assert jobs
+    job = jobs[0]
+    assert job["job_type"] == "signal_tier1_shadow_run"
+    assert job["status"] == "completed"
+    assert "scored=2/3" in (job["detail"] or "")
+    assert "ranked=2" in (job["detail"] or "")
+    assert "tier1abc" in (job["result"] or "")
+
+
+def test_api_signal_shadow_enriches_with_rankings(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "get_signal_shadow_report",
+        lambda: {
+            "ok": True,
+            "state": "ready",
+            "has_report": True,
+            "event_stats": {"tickers_with_layers": 1, "layer_coverage": {}, "latest_layer_as_of": "2026-03-02T10:00:00Z"},
+            "report": {
+                "run_id": "r1",
+                "run_at": "2026-03-02T10:00:00Z",
+                "summary": {"tickers_total": 1, "tickers_scored": 1},
+                "results": [
+                    {
+                        "ticker": "AAPL",
+                        "status": "scored",
+                        "action": "auto_execute_buy",
+                        "final_score": 81.2,
+                        "weighted_score": 78.0,
+                        "layer_count": 8,
+                        "missing_required_layers": [],
+                        "freshness": {"warning_layers": [], "stale_layers": []},
+                        "notes": ["quality_penalty_pct=0.0"],
+                    }
+                ],
+            },
+        },
+    )
+
+    with TestClient(server.app) as client:
+        response = client.get("/api/signal-shadow")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["has_report"] is True
+    assert body["report"]["ranked_candidates"][0]["ticker"] == "AAPL"
+    assert body["freshness_diagnostics"]["tickers_with_stale"] == 0
+
+
 def test_signal_engine_fragment_renders(monkeypatch):
     monkeypatch.setattr(
         server,
@@ -172,7 +245,19 @@ def test_signal_engine_fragment_renders(monkeypatch):
                         "missing_required_layers": ["l2_insider", "l4_analyst_revisions"],
                     }
                 ],
+                "ranked_candidates": [
+                    {
+                        "rank": 1,
+                        "ticker": "AAPL",
+                        "action": "auto_execute_buy",
+                        "final_score": 82.4,
+                        "rank_score": 82.4,
+                        "warning_layers": [],
+                        "stale_layers": [],
+                    }
+                ],
             },
+            "freshness_diagnostics": {"tickers_with_warnings": 0, "tickers_with_stale": 0},
         },
     )
 
@@ -184,6 +269,8 @@ def test_signal_engine_fragment_renders(monkeypatch):
     assert "abcd1234" in response.text
     assert "AAPL" in response.text
     assert "auto_execute_buy" in response.text
+    assert "Ranked Candidates" in response.text
+    assert "Freshness diagnostics" in response.text
 
 
 def test_run_signal_shadow_cycle_uses_latest_layer_events(tmp_path, monkeypatch):
@@ -289,3 +376,49 @@ def test_run_signal_shadow_cycle_blocks_stale_layers(tmp_path, monkeypatch):
     assert row["action"] == "no_action"
     assert "stale_layer_data" in row["vetoes"]
     assert row["freshness"]["stale_layers"] == ["l6_news_sentiment"]
+
+
+def test_build_ranked_candidates_orders_actions():
+    report = {
+        "results": [
+            {
+                "ticker": "AAPL",
+                "status": "scored",
+                "action": "auto_execute_buy",
+                "final_score": 83.0,
+                "weighted_score": 80.0,
+                "layer_count": 8,
+                "missing_required_layers": [],
+                "freshness": {"warning_layers": ["l2_insider"], "stale_layers": []},
+                "notes": ["quality_penalty_pct=2.5"],
+            },
+            {
+                "ticker": "TSLA",
+                "status": "scored",
+                "action": "short_candidate",
+                "final_score": 18.0,
+                "weighted_score": 20.0,
+                "layer_count": 8,
+                "missing_required_layers": [],
+                "freshness": {"warning_layers": [], "stale_layers": ["l6_news_sentiment"]},
+                "notes": ["quality_penalty_pct=15.0"],
+            },
+            {
+                "ticker": "MSFT",
+                "status": "scored",
+                "action": "no_action",
+                "final_score": 51.0,
+                "weighted_score": 50.0,
+                "layer_count": 8,
+                "missing_required_layers": [],
+                "freshness": {"warning_layers": [], "stale_layers": []},
+                "notes": ["quality_penalty_pct=0.0"],
+            },
+        ]
+    }
+
+    ranked = signal_layer_jobs.build_ranked_candidates(report, limit=10)
+
+    assert [row["ticker"] for row in ranked] == ["AAPL", "TSLA"]
+    assert ranked[0]["rank"] == 1
+    assert ranked[1]["rank"] == 2

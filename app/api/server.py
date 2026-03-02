@@ -23,6 +23,10 @@ from app.engine.signal_shadow import get_signal_shadow_report, run_signal_shadow
 from app.research.service import ResearchService
 from fund.promotion_gate import build_promotion_gate_report, validate_lane_transition
 from fund.nav import calculate_fund_nav
+from intelligence.jobs.signal_layer_jobs import (
+    enrich_signal_shadow_payload,
+    run_tier1_shadow_jobs,
+)
 from data.trade_db import (
     complete_calibration_run,
     create_job,
@@ -233,7 +237,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/signal-shadow")
     def api_signal_shadow():
-        return get_signal_shadow_report()
+        return enrich_signal_shadow_payload(get_signal_shadow_report())
 
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
@@ -371,6 +375,19 @@ def create_app() -> FastAPI:
         thread = threading.Thread(target=_run_signal_shadow_job, args=(job_id,), daemon=True)
         thread.start()
         return action_message(f"Queued signal shadow run {job_id[:8]}.", ok=True)
+
+    @app.post("/api/actions/signal-tier1-run", response_class=HTMLResponse)
+    def signal_tier1_run():
+        job_id = str(uuid.uuid4())
+        create_job(
+            job_id=job_id,
+            job_type="signal_tier1_shadow_run",
+            status="queued",
+            detail="Queued tier-1 signal jobs + shadow ranking run",
+        )
+        thread = threading.Thread(target=_run_signal_tier1_job, args=(job_id,), daemon=True)
+        thread.start()
+        return action_message(f"Queued tier-1 shadow run {job_id[:8]}.", ok=True)
 
     @app.post("/api/actions/close-spread", response_class=HTMLResponse)
     def close_spread(
@@ -919,7 +936,7 @@ def create_app() -> FastAPI:
             "_signal_engine.html",
             {
                 "request": request,
-                "signal_shadow": get_signal_shadow_report(),
+                "signal_shadow": enrich_signal_shadow_payload(get_signal_shadow_report()),
             },
         )
 
@@ -1216,6 +1233,39 @@ def _run_signal_shadow_job(job_id: str):
         status="completed",
         detail=detail,
         result=json.dumps(report, sort_keys=True, default=str),
+    )
+
+
+def _run_signal_tier1_job(job_id: str):
+    update_job(job_id, status="running", detail="Running tier-1 signal jobs + shadow ranking")
+    try:
+        outcome = run_tier1_shadow_jobs()
+    except Exception as exc:
+        update_job(
+            job_id,
+            status="failed",
+            detail="Tier-1 signal shadow run failed",
+            error=str(exc),
+        )
+        return
+
+    report = outcome.get("shadow_report", {}) if isinstance(outcome, dict) else {}
+    summary = report.get("summary", {}) if isinstance(report, dict) else {}
+    ranked_count = len(outcome.get("ranked_candidates", [])) if isinstance(outcome, dict) else 0
+    stale_blocked = int(summary.get("tickers_blocked_stale_layers", 0))
+    missing_blocked = int(summary.get("tickers_blocked_missing_required_layers", 0))
+    detail = (
+        f"scored={int(summary.get('tickers_scored', 0))}/"
+        f"{int(summary.get('tickers_total', 0))}, "
+        f"ranked={ranked_count}, stale_blocked={stale_blocked}, "
+        f"missing_blocked={missing_blocked}"
+    )
+
+    update_job(
+        job_id,
+        status="completed",
+        detail=detail,
+        result=json.dumps(outcome, sort_keys=True, default=str),
     )
 
 

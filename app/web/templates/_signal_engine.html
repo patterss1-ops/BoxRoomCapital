@@ -4,9 +4,14 @@
       <h2>Signal Engine Shadow Run</h2>
       <p class="muted">Composite scoring only. No live auto-execution in this workflow.</p>
     </div>
-    <form hx-post="/api/actions/signal-shadow-run" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn secondary">Run Shadow Cycle</button>
-    </form>
+    <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;">
+      <form hx-post="/api/actions/signal-shadow-run" hx-target="#action-result" hx-swap="innerHTML">
+        <button type="submit" class="btn secondary">Run Shadow Cycle</button>
+      </form>
+      <form hx-post="/api/actions/signal-tier1-run" hx-target="#action-result" hx-swap="innerHTML">
+        <button type="submit" class="btn primary">Run Tier-1 Jobs + Rank</button>
+      </form>
+    </div>
   </div>
 
   {% if signal_shadow.has_report and signal_shadow.report %}
@@ -22,6 +27,8 @@
       <span class="badge live">Auto Buy {{ (summary.action_counts or {}).get("auto_execute_buy", 0) }}</span>
       <span class="badge archived">No Action {{ (summary.action_counts or {}).get("no_action", 0) }}</span>
       <span class="badge rejection">Short {{ (summary.action_counts or {}).get("short_candidate", 0) }}</span>
+      <span class="badge queued">Blocked Missing {{ summary.tickers_blocked_missing_required_layers or 0 }}</span>
+      <span class="badge queued">Blocked Stale {{ summary.tickers_blocked_stale_layers or 0 }}</span>
     </div>
 
     <table>
@@ -37,21 +44,65 @@
       </thead>
       <tbody>
       {% for row in report.results %}
+        {% set status_text = row.status or "" %}
+        {% set is_scored = status_text.startswith("scored") %}
         <tr>
           <td class="code">{{ row.ticker }}</td>
           <td>
-            <span class="badge {{ 'completed' if row.status == 'scored' else 'queued' }}">
+            <span class="badge {{ 'completed' if is_scored else 'queued' }}">
               {{ row.status }}
             </span>
           </td>
-          <td>{{ "%.2f"|format(row.final_score) if row.status == "scored" else "-" }}</td>
-          <td>{{ row.action if row.status == "scored" else "-" }}</td>
+          <td>{{ "%.2f"|format(row.final_score) if is_scored else "-" }}</td>
+          <td>{{ row.action if is_scored else "-" }}</td>
           <td>{{ row.layer_count or 0 }}</td>
           <td class="code">{{ (row.missing_required_layers or [])|join(", ") if row.missing_required_layers else "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
+
+    {% if report.ranked_candidates %}
+      <h3 style="margin-top: 0.9rem;">Ranked Candidates</h3>
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Ticker</th>
+            <th>Action</th>
+            <th>Final</th>
+            <th>Rank Score</th>
+            <th>Freshness</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for row in report.ranked_candidates %}
+          <tr>
+            <td>{{ row.rank }}</td>
+            <td class="code">{{ row.ticker }}</td>
+            <td>{{ row.action }}</td>
+            <td>{{ "%.2f"|format(row.final_score) }}</td>
+            <td>{{ "%.2f"|format(row.rank_score) }}</td>
+            <td class="code">
+              warn={{ (row.warning_layers or [])|length }},
+              stale={{ (row.stale_layers or [])|length }}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    {% if signal_shadow.freshness_diagnostics %}
+      {% set fd = signal_shadow.freshness_diagnostics %}
+      <p class="muted" style="margin-top: 0.55rem;">
+        Freshness diagnostics:
+        warnings={{ fd.tickers_with_warnings or 0 }},
+        stale={{ fd.tickers_with_stale or 0 }},
+        blocked_missing={{ fd.blocked_missing_required_layers or 0 }},
+        blocked_stale={{ fd.blocked_stale_layers or 0 }}
+      </p>
+    {% endif %}
   {% else %}
     <p class="muted">No shadow report yet. Seed layer events and run a cycle.</p>
   {% endif %}
