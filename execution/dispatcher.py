@@ -20,6 +20,7 @@ from broker.paper import PaperBroker
 from data.order_intent_store import (
     claim_order_intent_for_dispatch,
     get_dispatchable_order_intents,
+    record_execution_metric,
     transition_order_intent,
 )
 from data.trade_db import DB_PATH
@@ -98,9 +99,10 @@ class IntentDispatcher:
         intent_id = str(row["intent_id"])
         attempt = int(row.get("latest_attempt", 0) or 0) + 1
         max_attempts = int(row.get("max_attempts", 1) or 1)
+        dispatch_at = datetime.utcnow().isoformat()
 
         request_payload = {
-            "dispatch_at": datetime.utcnow().isoformat(),
+            "dispatch_at": dispatch_at,
             "broker_target": row.get("broker_target"),
             "instrument": row.get("instrument"),
         }
@@ -132,9 +134,28 @@ class IntentDispatcher:
                 )
                 if persisted:
                     summary.completed += 1
+                    self._record_metric(
+                        intent_id=intent_id,
+                        attempt=attempt,
+                        status="completed",
+                        dispatch_at=dispatch_at,
+                        response_payload=payload,
+                        summary=summary,
+                    )
+                else:
+                    self._record_metric(
+                        intent_id=intent_id,
+                        attempt=attempt,
+                        status="failed",
+                        dispatch_at=dispatch_at,
+                        response_payload=payload,
+                        error_code="POST_SUBMIT_PERSIST_FAILED",
+                        error_message="broker submitted but completion persistence failed",
+                        summary=summary,
+                    )
                 return
 
-            self._mark_failure(
+            failure_status = self._mark_failure(
                 intent_id=intent_id,
                 attempt=attempt,
                 max_attempts=max_attempts,
@@ -143,8 +164,19 @@ class IntentDispatcher:
                 response_payload=payload,
                 summary=summary,
             )
+            if failure_status:
+                self._record_metric(
+                    intent_id=intent_id,
+                    attempt=attempt,
+                    status=failure_status,
+                    dispatch_at=dispatch_at,
+                    response_payload=payload,
+                    error_code="BROKER_REJECTED",
+                    error_message=result.message or "broker rejected order",
+                    summary=summary,
+                )
         except Exception as exc:
-            self._mark_failure(
+            failure_status = self._mark_failure(
                 intent_id=intent_id,
                 attempt=attempt,
                 max_attempts=max_attempts,
@@ -153,6 +185,17 @@ class IntentDispatcher:
                 response_payload={"exception": str(exc)},
                 summary=summary,
             )
+            if failure_status:
+                self._record_metric(
+                    intent_id=intent_id,
+                    attempt=attempt,
+                    status=failure_status,
+                    dispatch_at=dispatch_at,
+                    response_payload={"exception": str(exc)},
+                    error_code="DISPATCH_ERROR",
+                    error_message=str(exc),
+                    summary=summary,
+                )
 
     def _persist_completed(
         self,
@@ -237,7 +280,7 @@ class IntentDispatcher:
         error_message: str,
         response_payload: dict,
         summary: DispatchRunSummary,
-    ) -> None:
+    ) -> Optional[str]:
         status = "retrying" if attempt < max_attempts else "failed"
         recoverable = attempt < max_attempts
 
@@ -259,12 +302,45 @@ class IntentDispatcher:
                 "Could not persist failure transition for %s: %s",
                 intent_id, exc,
             )
-            return
+            return None
 
         if recoverable:
             summary.retried += 1
         else:
             summary.failed += 1
+        return status
+
+    def _record_metric(
+        self,
+        intent_id: str,
+        attempt: int,
+        status: str,
+        dispatch_at: str,
+        response_payload: dict,
+        summary: DispatchRunSummary,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> None:
+        try:
+            record_execution_metric(
+                intent_id=intent_id,
+                attempt=attempt,
+                status=status,
+                actor=self.actor,
+                dispatch_at=dispatch_at,
+                response_payload=response_payload,
+                error_code=error_code,
+                error_message=error_message,
+                db_path=self.db_path,
+            )
+        except Exception as exc:
+            summary.errors += 1
+            logger.exception(
+                "Could not persist execution metric for %s/%s: %s",
+                intent_id,
+                attempt,
+                exc,
+            )
 
 
 def _row_to_order_intent(row: dict) -> OrderIntent:

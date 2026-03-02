@@ -14,6 +14,7 @@ from data import trade_db
 from data.order_intent_store import (
     claim_order_intent_for_dispatch,
     create_order_intent_envelope,
+    get_execution_metrics,
     get_dispatchable_order_intents,
     get_order_intent,
     get_order_intent_attempts,
@@ -84,7 +85,11 @@ class TestIntentDispatcher:
         is_exit: bool = False,
         qty: float = 2.0,
         instrument: str = "SPY",
+        metadata: Optional[dict] = None,
     ) -> str:
+        intent_metadata = {"is_exit": is_exit}
+        if metadata:
+            intent_metadata.update(metadata)
         intent = OrderIntent(
             strategy_id="gtaa",
             strategy_version="v1",
@@ -95,7 +100,7 @@ class TestIntentDispatcher:
             side=side,
             qty=qty,
             order_type="MARKET",
-            metadata={"is_exit": is_exit},
+            metadata=intent_metadata,
         )
         created = create_order_intent_envelope(
             intent=intent,
@@ -315,3 +320,61 @@ class TestIntentDispatcher:
 
         assert ids[0] == first
         assert ids[1] == second
+
+    def test_dispatcher_records_execution_metric_on_completed_fill(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(
+            db,
+            side="BUY",
+            qty=2.0,
+            metadata={"reference_price": 100.0},
+        )
+
+        stub = StubBroker([
+            OrderResult(success=True, order_id="ord-telemetry", fill_qty=2.0, fill_price=101.0),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+
+        summary = dispatcher.run_once(limit=10)
+        assert summary.completed == 1
+
+        metrics = get_execution_metrics(limit=10, intent_id=intent_id, db_path=db)
+        assert len(metrics) == 1
+        metric = metrics[0]
+        assert metric["status"] == "completed"
+        assert metric["qty_requested"] == 2.0
+        assert metric["qty_filled"] == 2.0
+        assert metric["fill_price"] == 101.0
+        assert metric["reference_price"] == 100.0
+        assert metric["slippage_bps"] == 100.0
+        assert metric["error_code"] is None
+        assert metric["dispatch_latency_ms"] is not None
+        assert metric["notional_filled"] == 202.0
+
+    def test_dispatcher_records_execution_metric_on_retrying_reject(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=3)
+
+        stub = StubBroker([
+            OrderResult(success=False, message="venue unavailable"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+
+        summary = dispatcher.run_once(limit=10)
+        assert summary.retried == 1
+
+        metrics = get_execution_metrics(limit=10, intent_id=intent_id, db_path=db)
+        assert len(metrics) == 1
+        metric = metrics[0]
+        assert metric["status"] == "retrying"
+        assert metric["error_code"] == "BROKER_REJECTED"
+        assert metric["error_message"] == "venue unavailable"
+        assert metric["qty_filled"] == 0.0
