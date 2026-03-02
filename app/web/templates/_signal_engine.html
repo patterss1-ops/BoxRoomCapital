@@ -1,0 +1,83 @@
+<section class="card" id="signal-engine-panel">
+  <div class="section-head">
+    <div>
+      <h2>Signal Engine Shadow Run</h2>
+      <p class="muted">Composite scoring only. No live auto-execution in this workflow.</p>
+    </div>
+    <form hx-post="/api/actions/signal-shadow-run" hx-target="#action-result" hx-swap="innerHTML">
+      <button type="submit" class="btn secondary">Run Shadow Cycle</button>
+    </form>
+  </div>
+
+  {% if signal_shadow.has_report and signal_shadow.report %}
+    {% set report = signal_shadow.report %}
+    {% set summary = report.summary %}
+    <p>
+      <span class="code">run {{ report.run_id }}</span>
+      <span class="muted"> · {{ report.run_at }}</span>
+    </p>
+    <div class="badge-wrap" style="margin: 0.55rem 0 0.8rem;">
+      <span class="badge shadow">Scored {{ summary.tickers_scored or 0 }}/{{ summary.tickers_total or 0 }}</span>
+      <span class="badge staged_live">Review {{ (summary.action_counts or {}).get("flag_for_review", 0) }}</span>
+      <span class="badge live">Auto Buy {{ (summary.action_counts or {}).get("auto_execute_buy", 0) }}</span>
+      <span class="badge archived">No Action {{ (summary.action_counts or {}).get("no_action", 0) }}</span>
+      <span class="badge rejection">Short {{ (summary.action_counts or {}).get("short_candidate", 0) }}</span>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Ticker</th>
+          <th>Status</th>
+          <th>Final</th>
+          <th>Action</th>
+          <th>Layers</th>
+          <th>Missing Required</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for row in report.results %}
+        <tr>
+          <td class="code">{{ row.ticker }}</td>
+          <td>
+            <span class="badge {{ 'completed' if row.status == 'scored' else 'queued' }}">
+              {{ row.status }}
+            </span>
+          </td>
+          <td>{{ "%.2f"|format(row.final_score) if row.status == "scored" else "-" }}</td>
+          <td>{{ row.action if row.status == "scored" else "-" }}</td>
+          <td>{{ row.layer_count or 0 }}</td>
+          <td class="code">{{ (row.missing_required_layers or [])|join(", ") if row.missing_required_layers else "-" }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No shadow report yet. Seed layer events and run a cycle.</p>
+  {% endif %}
+
+  {% if signal_shadow.event_stats %}
+    {% set stats = signal_shadow.event_stats %}
+    <h3 style="margin-top: 0.9rem;">Layer Event Coverage</h3>
+    <p class="muted">
+      Tickers with layer data: {{ stats.tickers_with_layers or 0 }}
+      {% if stats.latest_layer_as_of %} · Latest layer as_of: {{ stats.latest_layer_as_of }}{% endif %}
+    </p>
+    <table>
+      <thead>
+        <tr>
+          <th>Layer</th>
+          <th>Tickers Covered</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for layer_id, count in (stats.layer_coverage or {}).items() %}
+        <tr>
+          <td class="code">{{ layer_id }}</td>
+          <td>{{ count }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+</section>

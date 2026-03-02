@@ -19,6 +19,7 @@ from fastapi.templating import Jinja2Templates
 import config
 from app.api.ledger import router as ledger_router
 from app.engine.control import BotControlService
+from app.engine.signal_shadow import get_signal_shadow_report, run_signal_shadow_cycle
 from app.research.service import ResearchService
 from fund.promotion_gate import build_promotion_gate_report, validate_lane_transition
 from fund.nav import calculate_fund_nav
@@ -230,6 +231,10 @@ def create_app() -> FastAPI:
     def api_risk_briefing():
         return build_risk_briefing_payload()
 
+    @app.get("/api/signal-shadow")
+    def api_signal_shadow():
+        return get_signal_shadow_report()
+
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
         payload: Optional[dict[str, Any]] = None
@@ -353,6 +358,19 @@ def create_app() -> FastAPI:
         thread = threading.Thread(target=_run_reconcile_job, args=(job_id,), daemon=True)
         thread.start()
         return action_message(f"Queued reconcile job {job_id[:8]}.", ok=True)
+
+    @app.post("/api/actions/signal-shadow-run", response_class=HTMLResponse)
+    def signal_shadow_run():
+        job_id = str(uuid.uuid4())
+        create_job(
+            job_id=job_id,
+            job_type="signal_shadow_run",
+            status="queued",
+            detail="Queued signal shadow cycle",
+        )
+        thread = threading.Thread(target=_run_signal_shadow_job, args=(job_id,), daemon=True)
+        thread.start()
+        return action_message(f"Queued signal shadow run {job_id[:8]}.", ok=True)
 
     @app.post("/api/actions/close-spread", response_class=HTMLResponse)
     def close_spread(
@@ -894,6 +912,17 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/fragments/signal-engine", response_class=HTMLResponse)
+    def signal_engine_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_signal_engine.html",
+            {
+                "request": request,
+                "signal_shadow": get_signal_shadow_report(),
+            },
+        )
+
     @app.get("/fragments/promotion-gate", response_class=HTMLResponse)
     def promotion_gate_fragment(
         request: Request,
@@ -1162,6 +1191,32 @@ def _run_reconcile_job(job_id: str):
         update_job(job_id, status="completed", detail=result["message"])
         return
     update_job(job_id, status="failed", detail=result["message"], error=result.get("message"))
+
+
+def _run_signal_shadow_job(job_id: str):
+    update_job(job_id, status="running", detail="Running signal shadow cycle")
+    try:
+        report = run_signal_shadow_cycle()
+    except Exception as exc:
+        update_job(
+            job_id,
+            status="failed",
+            detail="Signal shadow cycle failed",
+            error=str(exc),
+        )
+        return
+
+    summary = report.get("summary", {}) if isinstance(report, dict) else {}
+    detail = (
+        f"scored={int(summary.get('tickers_scored', 0))}/"
+        f"{int(summary.get('tickers_total', 0))}"
+    )
+    update_job(
+        job_id,
+        status="completed",
+        detail=detail,
+        result=json.dumps(report, sort_keys=True, default=str),
+    )
 
 
 def _run_close_job(job_id: str, spread_id: str, ticker: str, reason: str):
