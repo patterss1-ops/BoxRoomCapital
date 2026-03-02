@@ -65,6 +65,7 @@ from intelligence.webhook_server import (
     summarize_payload,
     validate_expected_token,
 )
+from fund.execution_quality import get_execution_quality_payload
 from risk.portfolio_risk import get_risk_briefing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -238,6 +239,10 @@ def create_app() -> FastAPI:
     @app.get("/api/signal-shadow")
     def api_signal_shadow():
         return enrich_signal_shadow_payload(get_signal_shadow_report())
+
+    @app.get("/api/execution-quality")
+    def api_execution_quality(days: int = 30):
+        return get_execution_quality_payload(days=days)
 
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
@@ -937,6 +942,17 @@ def create_app() -> FastAPI:
             {
                 "request": request,
                 "signal_shadow": enrich_signal_shadow_payload(get_signal_shadow_report()),
+            },
+        )
+
+    @app.get("/fragments/execution-quality", response_class=HTMLResponse)
+    def execution_quality_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_execution_quality.html",
+            {
+                "request": request,
+                "eq": get_execution_quality_payload(days=30),
             },
         )
 

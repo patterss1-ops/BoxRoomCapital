@@ -1,0 +1,165 @@
+<section class="card">
+  <div class="section-head">
+    <h2>Execution Quality</h2>
+    <p>Fill rate, slippage, and latency analytics ({{ eq.window_label }}).</p>
+  </div>
+
+  {% set verdict = (eq.verdict or "no_data")|lower %}
+  <div class="badge-wrap" style="margin-bottom: 0.7rem;">
+    <span class="badge {{ 'ok' if verdict == 'healthy' else ('running' if verdict == 'attention' else ('failed' if verdict == 'degraded' else 'muted')) }}">{{ verdict|upper }}</span>
+    <span class="muted">Generated: {{ eq.generated_at or '-' }}</span>
+  </div>
+
+  {% if eq.fills.total_attempts == 0 %}
+    <p class="muted">No execution data available for this window.</p>
+  {% else %}
+
+  {# ── Fill Metrics ── #}
+  <h3 style="margin-top: 0.85rem;">Fill Metrics</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Total</th>
+        <th>Completed</th>
+        <th>Failed</th>
+        <th>Retrying</th>
+        <th>Fill Rate</th>
+        <th>Reject Rate</th>
+        <th>Partial Fill</th>
+        <th>Avg Fill Ratio</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ eq.fills.total_attempts }}</td>
+        <td>{{ eq.fills.completed }}</td>
+        <td>{{ eq.fills.failed }}</td>
+        <td>{{ eq.fills.retrying }}</td>
+        <td>{{ "%.1f%%"|format(eq.fills.fill_rate_pct) }}</td>
+        <td>{{ "%.1f%%"|format(eq.fills.reject_rate_pct) }}</td>
+        <td>{{ "%.1f%%"|format(eq.fills.partial_fill_rate_pct) }}</td>
+        <td>{{ "%.4f"|format(eq.fills.avg_fill_ratio) }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  {# ── Slippage ── #}
+  <h3 style="margin-top: 0.85rem;">Slippage (bps)</h3>
+  {% if eq.slippage.sample_count > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th>Samples</th>
+        <th>Mean</th>
+        <th>Median</th>
+        <th>P5</th>
+        <th>P95</th>
+        <th>Min</th>
+        <th>Max</th>
+        <th>Total Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ eq.slippage.sample_count }}</td>
+        <td>{{ "%.1f"|format(eq.slippage.mean_bps) if eq.slippage.mean_bps is not none else "-" }}</td>
+        <td>{{ "%.1f"|format(eq.slippage.median_bps) if eq.slippage.median_bps is not none else "-" }}</td>
+        <td>{{ "%.1f"|format(eq.slippage.p5_bps) if eq.slippage.p5_bps is not none else "-" }}</td>
+        <td>{{ "%.1f"|format(eq.slippage.p95_bps) if eq.slippage.p95_bps is not none else "-" }}</td>
+        <td>{{ "%.1f"|format(eq.slippage.min_bps) if eq.slippage.min_bps is not none else "-" }}</td>
+        <td>{{ "%.1f"|format(eq.slippage.max_bps) if eq.slippage.max_bps is not none else "-" }}</td>
+        <td>{{ "%.2f"|format(eq.slippage.total_slippage_cost) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No slippage data available.</p>
+  {% endif %}
+
+  {# ── Latency ── #}
+  <h3 style="margin-top: 0.85rem;">Latency (ms)</h3>
+  {% if eq.latency.sample_count > 0 %}
+  <table>
+    <thead>
+      <tr>
+        <th>Samples</th>
+        <th>Mean</th>
+        <th>P50</th>
+        <th>P95</th>
+        <th>Max</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>{{ eq.latency.sample_count }}</td>
+        <td>{{ "%.0f"|format(eq.latency.mean_ms) if eq.latency.mean_ms is not none else "-" }}</td>
+        <td>{{ "%.0f"|format(eq.latency.p50_ms) if eq.latency.p50_ms is not none else "-" }}</td>
+        <td>{{ "%.0f"|format(eq.latency.p95_ms) if eq.latency.p95_ms is not none else "-" }}</td>
+        <td>{{ "%.0f"|format(eq.latency.max_ms) if eq.latency.max_ms is not none else "-" }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No latency data available.</p>
+  {% endif %}
+
+  {# ── Broker Breakdown ── #}
+  {% if eq.by_broker %}
+  <h3 style="margin-top: 0.85rem;">By Broker</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Broker</th>
+        <th>Attempts</th>
+        <th>Fill Rate</th>
+        <th>Reject Rate</th>
+        <th>Avg Slippage</th>
+        <th>Avg Latency</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for b in eq.by_broker %}
+      <tr>
+        <td>{{ b.broker }}</td>
+        <td>{{ b.total_attempts }}</td>
+        <td>{{ "%.1f%%"|format(b.fill_rate_pct) }}</td>
+        <td>{{ "%.1f%%"|format(b.reject_rate_pct) }}</td>
+        <td>{{ "%.1f bps"|format(b.mean_slippage_bps) if b.mean_slippage_bps is not none else "-" }}</td>
+        <td>{{ "%.0f ms"|format(b.mean_latency_ms) if b.mean_latency_ms is not none else "-" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {# ── Strategy Breakdown ── #}
+  {% if eq.by_strategy %}
+  <h3 style="margin-top: 0.85rem;">By Strategy</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Strategy</th>
+        <th>Attempts</th>
+        <th>Fill Rate</th>
+        <th>Reject Rate</th>
+        <th>Avg Slippage</th>
+        <th>Notional Traded</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in eq.by_strategy %}
+      <tr>
+        <td>{{ s.strategy_id }}</td>
+        <td>{{ s.total_attempts }}</td>
+        <td>{{ "%.1f%%"|format(s.fill_rate_pct) }}</td>
+        <td>{{ "%.1f%%"|format(s.reject_rate_pct) }}</td>
+        <td>{{ "%.1f bps"|format(s.mean_slippage_bps) if s.mean_slippage_bps is not none else "-" }}</td>
+        <td>{{ "%.2f"|format(s.notional_traded) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% endif %}
+</section>
