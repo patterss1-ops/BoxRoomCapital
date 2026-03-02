@@ -212,14 +212,11 @@ def _breadth_score(
     if not revisions:
         return 0.0
 
-    ups = sum(1 for r in revisions if r.direction == RevisionDirection.UP)
-    downs = sum(1 for r in revisions if r.direction == RevisionDirection.DOWN)
+    up_analysts = {r.analyst_name.strip().lower() for r in revisions if r.direction == RevisionDirection.UP}
+    down_analysts = {r.analyst_name.strip().lower() for r in revisions if r.direction == RevisionDirection.DOWN}
 
     # Net direction determines which analysts we count as "in agreement"
-    if ups >= downs:
-        agreeing = ups
-    else:
-        agreeing = downs
+    agreeing = max(len(up_analysts), len(down_analysts))
 
     total_analysts = len({r.analyst_name.strip().lower() for r in revisions})
     if total_analysts == 0:

@@ -186,6 +186,20 @@ class TestBreadthScoring:
         score = score_analyst_revisions("AAPL", [_rev()], AS_OF)
         assert score.details["sub_scores"]["breadth"] == 20.0
 
+    def test_repeated_revisions_from_one_analyst_dont_inflate_breadth(self):
+        """Regression: 5 UP from one analyst + 1 DOWN from another.
+
+        Only 1 of 2 distinct analysts is on the dominant side,
+        so breadth_fraction should be 0.5 (→ 10 pts), not 2.5 (→ 20 pts).
+        """
+        revs = [
+            _rev(analyst="Prolific", revision_date=f"2026-02-{20 + i}")
+            for i in range(5)
+        ] + [_down_rev(analyst="Bear")]
+        score = score_analyst_revisions("AAPL", revs, AS_OF)
+        # 1 up-analyst out of 2 total → 50% breadth → 10 points
+        assert score.details["sub_scores"]["breadth"] == 10.0
+
 
 # ── Recency scoring ──────────────────────────────────────────────────
 
