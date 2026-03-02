@@ -163,6 +163,23 @@ class TestClusterScoring:
         score = score_congressional("NVDA", trades, AS_OF)
         assert score.details["sub_scores"]["cluster"] == 18.0
 
+    def test_cluster_only_counts_net_direction_members(self):
+        """5 tiny buys should NOT inflate cluster when 1 huge sell dominates."""
+        trades = [
+            # 5 tiny buys from different members ($1k-$3k each)
+            _trade(member_name=f"Buyer {i}", direction=TradeDirection.BUY,
+                   estimated_value_low=1_000, estimated_value_high=3_000)
+            for i in range(5)
+        ] + [
+            # 1 huge sell ($5M-$10M) → net direction is SELL
+            _trade(member_name="Big Seller", direction=TradeDirection.SELL,
+                   estimated_value_low=5_000_000, estimated_value_high=10_000_000),
+        ]
+        score = score_congressional("NVDA", trades, AS_OF)
+        # Net direction is SELL (huge sell > tiny buys), so cluster counts
+        # only sell-side members = 1 → cluster = 5.0
+        assert score.details["sub_scores"]["cluster"] == 5.0
+
 
 # ── Committee scoring ────────────────────────────────────────────────
 
@@ -204,6 +221,23 @@ class TestCommitteeScoring:
         # 1 of 3 relevant → ratio 0.33 → one_relevant
         assert score.details["sub_scores"]["committee"] == DEFAULT_CONFIG.committee_one_relevant_score
 
+    def test_committee_only_evaluates_net_direction_trades(self):
+        """Committee relevance should only consider net-direction trades."""
+        trades = [
+            # Relevant-committee buy (tiny)
+            _trade(member_name="Buyer A", direction=TradeDirection.BUY,
+                   estimated_value_low=1_000, estimated_value_high=3_000,
+                   committee_memberships=("Senate Banking Committee",)),
+            # Non-relevant sell (huge) → this dominates net direction
+            _trade(member_name="Seller A", direction=TradeDirection.SELL,
+                   estimated_value_low=1_000_000, estimated_value_high=2_000_000,
+                   committee_memberships=()),
+        ]
+        score = score_congressional("NVDA", trades, AS_OF)
+        # Net direction is SELL → only Seller A's trade is evaluated
+        # Seller A has no relevant committees → none_relevant
+        assert score.details["sub_scores"]["committee"] == DEFAULT_CONFIG.committee_none_relevant_score
+
 
 # ── Recency scoring ──────────────────────────────────────────────────
 
@@ -218,6 +252,22 @@ class TestRecencyScoring:
         trade = _trade(trade_date="2026-01-01", disclosure_date="2026-02-25")
         score = score_congressional("NVDA", [trade], AS_OF)
         # 55 day lag → 8 points (<=60)
+        assert score.details["sub_scores"]["recency"] == 8.0
+
+    def test_recency_only_evaluates_net_direction_trades(self):
+        """Recency should use filing lag of net-direction trades only."""
+        trades = [
+            # Tiny buy filed quickly (5 day lag)
+            _trade(member_name="Buyer A", direction=TradeDirection.BUY,
+                   trade_date="2026-02-20", disclosure_date="2026-02-25",
+                   estimated_value_low=1_000, estimated_value_high=3_000),
+            # Huge sell filed slowly (50 day lag) → this dominates net direction
+            _trade(member_name="Seller A", direction=TradeDirection.SELL,
+                   trade_date="2026-01-05", disclosure_date="2026-02-24",
+                   estimated_value_low=1_000_000, estimated_value_high=2_000_000),
+        ]
+        score = score_congressional("NVDA", trades, AS_OF)
+        # Net direction is SELL → recency uses Seller A's lag = 50 days → 8.0 pts
         assert score.details["sub_scores"]["recency"] == 8.0
 
 
@@ -243,6 +293,49 @@ class TestCompositeScenarios:
         )
         score = score_congressional("NVDA", [trade], AS_OF)
         assert score.score <= 30.0
+
+    def test_codex_repro_5_tiny_buys_1_huge_sell(self):
+        """Codex P1 repro: 5 tiny buys + 1 huge sell must score LOW.
+
+        Previous bug: cluster counted 5 buy members even though net direction
+        was overwhelmingly SELL by value.  Score was 48 with negative
+        net_trade_value — clearly wrong.
+        """
+        trades = [
+            # 5 tiny buys ($1k-$3k each, midpoint $2k → total $10k)
+            _trade(member_name=f"Buyer {i}", direction=TradeDirection.BUY,
+                   estimated_value_low=1_000, estimated_value_high=3_000,
+                   trade_date="2026-02-10", disclosure_date="2026-02-20")
+            for i in range(5)
+        ] + [
+            # 1 huge sell ($5M-$16M, midpoint $10.5M)
+            _trade(member_name="Big Seller", direction=TradeDirection.SELL,
+                   estimated_value_low=5_000_000, estimated_value_high=16_000_000,
+                   trade_date="2026-02-10", disclosure_date="2026-02-20"),
+        ]
+        score = score_congressional("NVDA", trades, AS_OF)
+        # Net direction is SELL → direction = 0.0
+        # Cluster: only 1 sell member → 5.0 (was 25.0 before fix!)
+        # Committee: no relevant committees → 3.0
+        # Recency: 10-day lag → 20.0 (legitimately recent sell)
+        # Total = 28.0 — well below the old buggy 48
+        assert score.score <= 30.0
+        assert score.details["net_trade_value"] < 0
+        # Key regression check: cluster must NOT count buy-side members
+        assert score.details["sub_scores"]["cluster"] == 5.0
+
+    def test_unanimous_buys_from_committee_members_high_score(self):
+        """Positive control: unanimous informed buying should score high."""
+        trades = [
+            _trade(member_name=f"Senator {i}", direction=TradeDirection.BUY,
+                   estimated_value_low=500_000, estimated_value_high=1_000_000,
+                   trade_date="2026-02-20", disclosure_date="2026-02-25",
+                   committee_memberships=("Senate Banking Committee",))
+            for i in range(4)
+        ]
+        score = score_congressional("NVDA", trades, AS_OF)
+        # direction=30, cluster=22, committee=25, recency=20 → 97
+        assert score.score >= 85.0
 
 
 # ── Batch scoring ────────────────────────────────────────────────────

@@ -154,21 +154,40 @@ def _direction_score(
         return 7.0  # slight sell bias
 
 
+def _net_direction_trades(trades: List[CongressionalTrade]) -> List[CongressionalTrade]:
+    """Return only the trades in the value-weighted net direction.
+
+    If buy_value >= sell_value → return buy trades only.
+    Otherwise → return sell trades only.
+
+    This ensures cluster/committee/recency only score trades that
+    align with the dominant signal direction.
+    """
+    buy_value = sum(t.midpoint_value for t in trades
+                    if t.direction == TradeDirection.BUY)
+    sell_value = sum(t.midpoint_value for t in trades
+                     if t.direction == TradeDirection.SELL)
+
+    if buy_value >= sell_value:
+        return [t for t in trades if t.direction == TradeDirection.BUY]
+    return [t for t in trades if t.direction == TradeDirection.SELL]
+
+
 def _cluster_score(
-    trades: List[CongressionalTrade],
+    net_trades: List[CongressionalTrade],
     config: CongressionalScoringConfig,
 ) -> float:
-    """Score based on number of distinct members trading in net direction."""
-    if not trades:
+    """Score based on number of distinct members in the net direction.
+
+    Only counts members whose trades align with the value-weighted
+    net direction (P1 fix: prevents inflated cluster score when a
+    few tiny trades outnumber one large opposing trade).
+    """
+    if not net_trades:
         return 0.0
 
-    buy_members = {t.member_name.strip().lower() for t in trades
-                   if t.direction == TradeDirection.BUY}
-    sell_members = {t.member_name.strip().lower() for t in trades
-                    if t.direction == TradeDirection.SELL}
-
-    # Net direction: whichever has more distinct members
-    net_count = max(len(buy_members), len(sell_members))
+    net_members = {t.member_name.strip().lower() for t in net_trades}
+    net_count = len(net_members)
 
     for min_count, points in config.cluster_breakpoints:
         if net_count >= min_count:
@@ -177,15 +196,15 @@ def _cluster_score(
 
 
 def _committee_score(
-    trades: List[CongressionalTrade],
+    net_trades: List[CongressionalTrade],
     config: CongressionalScoringConfig,
 ) -> float:
-    """Score based on committee relevance of trading members."""
-    if not trades:
-        return 0.0
+    """Score based on committee relevance of net-direction members."""
+    if not net_trades:
+        return config.committee_none_relevant_score
 
-    relevant_count = sum(1 for t in trades if t.is_committee_relevant)
-    total = len(trades)
+    relevant_count = sum(1 for t in net_trades if t.is_committee_relevant)
+    total = len(net_trades)
 
     if total == 0:
         return config.committee_none_relevant_score
@@ -202,14 +221,14 @@ def _committee_score(
 
 
 def _recency_score(
-    trades: List[CongressionalTrade],
+    net_trades: List[CongressionalTrade],
     config: CongressionalScoringConfig,
 ) -> float:
-    """Score based on average filing lag days."""
-    if not trades:
+    """Score based on average filing lag of net-direction trades."""
+    if not net_trades:
         return 0.0
 
-    lags = [t.filing_lag_days for t in trades]
+    lags = [t.filing_lag_days for t in net_trades]
     avg_lag = sum(lags) / len(lags)
 
     for max_lag, points in config.recency_breakpoints:
@@ -273,9 +292,10 @@ def score_congressional(
         )
 
     direction = _direction_score(filtered, config)
-    cluster = _cluster_score(filtered, config)
-    committee = _committee_score(filtered, config)
-    recency = _recency_score(filtered, config)
+    net_trades = _net_direction_trades(filtered)
+    cluster = _cluster_score(net_trades, config)
+    committee = _committee_score(net_trades, config)
+    recency = _recency_score(net_trades, config)
 
     raw_score = direction + cluster + committee + recency
     final_score = min(max(raw_score, 0.0), 100.0)
