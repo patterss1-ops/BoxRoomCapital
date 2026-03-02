@@ -51,6 +51,15 @@ Defines file-scope locks for parallel execution.
 | E-006 | codex | exclusive | `app/signal/composite.py`, `app/signal/decision.py`, `tests/test_signal_composite.py` | E-002, E-003, E-004, E-005 | E-002..E-005 then E-006 | released | 2026-03-02T09:44:51Z |
 | E-007 | codex | shared | `app/engine/signal_shadow.py`, `app/api/server.py` (signal endpoints only), `app/web/templates/_signal_engine.html`, `tests/test_signal_shadow_api.py` | E-008 | E-006 then E-007 then E-008 | released | 2026-03-02T12:15:00Z |
 | E-008 | claude | shared | `tests/test_signal_engine_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | E-007 | E-007 then E-008 | released | 2026-03-02T10:55:42Z |
+| F-000 | codex | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `ops/collab/mailbox/inbox/**`, `ops/collab/HANDOFFS/**` | none | n/a | released | 2026-03-02T11:24:05Z |
+| F-001 | codex | exclusive | `app/signal/layer_registry.py`, `app/signal/contracts.py` (layer metadata hooks only), `tests/test_signal_layer_registry.py` | F-002, F-003, F-004, F-005 | F-001 first to freeze remaining tier-1 layer contract | unclaimed | 2026-03-02T11:02:27Z |
+| F-002 | claude | exclusive | `intelligence/finra_short_interest.py`, `app/signal/layers/short_interest.py`, `tests/test_signal_layer_short_interest.py` | F-001 | F-001 then F-002 | unclaimed | 2026-03-02T11:02:27Z |
+| F-003 | claude | exclusive | `intelligence/capitol_trades_client.py`, `app/signal/layers/congressional.py`, `tests/test_signal_layer_congressional.py` | F-001 | F-001 then F-003 | unclaimed | 2026-03-02T11:02:27Z |
+| F-004 | codex | exclusive | `intelligence/news_sentiment.py`, `app/signal/layers/news_sentiment.py`, `tests/test_signal_layer_news_sentiment.py` | F-001 | F-001 then F-004 | unclaimed | 2026-03-02T11:02:27Z |
+| F-005 | claude | exclusive | `app/signal/layers/technical_overlay.py`, `tests/test_signal_layer_technical_overlay.py` | F-001 | F-001 then F-005 | unclaimed | 2026-03-02T11:02:27Z |
+| F-006 | codex | shared | `app/signal/composite.py`, `app/engine/signal_shadow.py`, `tests/test_signal_composite.py`, `tests/test_signal_shadow_api.py` | F-002, F-003, F-004, F-005 | F-002..F-005 then F-006 | unclaimed | 2026-03-02T11:02:27Z |
+| F-007 | codex | shared | `intelligence/jobs/signal_layer_jobs.py`, `app/api/server.py` (signal endpoints only), `app/web/templates/_signal_engine.html`, `tests/test_signal_shadow_api.py` | F-006, F-008 | F-006 then F-007 then F-008 | unclaimed | 2026-03-02T11:02:27Z |
+| F-008 | claude | shared | `tests/test_signal_engine_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | F-007 | F-007 then F-008 | unclaimed | 2026-03-02T11:02:27Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
 
 ## Claim protocol
