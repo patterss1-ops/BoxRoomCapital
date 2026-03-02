@@ -10,6 +10,7 @@ from app.signal.layers.news_sentiment import (
     NewsArticle,
     NewsSentimentConfig,
     score_news_sentiment,
+    score_news_sentiment_batch,
 )
 from app.signal.types import LayerId
 from intelligence.news_sentiment import (
@@ -86,6 +87,17 @@ class TestNormalizer:
         assert item is not None
         assert item.published_at.startswith("2026-03-02T10:00:00")
 
+    def test_normalize_news_item_date_only_uses_midday_utc(self):
+        raw = {
+            "ticker": "AAPL",
+            "headline": "Date only item",
+            "date": "2026-03-02",
+            "sentiment": "neutral",
+        }
+        item = normalize_news_item(raw)
+        assert item is not None
+        assert item.published_at.startswith("2026-03-02T12:00:00")
+
     def test_normalize_news_feed_skips_invalid_rows(self):
         items = [
             {"ticker": "AAPL", "headline": "ok", "published_at": "2026-03-02T10:00:00Z"},
@@ -99,10 +111,10 @@ class TestNormalizer:
 
 
 class TestNewsSentimentScorer:
-    def test_no_articles_returns_neutral_placeholder(self):
+    def test_no_articles_returns_zero_placeholder(self):
         score = score_news_sentiment("SPY", [], AS_OF)
         assert score.layer_id == LayerId.L6_NEWS_SENTIMENT
-        assert score.score == pytest.approx(45.0)
+        assert score.score == pytest.approx(0.0)
         assert score.confidence == 0.0
         assert score.details["reason"] == "no_articles_in_window"
         assert score.details["article_count"] == 0
@@ -163,7 +175,7 @@ class TestNewsSentimentScorer:
             _article("AMD", 0.8, 40, source="seeking_alpha"),
         ]
         score = score_news_sentiment("AMD", articles, AS_OF, config=cfg)
-        assert score.score == pytest.approx(45.0)
+        assert score.score == pytest.approx(0.0)
         assert score.details["reason"] == "no_articles_in_window"
 
     def test_required_contract_keys_exist_in_details(self):
@@ -183,6 +195,46 @@ class TestNewsSentimentScorer:
         score_a = score_news_sentiment("QQQ", articles, AS_OF)
         score_b = score_news_sentiment("QQQ", articles, AS_OF)
         assert score_a.provenance_ref == score_b.provenance_ref
+
+    def test_relevance_multiplier_changes_polarity_weighting(self):
+        articles = [
+            _article("NFLX", 0.9, 1, source="reuters", relevance=0.25),
+            _article("NFLX", -0.9, 1, source="reuters", relevance=1.5),
+        ]
+        score = score_news_sentiment("NFLX", articles, AS_OF)
+        assert score.details["sentiment_polarity"] < 0.0
+
+    def test_extreme_negative_clamps_to_zero(self):
+        articles = [
+            _article("PLTR", -1.0, i % 8, source="reuters")
+            for i in range(1, 16)
+        ]
+        score = score_news_sentiment("PLTR", articles, AS_OF)
+        assert score.score == pytest.approx(0.0)
+
+    def test_confidence_formula_reaches_one_with_depth_diversity_and_freshness(self):
+        sources = ("reuters", "bloomberg", "financial_times", "marketwatch", "seeking_alpha")
+        articles = []
+        for idx in range(12):
+            articles.append(
+                _article(
+                    "IBM",
+                    0.2,
+                    0 if idx == 0 else 1,
+                    source=sources[idx % len(sources)],
+                )
+            )
+        score = score_news_sentiment("IBM", articles, AS_OF)
+        assert score.confidence == pytest.approx(1.0)
+
+    def test_layer_batch_scoring_returns_per_ticker_scores(self):
+        batch = {
+            "AAPL": [_article("AAPL", 0.6, 2, source="reuters")],
+            "MSFT": [_article("MSFT", -0.4, 2, source="reuters")],
+        }
+        scores = score_news_sentiment_batch(batch, AS_OF)
+        assert set(scores.keys()) == {"AAPL", "MSFT"}
+        assert scores["AAPL"].score > scores["MSFT"].score
 
 
 class TestFeedScoringHelpers:

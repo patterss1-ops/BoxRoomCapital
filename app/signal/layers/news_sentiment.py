@@ -71,14 +71,15 @@ class NewsSentimentConfig:
     source: str = "news-sentiment"
     window_hours: int = 48
     negative_threshold: float = -0.25
+    no_data_score: float = 0.0
 
     # (source_key, weight)
     source_weights: Tuple[Tuple[str, float], ...] = (
-        ("seeking_alpha", 1.0),
-        ("reuters", 0.95),
-        ("bloomberg", 0.95),
-        ("wall_street_journal", 0.9),
-        ("financial_times", 0.9),
+        ("reuters", 1.0),
+        ("bloomberg", 1.0),
+        ("wall_street_journal", 1.0),
+        ("financial_times", 1.0),
+        ("seeking_alpha", 0.95),
         ("marketwatch", 0.85),
         ("x", 0.55),
         ("twitter", 0.55),
@@ -119,12 +120,23 @@ def _parse_iso8601(value: str) -> datetime:
     text = str(value or "").strip()
     if not text:
         raise ValueError("timestamp is required.")
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        try:
+            parsed = datetime.strptime(text, "%Y-%m-%d").replace(
+                hour=12, minute=0, second=0, tzinfo=timezone.utc
+            )
+            return parsed
+        except ValueError:
+            raise ValueError("Invalid ISO timestamp.")
     normalized = text.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:
         try:
-            parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+            # Date-only strings use midday UTC to reduce boundary artifacts.
+            parsed = datetime.strptime(text[:10], "%Y-%m-%d").replace(
+                hour=12, minute=0, second=0
+            )
         except ValueError:
             raise ValueError("Invalid ISO timestamp.") from exc
     if parsed.tzinfo is None:
@@ -244,7 +256,7 @@ def score_news_sentiment(
         return LayerScore(
             layer_id=LayerId.L6_NEWS_SENTIMENT,
             ticker=ticker_norm,
-            score=45.0,
+            score=float(config.no_data_score),
             as_of=as_of_text,
             source=config.source,
             provenance_ref=f"news-{ticker_norm}-{as_of_text[:10]}-no-data",
@@ -254,6 +266,7 @@ def score_news_sentiment(
                 "article_count": 0,
                 "negative_article_ratio": 0.0,
                 "window_hours": config.window_hours,
+                "source_count": 0,
                 "reason": "no_articles_in_window",
             },
         )

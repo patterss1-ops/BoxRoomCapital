@@ -58,12 +58,24 @@ def _to_iso8601_utc(value: Any) -> Optional[str]:
     if not text:
         return None
 
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        try:
+            parsed = datetime.strptime(text, "%Y-%m-%d").replace(
+                hour=12, minute=0, second=0, tzinfo=timezone.utc
+            )
+            return parsed.isoformat().replace("+00:00", "Z")
+        except ValueError:
+            return None
+
     normalized = text.replace("Z", "+00:00")
     try:
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
         try:
-            parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+            # Date-only strings use midday UTC to reduce window-boundary drift.
+            parsed = datetime.strptime(text[:10], "%Y-%m-%d").replace(
+                hour=12, minute=0, second=0
+            )
         except ValueError:
             return None
     if parsed.tzinfo is None:
