@@ -48,8 +48,8 @@ Defines file-scope locks for parallel execution.
 | E-004 | claude | exclusive | `app/signal/layers/pead.py`, `tests/test_signal_layer_pead.py` | E-001 | E-001 then E-004 | released | 2026-03-01T23:00:00Z |
 | E-005 | claude | exclusive | `app/signal/layers/analyst_revisions.py`, `tests/test_signal_layer_analyst_revisions.py` | E-001 | E-001 then E-005 | released | 2026-03-01T23:00:00Z |
 | E-006 | codex | exclusive | `app/signal/composite.py`, `app/signal/decision.py`, `tests/test_signal_composite.py` | E-002, E-003, E-004, E-005 | E-002..E-005 then E-006 | released | 2026-03-02T09:44:51Z |
-| E-007 | codex | shared | `app/engine/signal_shadow.py`, `app/api/server.py` (signal endpoints only), `app/web/templates/_signal_engine.html`, `tests/test_signal_shadow_api.py` | E-008 | E-006 then E-007 then E-008 | claimed | 2026-03-02T09:44:51Z |
-| E-008 | claude | shared | `tests/test_signal_engine_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | E-007 | E-007 then E-008 | unclaimed | 2026-03-01T21:42:10Z |
+| E-007 | codex | shared | `app/engine/signal_shadow.py`, `app/api/server.py` (signal endpoints only), `app/web/templates/_signal_engine.html`, `tests/test_signal_shadow_api.py` | E-008 | E-006 then E-007 then E-008 | released | 2026-03-02T12:15:00Z |
+| E-008 | claude | shared | `tests/test_signal_engine_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | E-007 | E-007 then E-008 | claimed | 2026-03-02T12:20:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
 
 ## Claim protocol
