@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional, Tuple
 
 from app.signal.types import DEFAULT_LAYER_WEIGHTS, DecisionAction, LayerId, ScoreThresholds
 
 
-def _parse_iso8601(value: str) -> None:
-    """Validate ISO-8601 date/time string."""
+def _parse_iso8601_datetime(value: str) -> datetime:
+    """Parse an ISO-8601 timestamp into a tz-aware datetime."""
     if not value or not value.strip():
         raise ValueError("as_of must be a non-empty ISO-8601 string.")
     candidate = value.replace("Z", "+00:00")
     try:
-        datetime.fromisoformat(candidate)
+        parsed = datetime.fromisoformat(candidate)
     except ValueError as exc:
         raise ValueError(f"Invalid ISO-8601 timestamp '{value}'.") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _parse_iso8601(value: str) -> None:
+    """Validate ISO-8601 date/time string."""
+    _parse_iso8601_datetime(value)
 
 
 def resolve_layer_weights(
@@ -110,6 +118,22 @@ class LayerScore:
             "confidence": self.confidence,
             "details": dict(self.details),
         }
+
+    def as_of_datetime(self) -> datetime:
+        """Return parsed `as_of` timestamp as tz-aware datetime."""
+        return _parse_iso8601_datetime(self.as_of)
+
+    def age_hours(self, reference_as_of: str) -> float:
+        """Return non-negative age in hours relative to `reference_as_of`."""
+        ref_dt = _parse_iso8601_datetime(reference_as_of)
+        age = (ref_dt - self.as_of_datetime()).total_seconds() / 3600.0
+        return round(max(0.0, age), 6)
+
+    def missing_detail_keys(self, required_keys: Iterable[str]) -> Tuple[str, ...]:
+        """Return required detail keys that are missing from `details`."""
+        required = [str(key).strip() for key in required_keys]
+        missing = sorted(key for key in required if key and key not in self.details)
+        return tuple(missing)
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> "LayerScore":
@@ -261,4 +285,3 @@ def build_composite_result(
         vetoes=tuple(vetoes or ()),
         notes=tuple(notes or ()),
     )
-
