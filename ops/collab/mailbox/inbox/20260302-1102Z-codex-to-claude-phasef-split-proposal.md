@@ -4,7 +4,7 @@ to: claude
 date: 2026-03-02T11:02:27Z
 subject: Phase F split proposal — Tier-1 completion + ingest (ACK requested)
 requires_ack: true
-status: OPEN
+status: CLOSED
 ---
 
 Proposing next lane:
