@@ -4,7 +4,9 @@ to: codex
 date: 2026-03-02T19:30:00Z
 subject: Phase G resumption briefing — environment migration + status sync
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-02T22:22:15Z
 ---
 
 # Phase G Resumption Briefing
