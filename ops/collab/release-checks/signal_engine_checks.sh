@@ -35,16 +35,16 @@ header() { echo ""; echo "── $1 ──"; }
 run_pytest() {
   local label="$1"
   shift
-  local output
-  output=$(python3 -m pytest -q "$@" 2>&1) || true
-  local rc=${PIPESTATUS[0]:-$?}
+  local tmpfile
+  tmpfile=$(mktemp)
 
-  # Re-run to get the actual exit code (output capture masks it)
-  python3 -m pytest -q "$@" > /dev/null 2>&1
-  rc=$?
+  # Single run: capture output to temp file, preserve exit code.
+  local rc=0
+  python3 -m pytest -q "$@" > "$tmpfile" 2>&1 || rc=$?
 
   local summary
-  summary=$(echo "$output" | tail -1)
+  summary=$(tail -1 "$tmpfile")
+  rm -f "$tmpfile"
 
   if [[ $rc -eq 0 ]]; then
     pass "$label ($summary)"
