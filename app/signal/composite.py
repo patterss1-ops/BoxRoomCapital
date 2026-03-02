@@ -25,6 +25,17 @@ class CompositeScoringConfig:
     min_layers_for_bonus: int = 3
     alignment_required: float = 0.75
     max_convergence_bonus_pct: float = 12.0
+    # Optional set of required layers. Missing entries emit `missing_required_veto_code`.
+    required_layers: Tuple[LayerId, ...] = ()
+    missing_required_veto_code: str = "missing_required_layers"
+    stale_layer_veto_code: str = "stale_layer_data"
+    emit_missing_required_veto: bool = False
+    emit_stale_layer_veto: bool = True
+    # Data quality penalties are applied after convergence multiplier.
+    # Freshness state comes from layer details (`_freshness_state`) when available.
+    warning_layer_penalty_pct: float = 1.5
+    stale_layer_penalty_pct: float = 12.0
+    max_data_quality_penalty_pct: float = 40.0
     # Optional hard floor by layer. If breached, emits veto code
     # `layer_floor_breach:<layer_id>`.
     layer_score_floors: Dict[LayerId, float] = field(default_factory=dict)
@@ -130,6 +141,42 @@ def compute_convergence_bonus(
     return round(max(0.0, bonus), 6)
 
 
+def _evaluate_data_quality(
+    request: CompositeRequest,
+    config: CompositeScoringConfig,
+) -> Tuple[Tuple[LayerId, ...], Tuple[LayerId, ...], Tuple[LayerId, ...]]:
+    """Return (missing_required, warning_layers, stale_layers)."""
+    required = tuple(config.required_layers or ())
+    present = {item.layer_id for item in request.layer_scores}
+    missing_required = tuple(layer_id for layer_id in required if layer_id not in present)
+
+    warning_layers: list[LayerId] = []
+    stale_layers: list[LayerId] = []
+
+    for item in request.layer_scores:
+        details = item.details or {}
+        freshness = str(details.get("_freshness_state") or "").strip().lower()
+        if freshness == "warning":
+            warning_layers.append(item.layer_id)
+        elif freshness == "stale":
+            stale_layers.append(item.layer_id)
+
+    return missing_required, tuple(warning_layers), tuple(stale_layers)
+
+
+def _compute_data_quality_penalty_pct(
+    warning_layers: Sequence[LayerId],
+    stale_layers: Sequence[LayerId],
+    config: CompositeScoringConfig,
+) -> float:
+    penalty = (
+        (len(tuple(warning_layers)) * float(config.warning_layer_penalty_pct))
+        + (len(tuple(stale_layers)) * float(config.stale_layer_penalty_pct))
+    )
+    capped = max(0.0, min(float(config.max_data_quality_penalty_pct), penalty))
+    return round(capped, 6)
+
+
 def evaluate_vetoes(
     request: CompositeRequest,
     external_vetoes: Iterable[str] = (),
@@ -161,7 +208,27 @@ def evaluate_composite(
     weighted = compute_weighted_score(request)
     score_map = request.score_map()
     bonus_pct = compute_convergence_bonus(score_map, config=scoring_config)
-    vetoes = evaluate_vetoes(request, external_vetoes=external_vetoes, config=scoring_config)
+    missing_required, warning_layers, stale_layers = _evaluate_data_quality(
+        request=request,
+        config=scoring_config,
+    )
+
+    quality_vetoes: list[str] = []
+    if missing_required and bool(scoring_config.emit_missing_required_veto):
+        code = str(scoring_config.missing_required_veto_code or "").strip().lower()
+        if code:
+            quality_vetoes.append(code)
+    if stale_layers and bool(scoring_config.emit_stale_layer_veto):
+        code = str(scoring_config.stale_layer_veto_code or "").strip().lower()
+        if code:
+            quality_vetoes.append(code)
+
+    merged_external_vetoes = tuple(external_vetoes or ()) + tuple(quality_vetoes)
+    vetoes = evaluate_vetoes(
+        request,
+        external_vetoes=merged_external_vetoes,
+        config=scoring_config,
+    )
     direction, _, _ = _convergence_direction(score_map, scoring_config)
     multiplier = 1.0
     if bonus_pct > 0.0:
@@ -170,7 +237,13 @@ def evaluate_composite(
             multiplier = 1.0 - (bonus_pct / 100.0)
         elif direction == "bullish":
             multiplier = 1.0 + (bonus_pct / 100.0)
-    uncapped_final = weighted * multiplier
+    quality_penalty_pct = _compute_data_quality_penalty_pct(
+        warning_layers=warning_layers,
+        stale_layers=stale_layers,
+        config=scoring_config,
+    )
+    quality_multiplier = 1.0 - (quality_penalty_pct / 100.0)
+    uncapped_final = weighted * multiplier * quality_multiplier
     final_score = max(0.0, min(100.0, uncapped_final))
     action = resolve_action(
         final_score=final_score,
@@ -178,6 +251,28 @@ def evaluate_composite(
         vetoes=vetoes,
         policy=veto_policy,
     )
+
+    notes = [
+        f"active_layers={len(request.layer_scores)}",
+        f"bonus_pct={round(bonus_pct, 4)}",
+        f"bonus_direction={direction}",
+        f"quality_penalty_pct={round(quality_penalty_pct, 4)}",
+    ]
+    if missing_required:
+        notes.append(
+            "missing_required_layers="
+            + ",".join(layer_id.value for layer_id in missing_required)
+        )
+    if warning_layers:
+        notes.append(
+            "warning_layers="
+            + ",".join(layer_id.value for layer_id in warning_layers)
+        )
+    if stale_layers:
+        notes.append(
+            "stale_layers="
+            + ",".join(layer_id.value for layer_id in stale_layers)
+        )
 
     return CompositeResult(
         ticker=request.ticker,
@@ -188,11 +283,7 @@ def evaluate_composite(
         action=action,
         layer_scores=request.score_map(),
         vetoes=tuple(vetoes or ()),
-        notes=(
-            f"active_layers={len(request.layer_scores)}",
-            f"bonus_pct={round(bonus_pct, 4)}",
-            f"bonus_direction={direction}",
-        ),
+        notes=tuple(notes),
     )
 
 

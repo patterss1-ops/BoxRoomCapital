@@ -206,6 +206,7 @@ def test_run_signal_shadow_cycle_uses_latest_layer_events(tmp_path, monkeypatch)
 
     report = signal_shadow.run_signal_shadow_cycle(
         db_path=db_path,
+        required_layers=(LayerId.L1_PEAD, LayerId.L8_SA_QUANT),
         min_layers_for_score=2,
         now_fn=lambda: "2026-03-02T10:00:00Z",
     )
@@ -226,3 +227,65 @@ def test_run_signal_shadow_cycle_uses_latest_layer_events(tmp_path, monkeypatch)
     assert snapshot["has_report"] is True
     assert snapshot["report"]["run_id"] == report["run_id"]
     assert snapshot["event_stats"]["layer_coverage"]["l1_pead"] == 2
+
+
+def test_run_signal_shadow_cycle_blocks_missing_required_layers(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "signal_shadow_missing_required.db")
+    trade_db.init_db(db_path)
+    store = EventStore(db_path=db_path)
+    monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+    l1 = _layer("AAPL", LayerId.L1_PEAD, 76.0, source="pead")
+    l8 = _layer("AAPL", LayerId.L8_SA_QUANT, 74.0, source="sa-quant")
+    _write_layer_event(store, l1, retrieved_at="2026-03-02T09:00:00Z", run_ref="l1")
+    _write_layer_event(store, l8, retrieved_at="2026-03-02T09:02:00Z", run_ref="l8")
+
+    report = signal_shadow.run_signal_shadow_cycle(
+        db_path=db_path,
+        required_layers=(LayerId.L1_PEAD, LayerId.L2_INSIDER, LayerId.L8_SA_QUANT),
+        min_layers_for_score=2,
+        enforce_required_layers=True,
+        now_fn=lambda: "2026-03-02T10:00:00Z",
+    )
+
+    assert report["summary"]["tickers_total"] == 1
+    assert report["summary"]["tickers_scored"] == 0
+    assert report["summary"]["tickers_blocked_missing_required_layers"] == 1
+    row = report["results"][0]
+    assert row["status"] == "blocked_missing_required_layers"
+    assert row["action"] == "no_action"
+    assert "missing_required_layers" in row["vetoes"]
+
+
+def test_run_signal_shadow_cycle_blocks_stale_layers(tmp_path, monkeypatch):
+    db_path = str(tmp_path / "signal_shadow_stale_layers.db")
+    trade_db.init_db(db_path)
+    store = EventStore(db_path=db_path)
+    monkeypatch.setattr(signal_shadow.config, "STRATEGY_SLOTS", [])
+
+    fresh_l1 = _layer("AAPL", LayerId.L1_PEAD, 82.0, as_of="2026-03-02T09:00:00Z", source="pead")
+    stale_news = _layer(
+        "AAPL",
+        LayerId.L6_NEWS_SENTIMENT,
+        78.0,
+        as_of="2026-02-26T09:00:00Z",
+        source="news",
+    )
+    _write_layer_event(store, fresh_l1, retrieved_at="2026-03-02T09:01:00Z", run_ref="l1")
+    _write_layer_event(store, stale_news, retrieved_at="2026-03-02T09:02:00Z", run_ref="l6")
+
+    report = signal_shadow.run_signal_shadow_cycle(
+        db_path=db_path,
+        required_layers=(LayerId.L1_PEAD, LayerId.L6_NEWS_SENTIMENT),
+        min_layers_for_score=2,
+        now_fn=lambda: "2026-03-02T10:00:00Z",
+    )
+
+    assert report["summary"]["tickers_total"] == 1
+    assert report["summary"]["tickers_scored"] == 0
+    assert report["summary"]["tickers_blocked_stale_layers"] == 1
+    row = report["results"][0]
+    assert row["status"] == "blocked_stale_layers"
+    assert row["action"] == "no_action"
+    assert "stale_layer_data" in row["vetoes"]
+    assert row["freshness"]["stale_layers"] == ["l6_news_sentiment"]

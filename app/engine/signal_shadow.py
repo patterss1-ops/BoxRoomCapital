@@ -12,8 +12,10 @@ import uuid
 from typing import Any, Mapping, Optional, Sequence
 
 import config
-from app.signal.composite import evaluate_composite
+from app.signal.composite import CompositeScoringConfig, evaluate_composite
 from app.signal.contracts import CompositeRequest, LayerScore
+from app.signal.decision import VetoPolicy
+from app.signal.layer_registry import evaluate_freshness
 from app.signal.types import LAYER_ORDER, LayerId
 from data.trade_db import (
     DB_PATH,
@@ -24,11 +26,26 @@ from data.trade_db import (
 )
 
 STATE_KEY_LAST_REPORT = "signal_shadow:last_report"
+DATA_QUALITY_VETO_MISSING = "missing_required_layers"
+DATA_QUALITY_VETO_STALE = "stale_layer_data"
 DEFAULT_REQUIRED_LAYERS: tuple[LayerId, ...] = (
     LayerId.L1_PEAD,
     LayerId.L2_INSIDER,
     LayerId.L4_ANALYST_REVISIONS,
     LayerId.L8_SA_QUANT,
+)
+BASE_VETO_POLICY = VetoPolicy()
+SHADOW_VETO_POLICY = VetoPolicy(
+    hard_block_vetoes=tuple(
+        dict.fromkeys(
+            (
+                *BASE_VETO_POLICY.hard_block_vetoes,
+                DATA_QUALITY_VETO_MISSING,
+                DATA_QUALITY_VETO_STALE,
+            )
+        )
+    ),
+    force_short_vetoes=BASE_VETO_POLICY.force_short_vetoes,
 )
 
 
@@ -103,8 +120,14 @@ def _collect_latest_layer_scores(
     return by_ticker
 
 
-def _clone_layer_score(layer: LayerScore, as_of: str) -> LayerScore:
-    return LayerScore(
+def _clone_layer_score(layer: LayerScore, as_of: str) -> tuple[LayerScore, str]:
+    freshness_state = evaluate_freshness(layer_score=layer, reference_as_of=as_of).value
+    details = dict(layer.details or {})
+    details["_observed_as_of"] = layer.as_of
+    details["_age_hours"] = layer.age_hours(as_of)
+    details["_freshness_state"] = freshness_state
+
+    cloned = LayerScore(
         layer_id=layer.layer_id,
         ticker=layer.ticker,
         score=layer.score,
@@ -112,8 +135,9 @@ def _clone_layer_score(layer: LayerScore, as_of: str) -> LayerScore:
         source=layer.source,
         provenance_ref=layer.provenance_ref,
         confidence=layer.confidence,
-        details=dict(layer.details or {}),
+        details=details,
     )
+    return cloned, freshness_state
 
 
 def _build_event_stats(by_ticker: Mapping[str, Mapping[LayerId, LayerScore]]) -> dict[str, Any]:
@@ -137,6 +161,7 @@ def run_signal_shadow_cycle(
     db_path: str = DB_PATH,
     required_layers: Sequence[LayerId] = DEFAULT_REQUIRED_LAYERS,
     min_layers_for_score: int = 2,
+    enforce_required_layers: bool = False,
     now_fn=_utc_now_iso,
 ) -> dict[str, Any]:
     """Run one shadow composite cycle and persist report into strategy_state."""
@@ -144,6 +169,14 @@ def run_signal_shadow_cycle(
     run_id = uuid.uuid4().hex[:12]
     required = tuple(required_layers)
     minimum = max(1, int(min_layers_for_score))
+    scoring_config = CompositeScoringConfig(
+        required_layers=required,
+        warning_layer_penalty_pct=2.5,
+        stale_layer_penalty_pct=15.0,
+        max_data_quality_penalty_pct=40.0,
+        emit_missing_required_veto=bool(enforce_required_layers),
+        emit_stale_layer_veto=True,
+    )
 
     by_ticker = _collect_latest_layer_scores(db_path=db_path)
     universe = sorted(set(_extract_strategy_tickers()) | set(by_ticker.keys()))
@@ -173,25 +206,53 @@ def run_signal_shadow_cycle(
             )
             continue
 
-        request_layers = tuple(
-            _clone_layer_score(layer_map[layer_id], as_of=run_at)
-            for layer_id in LAYER_ORDER
-            if layer_id in layer_map
-        )
+        request_layers: list[LayerScore] = []
+        freshness_by_layer: dict[str, str] = {}
+        warning_layers: list[str] = []
+        stale_layers: list[str] = []
+        for layer_id in LAYER_ORDER:
+            layer = layer_map.get(layer_id)
+            if not layer:
+                continue
+            cloned, freshness_state = _clone_layer_score(layer, as_of=run_at)
+            request_layers.append(cloned)
+            freshness_by_layer[layer_id.value] = freshness_state
+            if freshness_state == "warning":
+                warning_layers.append(layer_id.value)
+            elif freshness_state == "stale":
+                stale_layers.append(layer_id.value)
+
+        external_vetoes: list[str] = []
+        if missing_required and bool(enforce_required_layers):
+            external_vetoes.append(DATA_QUALITY_VETO_MISSING)
+        if stale_layers:
+            external_vetoes.append(DATA_QUALITY_VETO_STALE)
+
         composite = evaluate_composite(
             CompositeRequest(
                 ticker=ticker,
                 as_of=run_at,
-                layer_scores=request_layers,
-            )
+                layer_scores=tuple(request_layers),
+            ),
+            external_vetoes=tuple(external_vetoes),
+            scoring_config=scoring_config,
+            veto_policy=SHADOW_VETO_POLICY,
         )
         action = composite.action.value
         action_counts[action] = action_counts.get(action, 0) + 1
+        status = "scored"
+        vetoes = set(composite.vetoes)
+        if DATA_QUALITY_VETO_MISSING in vetoes:
+            status = "blocked_missing_required_layers"
+        elif DATA_QUALITY_VETO_STALE in vetoes:
+            status = "blocked_stale_layers"
+        elif warning_layers:
+            status = "scored_warning_layers"
 
         results.append(
             {
                 "ticker": ticker,
-                "status": "scored",
+                "status": status,
                 "available_layers": available_layers,
                 "missing_required_layers": missing_required,
                 "layer_count": len(request_layers),
@@ -202,10 +263,28 @@ def run_signal_shadow_cycle(
                 "vetoes": list(composite.vetoes),
                 "notes": list(composite.notes),
                 "layer_scores": composite.to_dict().get("layer_scores", {}),
+                "freshness": {
+                    "layer_states": freshness_by_layer,
+                    "warning_layers": warning_layers,
+                    "stale_layers": stale_layers,
+                },
             }
         )
 
-    scored = sum(1 for row in results if row.get("status") == "scored")
+    scored = sum(
+        1 for row in results if str(row.get("status") or "").startswith("scored")
+    )
+    insufficient = sum(1 for row in results if row.get("status") == "insufficient_layers")
+    scored_missing_required = sum(
+        1
+        for row in results
+        if str(row.get("status") or "").startswith("scored")
+        and bool(row.get("missing_required_layers"))
+    )
+    blocked_missing = sum(
+        1 for row in results if row.get("status") == "blocked_missing_required_layers"
+    )
+    blocked_stale = sum(1 for row in results if row.get("status") == "blocked_stale_layers")
     report = {
         "run_id": run_id,
         "run_at": run_at,
@@ -214,7 +293,10 @@ def run_signal_shadow_cycle(
         "summary": {
             "tickers_total": len(universe),
             "tickers_scored": scored,
-            "tickers_insufficient_layers": len(universe) - scored,
+            "tickers_insufficient_layers": insufficient,
+            "tickers_scored_missing_required_layers": scored_missing_required,
+            "tickers_blocked_missing_required_layers": blocked_missing,
+            "tickers_blocked_stale_layers": blocked_stale,
             "action_counts": action_counts,
         },
         "results": results,

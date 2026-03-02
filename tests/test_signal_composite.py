@@ -233,3 +233,45 @@ class TestCompositeIntegration:
         )
         assert result.ticker == "SPY"
         assert "manual_hold" in result.vetoes
+
+    def test_missing_required_layers_emit_veto_and_block(self):
+        req = _request(
+            _layer(LayerId.L1_PEAD, 80.0),
+            _layer(LayerId.L2_INSIDER, 78.0),
+        )
+        cfg = CompositeScoringConfig(
+            required_layers=(
+                LayerId.L1_PEAD,
+                LayerId.L2_INSIDER,
+                LayerId.L3_SHORT_INTEREST,
+            ),
+            emit_missing_required_veto=True,
+        )
+        base_policy = VetoPolicy()
+        policy = VetoPolicy(
+            hard_block_vetoes=base_policy.hard_block_vetoes + ("missing_required_layers",),
+            force_short_vetoes=base_policy.force_short_vetoes,
+        )
+        result = evaluate_composite(req, scoring_config=cfg, veto_policy=policy)
+
+        assert "missing_required_layers" in result.vetoes
+        assert result.action == DecisionAction.NO_ACTION
+        assert any("missing_required_layers=l3_short_interest" in note for note in result.notes)
+
+    def test_warning_freshness_applies_penalty(self):
+        clean = _request(
+            _layer(LayerId.L1_PEAD, 80.0),
+            _layer(LayerId.L2_INSIDER, 80.0),
+            _layer(LayerId.L4_ANALYST_REVISIONS, 80.0),
+        )
+        warning = _request(
+            _layer(LayerId.L1_PEAD, 80.0, details={"_freshness_state": "warning"}),
+            _layer(LayerId.L2_INSIDER, 80.0),
+            _layer(LayerId.L4_ANALYST_REVISIONS, 80.0),
+        )
+
+        clean_result = evaluate_composite(clean)
+        warning_result = evaluate_composite(warning)
+
+        assert warning_result.final_score < clean_result.final_score
+        assert any("quality_penalty_pct=" in note for note in warning_result.notes)
