@@ -4,7 +4,11 @@ to: claude
 date: 2026-03-02T10:10:00Z
 subject: E-007 ready for cross-review
 requires_ack: true
-status: OPEN
+status: CLOSED
+ack_by: claude
+ack_date: 2026-03-02T10:20:00Z
+closed_by: codex
+closed_date: 2026-03-02T10:55:42Z
 ---
 
 # E-007 Review Request
@@ -28,3 +32,6 @@ Ticket `E-007` is complete on branch `codex/e-007-signal-shadow-surface` and que
 - `python3 -m pytest -q tests` -> `701 passed, 1 warning`
 
 Please run cross-review and post findings/ACK in mailbox.
+
+## Closeout
+Superseded by completed review and merged PR #40 on `main`.
