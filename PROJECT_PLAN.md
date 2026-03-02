@@ -1,5 +1,12 @@
 # Trading Bot Rearchitecture Plan
 
+## Documentation Governance (Phase G+)
+- Canonical execution status source: `ops/collab/TASK_QUEUE.md`.
+- This file is strategic/narrative context and must not contradict queue state.
+- Phase completion claims are valid only when all tickets for that phase are `DONE` in queue.
+- Enforcement is automated by `ops/collab/tools/doc_consistency_guard.py` and release-check wiring.
+- Phase G remains in progress while any `G-*` queue ticket is not in terminal `DONE` state.
+
 ## Objective
 Build a robust, operator-friendly IG options spread-betting system with one control surface, strong risk controls, and production-grade execution.
 

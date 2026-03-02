@@ -60,6 +60,16 @@ run_pytest() {
 # PHASE E CHECKS (E-001..E-008)
 # ══════════════════════════════════════════════════════════════════════════
 
+# ── 0. Documentation consistency guard (Phase G+) ─────────────────────────
+
+header "Documentation Consistency Guard (Phase G+)"
+if python3 ops/collab/tools/doc_consistency_guard.py --phase G >/tmp/doc_guard.out 2>&1; then
+  pass "PROJECT_PLAN vs TASK_QUEUE consistency ($(tail -1 /tmp/doc_guard.out))"
+else
+  fail "PROJECT_PLAN vs TASK_QUEUE consistency ($(tail -1 /tmp/doc_guard.out))"
+fi
+rm -f /tmp/doc_guard.out
+
 # ── 1. Full regression suite ──────────────────────────────────────────────
 
 header "Full Regression Suite"
