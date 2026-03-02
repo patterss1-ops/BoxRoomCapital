@@ -55,6 +55,75 @@ def _utc_now() -> str:
     return datetime.utcnow().isoformat()
 
 
+_REFERENCE_PRICE_KEYS: tuple[str, ...] = (
+    "reference_price",
+    "signal_price",
+    "expected_price",
+    "decision_price",
+    "last_close",
+    "close_price",
+)
+
+
+def _safe_float(value: Any) -> Optional[float]:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = f"{text[:-1]}+00:00"
+    try:
+        return datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+
+def _extract_reference_price(
+    metadata: Any,
+    response_payload: Any,
+) -> Optional[float]:
+    meta = metadata if isinstance(metadata, dict) else _json_load(_json_dumps(metadata)) or {}
+    payload = response_payload if isinstance(response_payload, dict) else _json_load(_json_dumps(response_payload)) or {}
+
+    for key in _REFERENCE_PRICE_KEYS:
+        candidate = _safe_float(payload.get(key))
+        if candidate and candidate > 0:
+            return candidate
+
+    for key in _REFERENCE_PRICE_KEYS:
+        candidate = _safe_float(meta.get(key))
+        if candidate and candidate > 0:
+            return candidate
+    return None
+
+
+def _compute_slippage_bps(side: str, reference_price: Optional[float], fill_price: Optional[float]) -> Optional[float]:
+    if not reference_price or reference_price <= 0 or not fill_price or fill_price <= 0:
+        return None
+    side_norm = str(side or "").strip().upper()
+    if side_norm == "SELL":
+        return ((reference_price - fill_price) / reference_price) * 10_000.0
+    return ((fill_price - reference_price) / reference_price) * 10_000.0
+
+
+def _compute_latency_ms(dispatch_at: Optional[str], broker_timestamp: Optional[str]) -> Optional[float]:
+    start = _parse_iso_datetime(dispatch_at)
+    end = _parse_iso_datetime(broker_timestamp)
+    if start is None or end is None:
+        return None
+    return max((end - start).total_seconds() * 1000.0, 0.0)
+
+
 def _default_correlation_id(action_type: str, instrument: str) -> str:
     stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     return f"{action_type}:{instrument}:{stamp}:{uuid.uuid4().hex[:8]}"
@@ -134,6 +203,41 @@ def ensure_order_intent_schema(db_path: str = DB_PATH) -> None:
             ON order_intent_transitions(intent_id);
         CREATE INDEX IF NOT EXISTS idx_order_intent_transitions_time
             ON order_intent_transitions(transition_at);
+
+        CREATE TABLE IF NOT EXISTS order_execution_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            intent_id TEXT NOT NULL,
+            action_id TEXT NOT NULL,
+            correlation_id TEXT NOT NULL,
+            attempt INTEGER NOT NULL,
+            event_at TEXT NOT NULL,
+            status TEXT NOT NULL,
+            actor TEXT NOT NULL,
+            broker_target TEXT NOT NULL,
+            account_type TEXT NOT NULL,
+            strategy_id TEXT NOT NULL,
+            sleeve TEXT NOT NULL,
+            instrument TEXT NOT NULL,
+            side TEXT NOT NULL,
+            qty_requested REAL NOT NULL,
+            qty_filled REAL NOT NULL DEFAULT 0,
+            reference_price REAL,
+            fill_price REAL,
+            slippage_bps REAL,
+            dispatch_latency_ms REAL,
+            notional_requested REAL,
+            notional_filled REAL,
+            error_code TEXT,
+            error_message TEXT,
+            metadata TEXT,
+            UNIQUE(intent_id, attempt)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_oem_event_at ON order_execution_metrics(event_at);
+        CREATE INDEX IF NOT EXISTS idx_oem_status ON order_execution_metrics(status);
+        CREATE INDEX IF NOT EXISTS idx_oem_broker ON order_execution_metrics(broker_target);
+        CREATE INDEX IF NOT EXISTS idx_oem_instrument ON order_execution_metrics(instrument);
+        CREATE INDEX IF NOT EXISTS idx_oem_strategy ON order_execution_metrics(strategy_id);
         """
     )
     conn.commit()
@@ -601,5 +705,184 @@ def get_order_intent_transitions(intent_id: str, db_path: str = DB_PATH) -> list
         payload = dict(row)
         payload["request_payload"] = _json_load(payload.get("request_payload"))
         payload["response_payload"] = _json_load(payload.get("response_payload"))
+        items.append(payload)
+    return items
+
+
+def record_execution_metric(
+    intent_id: str,
+    attempt: int,
+    status: str | OrderIntentStatus,
+    actor: str = "system",
+    dispatch_at: Optional[str] = None,
+    response_payload: Any = None,
+    error_code: Optional[str] = None,
+    error_message: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> Optional[dict[str, Any]]:
+    """
+    Upsert one execution metric row for a dispatch attempt.
+
+    This powers execution-quality reporting (fill rate, latency, slippage)
+    using live dispatcher outcomes instead of backtest assumptions.
+    """
+    ensure_order_intent_schema(db_path)
+    status_value = normalize_status(status).value
+    actor_value = normalize_actor(actor)
+    attempt_value = int(attempt)
+    if attempt_value < 1:
+        raise ValueError("attempt must be >= 1")
+
+    conn = get_conn(db_path)
+    row = conn.execute(
+        "SELECT * FROM order_intents WHERE intent_id=?",
+        (intent_id,),
+    ).fetchone()
+    if not row:
+        conn.close()
+        return None
+
+    intent = dict(row)
+    metadata = intent.get("metadata")
+    if isinstance(metadata, str):
+        metadata = _json_load(metadata)
+    if not isinstance(metadata, dict):
+        metadata = {}
+
+    payload = response_payload or {}
+    if not isinstance(payload, dict):
+        payload = {"raw_response": payload}
+
+    qty_requested = float(intent.get("qty", 0.0) or 0.0)
+    qty_filled = _safe_float(payload.get("fill_qty")) or 0.0
+    fill_price = _safe_float(payload.get("fill_price"))
+    reference_price = _extract_reference_price(metadata, payload)
+    slippage_bps = _compute_slippage_bps(str(intent.get("side", "")), reference_price, fill_price)
+
+    broker_timestamp = payload.get("timestamp")
+    event_at = (
+        broker_timestamp
+        if _parse_iso_datetime(broker_timestamp) is not None
+        else _utc_now()
+    )
+    dispatch_latency_ms = _compute_latency_ms(dispatch_at, broker_timestamp)
+
+    notional_requested = (
+        qty_requested * reference_price
+        if reference_price and reference_price > 0
+        else qty_requested
+    )
+    notional_filled = (
+        qty_filled * fill_price
+        if fill_price is not None and fill_price > 0 and qty_filled > 0
+        else 0.0
+    )
+
+    metric_metadata = {
+        "order_id": payload.get("order_id"),
+        "message": payload.get("message"),
+        "response_timestamp": broker_timestamp,
+    }
+
+    conn.execute(
+        """INSERT INTO order_execution_metrics
+           (intent_id, action_id, correlation_id, attempt, event_at, status, actor,
+            broker_target, account_type, strategy_id, sleeve, instrument, side,
+            qty_requested, qty_filled, reference_price, fill_price, slippage_bps,
+            dispatch_latency_ms, notional_requested, notional_filled,
+            error_code, error_message, metadata)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(intent_id, attempt) DO UPDATE SET
+               event_at=excluded.event_at,
+               status=excluded.status,
+               actor=excluded.actor,
+               qty_filled=excluded.qty_filled,
+               reference_price=COALESCE(excluded.reference_price, order_execution_metrics.reference_price),
+               fill_price=COALESCE(excluded.fill_price, order_execution_metrics.fill_price),
+               slippage_bps=COALESCE(excluded.slippage_bps, order_execution_metrics.slippage_bps),
+               dispatch_latency_ms=COALESCE(excluded.dispatch_latency_ms, order_execution_metrics.dispatch_latency_ms),
+               notional_requested=excluded.notional_requested,
+               notional_filled=excluded.notional_filled,
+               error_code=COALESCE(excluded.error_code, order_execution_metrics.error_code),
+               error_message=COALESCE(excluded.error_message, order_execution_metrics.error_message),
+               metadata=COALESCE(excluded.metadata, order_execution_metrics.metadata)""",
+        (
+            intent_id,
+            str(intent.get("action_id", "")),
+            str(intent.get("correlation_id", "")),
+            attempt_value,
+            event_at,
+            status_value,
+            actor_value,
+            str(intent.get("broker_target", "")),
+            str(intent.get("account_type", "")),
+            str(intent.get("strategy_id", "")),
+            str(intent.get("sleeve", "")),
+            str(intent.get("instrument", "")),
+            str(intent.get("side", "")),
+            qty_requested,
+            qty_filled,
+            reference_price,
+            fill_price,
+            slippage_bps,
+            dispatch_latency_ms,
+            notional_requested,
+            notional_filled,
+            error_code,
+            error_message,
+            _json_dumps(metric_metadata),
+        ),
+    )
+    conn.commit()
+
+    metric_row = conn.execute(
+        """SELECT * FROM order_execution_metrics
+           WHERE intent_id=? AND attempt=?""",
+        (intent_id, attempt_value),
+    ).fetchone()
+    conn.close()
+    if not metric_row:
+        return None
+    item = dict(metric_row)
+    item["metadata"] = _json_load(item.get("metadata"))
+    return item
+
+
+def get_execution_metrics(
+    limit: int = 100,
+    intent_id: Optional[str] = None,
+    status: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> list[dict[str, Any]]:
+    """Return recent execution metric rows for analytics/reporting."""
+    ensure_order_intent_schema(db_path)
+    conn = get_conn(db_path)
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    if intent_id:
+        clauses.append("intent_id=?")
+        params.append(intent_id)
+    if status:
+        clauses.append("status=?")
+        params.append(normalize_status(status).value)
+
+    where_sql = ""
+    if clauses:
+        where_sql = "WHERE " + " AND ".join(clauses)
+
+    rows = conn.execute(
+        f"""SELECT * FROM order_execution_metrics
+            {where_sql}
+            ORDER BY event_at DESC, id DESC
+            LIMIT ?""",
+        (*params, int(limit)),
+    ).fetchall()
+    conn.close()
+
+    items: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row)
+        payload["metadata"] = _json_load(payload.get("metadata"))
         items.append(payload)
     return items
