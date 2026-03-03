@@ -30,6 +30,8 @@ Format: `DEC-### | date_utc | decision | rationale | impact | owner`
 | DEC-023 | 2026-03-02T17:42:23Z | Next build lane named `Phase G: Execution Bridge + AI Confidence Gate` with execution-first sequencing | User-directed ordering prioritizes real execution quality telemetry (fills/slippage/rejects) before AI panel calibration so confidence can be tuned on live outcomes, not backtests. | Adds G-000..G-005 split; Codex starts G-001 immediately and Claude claims G-002 after mailbox ACK. | codex |
 | DEC-024 | 2026-03-02T22:40:00Z | Documentation canonicalization policy activated (G+ scope) | `PROJECT_PLAN.md` and `TASK_QUEUE.md` diverged in implied completion semantics; a deterministic governance contract is required before further Phase G delivery. | Dual-layer model is now mandatory: `PROJECT_PLAN.md` is strategic narrative, `ops/collab/TASK_QUEUE.md` is execution truth. Completion claims must match queue (`all DONE`). Enforcement is automated via `ops/collab/tools/doc_consistency_guard.py` wired into release checks. | both |
 
+| DEC-025 | 2026-03-03T13:20:00Z | Phase H: Production Hardening + Promotion Pipeline — full 8-ticket scope with ACK-gated split | Phase G complete (68 tickets DONE, 1128 tests). Promotion pipeline exists but isn't enforcement-wired. No monitoring, containerization, or EOD automation. Codex ACKed full scope at 11:43Z. Claude bootstrapped H-000 after Codex delay. | Adds H-000..H-007 queue rows; Codex owns H-002/H-003/H-005, Claude owns H-001/H-004/H-006/H-007. | both |
+
 ## Pending decision template
 Use this row format when a blocker needs user decision:
 `DEC-### | <date_utc> | <decision requested> | <what is ambiguous> | <impact if delayed/wrong> | <requesting_agent>`
