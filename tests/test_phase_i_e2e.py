@@ -1,8 +1,8 @@
 """Phase I acceptance harness + release checks.
 
 I-007: End-to-end tests covering all Phase I deliverables.
-Validates alert routing, drawdown breaker, decay detector,
-and cross-ticket integration.
+Validates alert routing, position sizing, drawdown breaker, OMS,
+market data monitor, decay detector, and cross-ticket integration.
 """
 
 from __future__ import annotations
@@ -54,32 +54,21 @@ class TestPhaseIModuleImports:
 
     def test_import_position_sizer(self):
         """Verify I-002 position sizer is importable."""
-        try:
-            from risk.position_sizer import PositionSizer
-            assert PositionSizer is not None
-        except (ImportError, AttributeError):
-            # Check for alternative module structure
-            try:
-                import risk.position_sizer
-                assert risk.position_sizer is not None
-            except ImportError:
-                pytest.skip("I-002 position sizer not yet merged")
+        from risk.position_sizer import SizingConfig, compute_position_size
+        assert SizingConfig is not None
+        assert callable(compute_position_size)
 
     def test_import_oms(self):
         """Verify I-004 OMS is importable."""
-        try:
-            import execution.oms
-            assert execution.oms is not None
-        except ImportError:
-            pytest.skip("I-004 OMS not yet merged")
+        from execution.oms import OrderManager, OrderState
+        assert OrderManager is not None
+        assert OrderState is not None
 
     def test_import_market_data_monitor(self):
         """Verify I-005 market data monitor is importable."""
-        try:
-            import data.market_data_monitor
-            assert data.market_data_monitor is not None
-        except ImportError:
-            pytest.skip("I-005 market data monitor not yet merged")
+        from data.market_data_monitor import MarketDataMonitor, ProviderStatus
+        assert MarketDataMonitor is not None
+        assert ProviderStatus is not None
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -295,7 +284,11 @@ class TestPhaseISourceFiles:
 
     REQUIRED_FILES = [
         "app/alert_router.py",
+        "risk/position_sizer.py",
+        "risk/limits_engine.py",
         "risk/drawdown_breaker.py",
+        "execution/oms.py",
+        "data/market_data_monitor.py",
         "analytics/decay_detector.py",
     ]
 
@@ -303,3 +296,175 @@ class TestPhaseISourceFiles:
     def test_source_file_exists(self, rel_path):
         full_path = os.path.join(PROJECT_ROOT, rel_path)
         assert os.path.isfile(full_path), f"Missing: {rel_path}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 7: Position sizer E2E (I-002)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestPositionSizerE2E:
+    """End-to-end position sizing validation."""
+
+    def test_basic_sizing_returns_result(self):
+        """Default config produces a valid sizing result."""
+        from risk.position_sizer import SizingConfig, SizingContext, compute_position_size
+
+        result = compute_position_size(
+            ticker="AAPL",
+            strategy="momentum",
+            price=150.0,
+            config=SizingConfig(),
+            context=SizingContext(equity=100_000.0),
+        )
+        assert result.recommended_notional > 0
+        assert result.ticker == "AAPL"
+        assert result.strategy == "momentum"
+
+    def test_zero_equity_blocks(self):
+        """Zero equity produces zero sizing."""
+        from risk.position_sizer import SizingConfig, SizingContext, compute_position_size
+
+        result = compute_position_size(
+            ticker="AAPL",
+            strategy="momentum",
+            price=150.0,
+            config=SizingConfig(),
+            context=SizingContext(equity=0.0),
+        )
+        assert result.recommended_notional == 0.0
+        assert result.capped_by == "zero_equity"
+
+    def test_volatility_adjustment(self):
+        """Volatility-adjusted sizing differs from fixed."""
+        from risk.position_sizer import SizingConfig, SizingContext, compute_position_size
+
+        ctx_no_vol = SizingContext(equity=100_000.0)
+        ctx_with_vol = SizingContext(equity=100_000.0, ticker_volatility_pct=40.0)
+
+        r1 = compute_position_size("T", "s", 100.0, SizingConfig(), ctx_no_vol)
+        r2 = compute_position_size("T", "s", 100.0, SizingConfig(), ctx_with_vol)
+        assert r1.sizing_method == "fixed"
+        assert r2.sizing_method == "volatility_adjusted"
+
+    def test_position_sizer_class_wrapper(self):
+        """PositionSizer class delegates to compute_position_size."""
+        from risk.position_sizer import PositionSizer
+
+        sizer = PositionSizer()
+        result = sizer.size_position("MSFT", "mean_rev", 300.0)
+        assert result.recommended_notional > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 8: OMS E2E (I-004)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestOmsE2E:
+    """End-to-end order management validation."""
+
+    def test_full_order_lifecycle(self):
+        """PENDING → SUBMITTED → PARTIAL → FILLED."""
+        from execution.oms import OrderManager, OrderState
+
+        mgr = OrderManager()
+        order = mgr.create_order("AAPL", "BUY", 100, strategy="momentum")
+        assert order.state == OrderState.PENDING
+
+        mgr.submit(order.order_id, broker_ref="BR001")
+        assert order.state == OrderState.SUBMITTED
+
+        mgr.fill(order.order_id, 50, 150.0)
+        assert order.state == OrderState.PARTIAL
+
+        mgr.fill(order.order_id, 100, 151.0)
+        assert order.state == OrderState.FILLED
+        assert order.is_terminal
+
+    def test_cancel_and_reject_paths(self):
+        """Verify cancel and reject terminal states."""
+        from execution.oms import OrderManager, OrderState
+
+        mgr = OrderManager()
+        o1 = mgr.create_order("GOOG", "SELL", 50)
+        mgr.submit(o1.order_id)
+        mgr.cancel(o1.order_id, reason="user request")
+        assert o1.state == OrderState.CANCELLED
+
+        o2 = mgr.create_order("TSLA", "BUY", 200)
+        mgr.reject(o2.order_id, reason="margin")
+        assert o2.state == OrderState.REJECTED
+
+    def test_active_vs_terminal_filtering(self):
+        """Active orders exclude terminal ones."""
+        from execution.oms import OrderManager
+
+        mgr = OrderManager()
+        o1 = mgr.create_order("A", "BUY", 10)
+        o2 = mgr.create_order("B", "SELL", 20)
+        mgr.submit(o1.order_id)
+        mgr.fill(o1.order_id, 10, 100.0)
+
+        active = mgr.get_active_orders()
+        assert len(active) == 1
+        assert active[0].ticker == "B"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 9: Market data monitor E2E (I-005)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestMarketDataMonitorE2E:
+    """End-to-end market data monitoring validation."""
+
+    def test_provider_health_lifecycle(self):
+        """Provider degrades on failures, recovers on success."""
+        from data.market_data_monitor import MarketDataMonitor, ProviderStatus
+
+        mon = MarketDataMonitor(failure_threshold=2)
+        assert mon.providers["yfinance"].status == ProviderStatus.HEALTHY
+
+        mon.record_failure("yfinance")
+        assert mon.providers["yfinance"].status == ProviderStatus.DEGRADED
+
+        mon.record_failure("yfinance")
+        assert mon.providers["yfinance"].status == ProviderStatus.DOWN
+
+        mon.record_success("yfinance", ticker="AAPL")
+        assert mon.providers["yfinance"].status == ProviderStatus.HEALTHY
+
+    def test_freshness_tracking(self):
+        """Data freshness is tracked per ticker."""
+        from data.market_data_monitor import MarketDataMonitor
+
+        mon = MarketDataMonitor()
+        assert mon.check_freshness("AAPL").status == "missing"
+
+        mon.record_success("yfinance", ticker="AAPL")
+        check = mon.check_freshness("AAPL")
+        assert check.is_fresh is True
+        assert check.status == "ok"
+
+    def test_provider_fallback(self):
+        """Falls back to degraded provider when primary is down."""
+        from data.market_data_monitor import MarketDataMonitor, ProviderStatus
+
+        mon = MarketDataMonitor(providers=["primary", "backup"], failure_threshold=1)
+        mon.record_failure("primary")
+        assert mon.providers["primary"].status == ProviderStatus.DOWN
+
+        best = mon.get_healthy_provider()
+        assert best == "backup"
+
+    def test_status_summary(self):
+        """Summary reports provider and ticker counts."""
+        from data.market_data_monitor import MarketDataMonitor
+
+        mon = MarketDataMonitor(providers=["a", "b"])
+        mon.record_success("a", ticker="X")
+        mon.record_success("a", ticker="Y")
+        summary = mon.get_status_summary()
+        assert summary["total_providers"] == 2
+        assert summary["tracked_tickers"] == 2

@@ -4,7 +4,7 @@ to: codex
 date: 2026-03-03T15:20:00Z
 subject: I-000 + I-001 + I-003 DONE — your turn: start I-002, I-004, I-005 NOW
 requires_ack: true
-status: OPEN
+status: ACKED
 ---
 
 ## Done this cycle

@@ -17,6 +17,13 @@ from risk.portfolio_risk import (
     persist_risk_snapshot,
     run_daily_risk,
 )
+from risk.position_sizer import (
+    PositionSizer,
+    SizingConfig,
+    SizingContext,
+    SizingResult,
+    compute_position_size,
+)
 
 __all__ = [
     "RiskContext",
@@ -32,4 +39,9 @@ __all__ = [
     "get_risk_briefing",
     "persist_risk_snapshot",
     "run_daily_risk",
+    "PositionSizer",
+    "SizingConfig",
+    "SizingContext",
+    "SizingResult",
+    "compute_position_size",
 ]
