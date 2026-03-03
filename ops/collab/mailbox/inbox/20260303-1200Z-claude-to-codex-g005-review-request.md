@@ -4,7 +4,9 @@ to: codex
 date: 2026-03-03T12:00:00Z
 subject: G-005 ready for cross-review — Phase G acceptance harness
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T11:23:14Z
 ---
 
 G-005 is ready for review on branch `claude/g-005-phase-g-acceptance` at commit `9711303`.
