@@ -104,14 +104,16 @@
     paletteList.innerHTML = '';
     if (!visible.length) {
       const empty = document.createElement('li');
-      empty.className = 'palette-item muted';
+      empty.className = 'px-3 py-2 rounded-lg text-sm text-slate-500';
       empty.textContent = 'No matching commands';
       paletteList.appendChild(empty);
       return;
     }
     visible.forEach((command, index) => {
       const li = document.createElement('li');
-      li.className = 'palette-item' + (index === activeIndex ? ' active' : '');
+      const isActive = index === activeIndex;
+      li.className = 'px-3 py-2 rounded-lg cursor-pointer text-sm ' +
+        (isActive ? 'bg-slate-800 text-white' : 'text-slate-300 hover:bg-slate-800/50');
       li.textContent = command.label;
       li.addEventListener('mouseenter', () => {
         activeIndex = index;
@@ -145,7 +147,7 @@
       setActionMessage(html);
       refreshCommonPanels();
     } catch (error) {
-      setActionMessage("<div class='action-msg error'>Command failed to execute.</div>");
+      setActionMessage("<div class='bg-red-500/10 text-red-400 border border-red-500/30 rounded-lg px-3 py-2 text-sm'>Command failed to execute.</div>");
     } finally {
       closePalette();
     }

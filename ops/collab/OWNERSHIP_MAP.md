@@ -108,6 +108,15 @@ Defines file-scope locks for parallel execution.
 | M-006 | codex | exclusive | `risk/compliance_engine.py`, `tests/test_compliance_engine.py` | none | M-006 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
 | M-007 | claude | shared | `tests/test_phase_m_e2e.py` | M-001..M-006 | M-001..M-006 then M-007 | unclaimed | 2026-03-03T17:26:00Z |
 
+| N-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `app/web/DESIGN_TOKENS.md` | none | n/a | released | 2026-03-03T18:00:00Z |
+| N-001 | claude | exclusive | `app/web/templates/base.html`, `app/web/templates/overview.html`, `app/api/server.py` (equity-curve endpoint only) | N-006 | N-001 before N-002..N-005 | claimed | 2026-03-03T18:00:00Z |
+| N-002 | codex | exclusive | `app/web/templates/_top_strip.html`, `app/web/templates/_status.html`, `app/web/templates/_risk_briefing.html` | none | N-001 then N-002 | unclaimed | 2026-03-03T18:00:00Z |
+| N-003 | codex | exclusive | `app/web/templates/_events.html`, `app/web/templates/_incidents.html`, `app/web/templates/_order_actions.html`, `app/web/templates/_control_actions.html` | none | N-001 then N-003 | unclaimed | 2026-03-03T18:00:00Z |
+| N-004 | codex | exclusive | `app/web/templates/_jobs.html`, `app/web/templates/_job_detail.html`, `app/web/templates/_reconcile_report.html`, `app/web/templates/_log_tail.html` | none | N-001 then N-004 | unclaimed | 2026-03-03T18:00:00Z |
+| N-005 | codex | exclusive | `app/web/templates/_ledger_snapshot.html`, `app/web/templates/_broker_health.html`, `app/web/templates/_intent_audit.html`, `app/web/templates/_research.html`, `app/web/templates/_promotion_gate.html`, `app/web/templates/_calibration_run_detail.html`, `app/web/templates/_signal_engine.html`, `app/web/templates/_execution_quality.html` | none | N-001 then N-005 | unclaimed | 2026-03-03T18:00:00Z |
+| N-006 | claude | exclusive | `app/web/templates/trading.html`, `app/web/templates/research_page.html`, `app/web/templates/incidents_page.html`, `app/web/templates/settings_page.html` | N-001 | N-001 then N-006 | unclaimed | 2026-03-03T18:00:00Z |
+| N-007 | claude | shared | `tests/test_phase_n_ui.py`, `app/web/static/styles.css` | N-002..N-006 | N-002..N-006 then N-007 | unclaimed | 2026-03-03T18:00:00Z |
+
 ## Conflict protocol
 1. Stop editing immediately.
 2. Set queue status to `BLOCKED`.

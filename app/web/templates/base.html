@@ -12,51 +12,125 @@
     />
     <link rel="stylesheet" href="/static/styles.css" />
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Space Grotesk', 'Segoe UI', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+          },
+        },
+      }
+    </script>
+    <style>
+      /* HTMX loading states */
+      .htmx-request {
+        opacity: 0.5;
+        cursor: wait;
+        transition: opacity 200ms ease;
+      }
+      .htmx-request button {
+        pointer-events: none;
+      }
+      /* Sidebar transition */
+      .sidebar { transition: width 200ms ease; }
+      .sidebar .nav-label { opacity: 0; transition: opacity 150ms ease; white-space: nowrap; }
+      .sidebar:hover .nav-label { opacity: 1; }
+      /* Scrollbar styling */
+      ::-webkit-scrollbar { width: 6px; height: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: #475569; }
+      /* Override old styles.css where Tailwind takes precedence */
+      body { background: #0f172a !important; color: #cbd5e1 !important; }
+    </style>
   </head>
-  <body data-page="{{ page_key or 'overview' }}">
-    <div class="app-shell">
-      <header class="topbar">
-        <div class="wrap shell-head">
-          <div>
-            <p class="eyebrow">Operator Console</p>
-            <h1>Trading Bot Control Plane</h1>
-            <p class="subtitle">FastAPI + HTMX runtime for local-first trading operations</p>
+  <body class="bg-slate-950 text-slate-300 font-sans m-0" data-page="{{ page_key or 'overview' }}">
+    <div class="flex min-h-screen">
+      <!-- Sidebar -->
+      <aside class="sidebar fixed top-0 left-0 h-screen w-16 hover:w-48 bg-slate-900 border-r border-slate-800 z-30 flex flex-col overflow-hidden">
+        <div class="px-3 py-4 border-b border-slate-800">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center flex-shrink-0">
+              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+            </div>
+            <span class="nav-label text-white font-semibold text-sm">Control Plane</span>
           </div>
-          <button id="command-open" class="btn ghost" type="button">Command Palette</button>
         </div>
-        <nav class="wrap nav-row">
-          <a href="/overview" class="{% if page_key == 'overview' %}active{% endif %}">Overview</a>
-          <a href="/trading" class="{% if page_key == 'trading' %}active{% endif %}">Trading</a>
-          <a href="/research" class="{% if page_key == 'research' %}active{% endif %}">Research</a>
-          <a href="/incidents" class="{% if page_key == 'incidents' %}active{% endif %}">Incidents & Jobs</a>
-          <a href="/settings" class="{% if page_key == 'settings' %}active{% endif %}">Settings</a>
+        <nav class="flex-1 py-2 space-y-0.5">
+          <a href="/overview" class="flex items-center gap-3 px-4 py-3 text-sm {% if page_key == 'overview' %}text-white bg-slate-800/50 border-l-2 border-blue-500{% else %}text-slate-400 hover:text-white hover:bg-slate-800/50 border-l-2 border-transparent{% endif %} transition-colors">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M4 5a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1H5a1 1 0 01-1-1V5zm10 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V5zm0 7a1 1 0 011-1h4a1 1 0 011 1v5a1 1 0 01-1 1h-4a1 1 0 01-1-1v-5zM4 13a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1v-2z"/></svg>
+            <span class="nav-label">Overview</span>
+          </a>
+          <a href="/trading" class="flex items-center gap-3 px-4 py-3 text-sm {% if page_key == 'trading' %}text-white bg-slate-800/50 border-l-2 border-blue-500{% else %}text-slate-400 hover:text-white hover:bg-slate-800/50 border-l-2 border-transparent{% endif %} transition-colors">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            <span class="nav-label">Trading</span>
+          </a>
+          <a href="/research" class="flex items-center gap-3 px-4 py-3 text-sm {% if page_key == 'research' %}text-white bg-slate-800/50 border-l-2 border-blue-500{% else %}text-slate-400 hover:text-white hover:bg-slate-800/50 border-l-2 border-transparent{% endif %} transition-colors">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            <span class="nav-label">Research</span>
+          </a>
+          <a href="/incidents" class="flex items-center gap-3 px-4 py-3 text-sm {% if page_key == 'incidents' %}text-white bg-slate-800/50 border-l-2 border-blue-500{% else %}text-slate-400 hover:text-white hover:bg-slate-800/50 border-l-2 border-transparent{% endif %} transition-colors">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+            <span class="nav-label">Incidents</span>
+          </a>
+          <a href="/settings" class="flex items-center gap-3 px-4 py-3 text-sm {% if page_key == 'settings' %}text-white bg-slate-800/50 border-l-2 border-blue-500{% else %}text-slate-400 hover:text-white hover:bg-slate-800/50 border-l-2 border-transparent{% endif %} transition-colors">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span class="nav-label">Settings</span>
+          </a>
         </nav>
-        <div
-          id="top-strip"
-          class="wrap"
-          hx-get="/fragments/top-strip"
-          hx-trigger="load, every 5s"
-          hx-swap="innerHTML"
-        ></div>
-      </header>
+        <div class="px-3 py-3 border-t border-slate-800">
+          <button id="command-open" class="flex items-center gap-3 w-full px-1 py-2 text-slate-400 hover:text-white transition-colors rounded-lg hover:bg-slate-800/50" type="button">
+            <svg class="w-5 h-5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+            <span class="nav-label text-xs"><kbd class="px-1.5 py-0.5 bg-slate-800 rounded text-slate-500 border border-slate-700 text-[10px]">Ctrl+K</kbd></span>
+          </button>
+        </div>
+      </aside>
 
-      <div class="wrap">
-        <div id="action-result" class="action-slot"></div>
+      <!-- Main content area -->
+      <div class="flex-1 ml-16">
+        <!-- Top header -->
+        <header class="sticky top-0 z-20 bg-slate-950/80 backdrop-blur-md border-b border-slate-800">
+          <div class="max-w-[1400px] mx-auto px-6 py-3 flex items-center justify-between">
+            <div>
+              <h1 class="text-lg font-semibold text-white">{{ title if title else "Trading Bot Control Plane" }}</h1>
+              <p class="text-xs text-slate-500">Operator Console</p>
+            </div>
+            <div
+              id="top-strip"
+              class="flex flex-wrap gap-2"
+              hx-get="/fragments/top-strip"
+              hx-trigger="load, every 5s"
+              hx-swap="innerHTML"
+            ></div>
+          </div>
+        </header>
+
+        <!-- Action result slot -->
+        <div class="max-w-[1400px] mx-auto px-6">
+          <div id="action-result" class="mt-2 min-h-[2rem]"></div>
+        </div>
+
+        <!-- Page content -->
+        <main class="max-w-[1400px] mx-auto px-6 py-4">
+          {% block content %}{% endblock %}
+        </main>
       </div>
-
-      <main class="wrap app-main">
-      {% block content %}{% endblock %}
-      </main>
     </div>
 
-    <div id="command-palette" class="palette hidden" aria-hidden="true">
-      <div class="palette-backdrop" data-close-palette="1"></div>
-      <div class="palette-dialog" role="dialog" aria-modal="true" aria-label="Command palette">
-        <div class="palette-head">
-          <input id="palette-input" type="text" placeholder="Type a command (start, stop, research, incidents...)" />
+    <!-- Command Palette -->
+    <div id="command-palette" class="hidden fixed inset-0 z-50" aria-hidden="true">
+      <div class="absolute inset-0 bg-black/50 backdrop-blur-sm" data-close-palette="1"></div>
+      <div class="relative w-[min(760px,calc(100%-2rem))] mt-[10vh] mx-auto bg-slate-900 border border-slate-800 rounded-xl shadow-2xl overflow-hidden" role="dialog" aria-modal="true" aria-label="Command palette">
+        <div class="p-3 border-b border-slate-800">
+          <input id="palette-input" type="text" class="w-full h-10 bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none" placeholder="Type a command (start, stop, research, incidents...)" />
         </div>
-        <ul id="palette-list" class="palette-list"></ul>
-        <p class="palette-help">Use up/down + enter. Press escape to close.</p>
+        <ul id="palette-list" class="p-1.5 max-h-80 overflow-auto"></ul>
+        <p class="border-t border-slate-800 text-slate-500 px-3 py-2 text-xs">Use up/down + enter. Press escape to close.</p>
       </div>
     </div>
 

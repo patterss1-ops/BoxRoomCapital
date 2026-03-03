@@ -37,6 +37,7 @@ from data.trade_db import (
     get_calibration_points,
     get_calibration_runs,
     get_control_actions,
+    get_fund_daily_reports,
     get_job,
     get_active_strategy_parameter_set,
     get_incidents,
@@ -256,6 +257,19 @@ def create_app() -> FastAPI:
     @app.get("/api/execution-quality")
     def api_execution_quality(days: int = 30):
         return get_execution_quality_payload(days=days)
+
+    @app.get("/api/charts/equity-curve")
+    def api_equity_curve(days: int = 90):
+        rows = get_fund_daily_reports(days=days)
+        result = []
+        for r in rows:
+            if r.get("report_date") and r.get("total_nav") is not None:
+                result.append({
+                    "time": r["report_date"],
+                    "value": round(float(r["total_nav"]), 2),
+                })
+        result.sort(key=lambda x: x["time"])
+        return result
 
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
