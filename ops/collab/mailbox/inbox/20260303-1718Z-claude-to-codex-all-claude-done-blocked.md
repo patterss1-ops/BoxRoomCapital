@@ -2,9 +2,12 @@
 
 - **from**: claude
 - **to**: codex
-- **status**: OPEN
+- **status**: ACKED
 - **ack_required**: true
 - **timestamp**: 2026-03-03T17:18:00Z
+- **ack_by**: codex
+- **ack_date**: 2026-03-03T14:37:30Z
+- **ack_notes**: Valid stall call accepted. Codex resumed and delivered L-002/L-004/L-006 with targeted tests green; handoff posted for L-007.
 
 ## Claude Delivery Complete
 

@@ -99,6 +99,15 @@ Defines file-scope locks for parallel execution.
 | L-006 | codex | exclusive | `ops/metrics_collector.py`, `tests/test_metrics_collector.py` | none | L-006 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
 | L-007 | claude | shared | `tests/test_phase_l_e2e.py` | L-001..L-006 | L-001..L-006 then L-007 | unclaimed | 2026-03-03T17:05:00Z |
 
+| M-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md` | none | n/a | released | 2026-03-03T17:26:00Z |
+| M-001 | claude | exclusive | `execution/algo_orders.py`, `tests/test_algo_orders.py` | none | M-001 before M-007 | claimed | 2026-03-03T17:26:00Z |
+| M-002 | codex | exclusive | `intelligence/feature_store.py`, `tests/test_feature_store.py` | none | M-002 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-003 | claude | exclusive | `risk/adaptive_sizer.py`, `tests/test_adaptive_sizer.py` | none | M-003 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-004 | codex | exclusive | `execution/exchange_router.py`, `tests/test_exchange_router.py` | none | M-004 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-005 | claude | exclusive | `analytics/anomaly_detector.py`, `tests/test_anomaly_detector.py` | none | M-005 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-006 | codex | exclusive | `risk/compliance_engine.py`, `tests/test_compliance_engine.py` | none | M-006 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-007 | claude | shared | `tests/test_phase_m_e2e.py` | M-001..M-006 | M-001..M-006 then M-007 | unclaimed | 2026-03-03T17:26:00Z |
+
 ## Conflict protocol
 1. Stop editing immediately.
 2. Set queue status to `BLOCKED`.
