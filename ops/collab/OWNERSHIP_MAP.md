@@ -64,7 +64,7 @@ Defines file-scope locks for parallel execution.
 | G-001 | codex | exclusive | `data/trade_db.py` (execution telemetry tables only), `execution/dispatcher.py`, `execution/reconciler.py`, `data/order_intent_store.py`, `tests/test_dispatcher.py`, `tests/test_reconciler.py`, `tests/test_order_intent_lifecycle.py` | G-002 | G-001 then G-002 | released | 2026-03-02T19:30:00Z |
 | G-002 | claude | shared | `fund/execution_quality.py`, `app/api/server.py` (execution quality endpoints only), `app/web/templates/_execution_quality.html`, `tests/test_execution_quality.py`, `tests/test_api_execution_quality.py` | G-001, G-004 | G-001 then G-002 then G-004 | released | 2026-03-02T19:30:00Z |
 | G-003 | claude | exclusive | `intelligence/ai_panel/**`, `app/signal/ai_contracts.py`, `tests/test_ai_panel_*.py` | G-004 | G-003 then G-004 | claimed | 2026-03-02T23:00:00Z |
-| G-004 | codex | shared | `app/signal/ai_confidence.py`, `execution/policy/**ai**`, `app/engine/orchestrator.py`, `tests/test_ai_confidence.py`, `tests/test_orchestrator.py` | G-002, G-003 | G-002/G-003 then G-004 | claimed | 2026-03-03T08:31:42Z |
+| G-004 | codex | shared | `app/signal/ai_confidence.py`, `execution/policy/**ai**`, `app/engine/orchestrator.py`, `tests/test_ai_confidence.py`, `tests/test_orchestrator.py` | G-002, G-003 | G-002/G-003 then G-004 | released | 2026-03-03T11:03:31Z |
 | G-005 | claude | shared | `tests/test_phase_g_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | G-004 | G-004 then G-005 | unclaimed | 2026-03-02T17:42:23Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
 
