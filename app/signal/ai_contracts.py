@@ -11,7 +11,8 @@ import hashlib
 from collections import Counter
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, Optional, Tuple
+from types import MappingProxyType
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 
 class AIPanelOpinion(str, Enum):
@@ -80,7 +81,9 @@ class AIModelVerdict:
         object.__setattr__(self, "confidence", conf)
 
         object.__setattr__(self, "key_factors", tuple(self.key_factors or ()))
-        object.__setattr__(self, "metadata", dict(self.metadata or {}))
+        object.__setattr__(
+            self, "metadata", MappingProxyType(dict(self.metadata or {}))
+        )
 
     @property
     def opinion_score(self) -> float:
@@ -100,6 +103,7 @@ class AIModelVerdict:
             "prompt_version": self.prompt_version,
             "response_hash": self.response_hash,
             "latency_ms": self.latency_ms,
+            "raw_response": self.raw_response,
             "metadata": dict(self.metadata),
         }
 
@@ -162,10 +166,33 @@ class PanelConsensus:
             )
         object.__setattr__(self, "consensus_score", score)
 
+        ar = float(self.agreement_ratio)
+        if not (0.0 <= ar <= 1.0):
+            raise ValueError(
+                f"agreement_ratio must be in [0, 1], got {ar}"
+            )
+        object.__setattr__(self, "agreement_ratio", ar)
+
+        mr = int(self.models_responded)
+        if mr < 0:
+            raise ValueError(
+                f"models_responded must be >= 0, got {mr}"
+            )
+        object.__setattr__(self, "models_responded", mr)
+
+        mf = int(self.models_failed)
+        if mf < 0:
+            raise ValueError(
+                f"models_failed must be >= 0, got {mf}"
+            )
+        object.__setattr__(self, "models_failed", mf)
+
         object.__setattr__(self, "verdicts", tuple(self.verdicts or ()))
         object.__setattr__(self, "failed_models", tuple(self.failed_models or ()))
         object.__setattr__(
-            self, "opinion_distribution", dict(self.opinion_distribution or {})
+            self,
+            "opinion_distribution",
+            MappingProxyType(dict(self.opinion_distribution or {})),
         )
 
     def to_dict(self) -> Dict[str, Any]:

@@ -180,6 +180,41 @@ class TestAIModelVerdict:
         assert v.key_factors == ()
         assert v.latency_ms == 0.0
 
+    def test_metadata_immutable(self):
+        """P1 regression: metadata must not be mutatable post-construction."""
+        v = _verdict()
+        with pytest.raises(TypeError):
+            v.metadata["tamper"] = "yes"
+
+    def test_raw_response_round_trip(self):
+        """P2 regression: raw_response must survive to_dict/from_dict."""
+        v = AIModelVerdict(
+            model_name="grok",
+            ticker="AAPL",
+            as_of=AS_OF,
+            opinion=AIPanelOpinion.BUY,
+            confidence=0.8,
+            reasoning="test",
+            key_factors=("a",),
+            time_horizon=TimeHorizon.SHORT_TERM,
+            prompt_version="v1",
+            response_hash="abc",
+            latency_ms=100.0,
+            raw_response="raw llm output here",
+        )
+        d = v.to_dict()
+        assert d["raw_response"] == "raw llm output here"
+        restored = AIModelVerdict.from_dict(d)
+        assert restored.raw_response == "raw llm output here"
+
+    def test_raw_response_none_round_trip(self):
+        """raw_response=None should round-trip cleanly."""
+        v = _verdict()
+        d = v.to_dict()
+        assert d["raw_response"] is None
+        restored = AIModelVerdict.from_dict(d)
+        assert restored.raw_response is None
+
 
 # ── PanelConsensus ───────────────────────────────────────────────────
 
@@ -282,3 +317,36 @@ class TestPanelConsensus:
     def test_failed_models_frozen_to_tuple(self):
         c = _consensus(failed_models=["a", "b"])
         assert isinstance(c.failed_models, tuple)
+
+    def test_opinion_distribution_immutable(self):
+        """P1 regression: opinion_distribution must not be mutatable."""
+        c = _consensus()
+        with pytest.raises(TypeError):
+            c.opinion_distribution["sell"] = 99
+
+    def test_agreement_ratio_above_one_raises(self):
+        """P2 regression: agreement_ratio must be in [0, 1]."""
+        with pytest.raises(ValueError, match="agreement_ratio"):
+            _consensus(agreement_ratio=2.5)
+
+    def test_agreement_ratio_negative_raises(self):
+        with pytest.raises(ValueError, match="agreement_ratio"):
+            _consensus(agreement_ratio=-0.1)
+
+    def test_agreement_ratio_boundary_zero(self):
+        c = _consensus(agreement_ratio=0.0)
+        assert c.agreement_ratio == 0.0
+
+    def test_agreement_ratio_boundary_one(self):
+        c = _consensus(agreement_ratio=1.0)
+        assert c.agreement_ratio == 1.0
+
+    def test_models_responded_negative_raises(self):
+        """P2 regression: models_responded must be >= 0."""
+        with pytest.raises(ValueError, match="models_responded"):
+            _consensus(models_responded=-1)
+
+    def test_models_failed_negative_raises(self):
+        """P2 regression: models_failed must be >= 0."""
+        with pytest.raises(ValueError, match="models_failed"):
+            _consensus(models_failed=-2)
