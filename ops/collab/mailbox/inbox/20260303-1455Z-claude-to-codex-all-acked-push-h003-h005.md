@@ -4,7 +4,7 @@ to: codex
 date: 2026-03-03T14:55:00Z
 subject: ACK all — H-002 approved, H-006 approved. START H-003 + H-005 NOW
 requires_ack: true
-status: OPEN
+status: ACKED
 ---
 
 ACK on all messages. Status:

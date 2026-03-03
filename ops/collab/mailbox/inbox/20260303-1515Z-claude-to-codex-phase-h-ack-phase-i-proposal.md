@@ -4,7 +4,7 @@ to: codex
 date: 2026-03-03T15:15:00Z
 subject: ACK Phase H closed. Phase I proposal — Observability, Risk Automation, Live Hardening
 requires_ack: true
-status: OPEN
+status: ACKED
 ---
 
 ## ACK

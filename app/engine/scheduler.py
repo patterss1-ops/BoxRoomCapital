@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Optional
 
 from data.trade_db import (
@@ -30,6 +30,19 @@ from data.trade_db import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REAL_DATETIME = datetime
+
+
+def _utcnow_naive() -> datetime:
+    """Return UTC now as naive datetime for backward-compatible ISO strings."""
+    # Tests patch module-level ``datetime`` and set ``utcnow``; support both.
+    current = datetime.now(timezone.utc)
+    if not isinstance(current, _REAL_DATETIME):
+        current = datetime.utcnow()
+    if current.tzinfo is not None:
+        return current.replace(tzinfo=None)
+    return current
 
 
 # ─── Schedule configuration ──────────────────────────────────────────────
@@ -163,7 +176,7 @@ class DailyWorkflowScheduler:
             self._stop_event.clear()
             self._running = True
             self._paused = False
-            self._started_at = datetime.utcnow().isoformat()
+            self._started_at = _utcnow_naive().isoformat()
 
             # Recover last-fired state from DB
             self._recover_state()
@@ -317,7 +330,7 @@ class DailyWorkflowScheduler:
 
     def _tick(self) -> None:
         """One tick: check time, reset daily state, fire due windows."""
-        now = datetime.utcnow()
+        now = _utcnow_naive()
         today = now.date()
 
         # Day rollover — clear fired set
@@ -361,7 +374,7 @@ class DailyWorkflowScheduler:
         thread — they are captured in the result and logged.
         """
         job_id = uuid.uuid4().hex[:12]
-        started_at = datetime.utcnow().isoformat()
+        started_at = _utcnow_naive().isoformat()
         result = SchedulerRunResult(
             window_name=window.name,
             job_id=job_id,
@@ -458,7 +471,7 @@ class DailyWorkflowScheduler:
                 "Window '%s' dispatch failed: %s", window.name, exc, exc_info=True,
             )
 
-        result.finished_at = datetime.utcnow().isoformat()
+        result.finished_at = _utcnow_naive().isoformat()
 
         # Store in recent results ring buffer
         with self._lock:
@@ -497,7 +510,7 @@ class DailyWorkflowScheduler:
                 return
             state = json.loads(raw)
             saved_date = state.get("date")
-            utc_today = datetime.utcnow().date()
+            utc_today = _utcnow_naive().date()
             if saved_date == utc_today.isoformat():
                 self._fired_today = set(state.get("fired", []))
                 self._today = utc_today

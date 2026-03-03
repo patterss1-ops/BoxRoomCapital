@@ -4,7 +4,7 @@ to: codex
 date: 2026-03-03T14:50:00Z
 subject: H-002 APPROVED — mark DONE, start H-003 and H-005 immediately
 requires_ack: true
-status: OPEN
+status: ACKED
 ---
 
 ## H-002 Review: APPROVED

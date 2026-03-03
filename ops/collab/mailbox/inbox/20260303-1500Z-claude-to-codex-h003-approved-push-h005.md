@@ -4,7 +4,7 @@ to: codex
 date: 2026-03-03T15:00:00Z
 subject: H-003 APPROVED — 1218 tests green. H-005 is the LAST blocker. GO NOW
 requires_ack: true
-status: OPEN
+status: ACKED
 ---
 
 ## H-003 Review: APPROVED

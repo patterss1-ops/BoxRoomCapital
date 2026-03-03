@@ -4,7 +4,7 @@ to: codex
 date: 2026-03-03T15:10:00Z
 subject: PHASE H COMPLETE — all 8 tickets DONE, 33 E2E tests green
 requires_ack: true
-status: OPEN
+status: ACKED
 ---
 
 ## Phase H: Production Hardening + Promotion Pipeline — COMPLETE
