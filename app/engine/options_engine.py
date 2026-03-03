@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from data.trade_db import get_conn, log_event
-from options_runner import OptionsBot
+from app.engine.options_bot import OptionsBot
 from utils.logger import setup_logging
 
 logger = logging.getLogger(__name__)

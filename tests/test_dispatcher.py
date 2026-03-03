@@ -378,3 +378,253 @@ class TestIntentDispatcher:
         assert metric["error_code"] == "BROKER_REJECTED"
         assert metric["error_message"] == "venue unavailable"
         assert metric["qty_filled"] == 0.0
+
+    def test_retry_exhaustion_across_multiple_cycles(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=3)
+
+        stub = StubBroker([
+            OrderResult(success=False, message="fail1"),
+            OrderResult(success=False, message="fail2"),
+            OrderResult(success=False, message="fail3"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+
+        s1 = dispatcher.run_once(limit=10)
+        assert s1.retried == 1
+        s2 = dispatcher.run_once(limit=10)
+        assert s2.retried == 1
+        s3 = dispatcher.run_once(limit=10)
+        assert s3.failed == 1
+
+        row = get_order_intent(intent_id, db_path=db)
+        assert row["status"] == "failed"
+        assert row["latest_attempt"] == 3
+
+        assert get_dispatchable_order_intents(limit=10, db_path=db) == []
+
+    def test_dispatcher_short_sell_uses_place_short(self, tmp_path):
+        db = self._init_db(tmp_path)
+        self._create_intent(db, side="SELL", is_exit=False)
+
+        stub = StubBroker([OrderResult(success=True, order_id="short-1")])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.completed == 1
+        assert stub.calls == [("place_short", "SPY", 2.0, "gtaa")]
+
+    def test_dispatcher_empty_queue_returns_zero_summary(self, tmp_path):
+        db = self._init_db(tmp_path)
+
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: StubBroker(),
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.discovered == 0
+        assert summary.processed == 0
+        assert summary.completed == 0
+
+    def test_dispatcher_processes_multiple_intents_in_order(self, tmp_path):
+        db = self._init_db(tmp_path)
+        id1 = self._create_intent(db, instrument="AAA")
+        id2 = self._create_intent(db, instrument="BBB")
+        id3 = self._create_intent(db, instrument="CCC")
+
+        stub = StubBroker([
+            OrderResult(success=True, order_id="o1"),
+            OrderResult(success=True, order_id="o2"),
+            OrderResult(success=True, order_id="o3"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.discovered == 3
+        assert summary.completed == 3
+
+        for iid in [id1, id2, id3]:
+            row = get_order_intent(iid, db_path=db)
+            assert row["status"] == "completed"
+
+    def test_dispatcher_limit_caps_processing(self, tmp_path):
+        db = self._init_db(tmp_path)
+        for _ in range(5):
+            self._create_intent(db)
+
+        stub = StubBroker([OrderResult(success=True, order_id=f"o{i}") for i in range(2)])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=2)
+        assert summary.discovered == 2
+        assert summary.completed == 2
+
+        remaining = get_dispatchable_order_intents(limit=10, db_path=db)
+        assert len(remaining) == 3
+
+    def test_dispatcher_broker_connect_failure_marks_retrying(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=2)
+
+        class FailConnectBroker(StubBroker):
+            def connect(self) -> bool:
+                return False
+
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: FailConnectBroker(),
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.retried == 1
+
+        row = get_order_intent(intent_id, db_path=db)
+        assert row["status"] == "retrying"
+
+    def test_dispatcher_broker_exception_marks_retrying(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=2)
+
+        class ExplodingBroker(StubBroker):
+            def place_long(self, ticker, stake, strategy):
+                raise ConnectionError("network down")
+
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: ExplodingBroker(),
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.retried == 1
+
+        metrics = get_execution_metrics(limit=10, intent_id=intent_id, db_path=db)
+        assert len(metrics) == 1
+        assert metrics[0]["error_code"] == "DISPATCH_ERROR"
+
+    def test_dispatcher_disconnect_all_clears_broker_cache(self, tmp_path):
+        db = self._init_db(tmp_path)
+        self._create_intent(db)
+
+        stub = StubBroker([OrderResult(success=True, order_id="ok")])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        dispatcher.run_once(limit=10)
+        assert len(dispatcher._brokers) == 1
+
+        dispatcher.disconnect_all()
+        assert len(dispatcher._brokers) == 0
+        assert stub.connected is False
+
+    def test_dispatcher_disconnect_after_run_default(self, tmp_path):
+        db = self._init_db(tmp_path)
+        self._create_intent(db)
+
+        stub = StubBroker([OrderResult(success=True, order_id="ok")])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=True,
+        )
+        dispatcher.run_once(limit=10)
+        assert len(dispatcher._brokers) == 0
+
+    def test_dispatcher_summary_to_dict(self, tmp_path):
+        from execution.dispatcher import DispatchRunSummary
+        s = DispatchRunSummary(discovered=5, processed=4, completed=2, retried=1, failed=1, errors=0, claim_conflicts=0)
+        d = s.to_dict()
+        assert d["discovered"] == 5
+        assert d["completed"] == 2
+        assert set(d.keys()) == {"discovered", "processed", "completed", "retried", "failed", "errors", "claim_conflicts"}
+
+    def test_dispatcher_records_metric_on_terminal_failure(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=1)
+
+        stub = StubBroker([OrderResult(success=False, message="permanent reject")])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.failed == 1
+
+        metrics = get_execution_metrics(limit=10, intent_id=intent_id, db_path=db)
+        assert len(metrics) == 1
+        assert metrics[0]["status"] == "failed"
+        assert metrics[0]["error_code"] == "BROKER_REJECTED"
+
+    def test_dispatcher_idempotency_double_claim_same_intent(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=2)
+
+        stub = StubBroker([OrderResult(success=True, order_id="ok")])
+        d1 = IntentDispatcher(db_path=db, broker_resolver=lambda _: stub, disconnect_after_run=False, actor="system")
+        d2 = IntentDispatcher(db_path=db, broker_resolver=lambda _: stub, disconnect_after_run=False, actor="operator")
+
+        s1 = d1.run_once(limit=10)
+        s2 = d2.run_once(limit=10)
+
+        total_completed = s1.completed + s2.completed
+        total_conflicts = s1.claim_conflicts + s2.claim_conflicts
+        assert total_completed == 1
+        assert s2.discovered == 0 or s2.claim_conflicts >= 0
+
+    def test_dispatcher_mixed_success_and_failure(self, tmp_path):
+        db = self._init_db(tmp_path)
+        self._create_intent(db, instrument="WIN", max_attempts=1)
+        self._create_intent(db, instrument="LOSE", max_attempts=1)
+
+        stub = StubBroker([
+            OrderResult(success=True, order_id="w1"),
+            OrderResult(success=False, message="rejected"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_once(limit=10)
+        assert summary.completed == 1
+        assert summary.failed == 1
+        assert summary.discovered == 2
+
+    def test_dispatcher_transitions_recorded_for_retry_flow(self, tmp_path):
+        db = self._init_db(tmp_path)
+        intent_id = self._create_intent(db, max_attempts=2)
+
+        stub = StubBroker([
+            OrderResult(success=False, message="tmp"),
+            OrderResult(success=True, order_id="ok"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        dispatcher.run_once(limit=10)
+        dispatcher.run_once(limit=10)
+
+        transitions = get_order_intent_transitions(intent_id, db_path=db)
+        statuses = [t["to_status"] for t in transitions]
+        assert "queued" in statuses
+        assert "running" in statuses
+        assert "retrying" in statuses
+        assert "completed" in statuses

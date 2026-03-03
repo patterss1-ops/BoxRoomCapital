@@ -14,8 +14,13 @@ A Python/FastAPI trading bot control plane with a web UI for managing and monito
 
 - `run_console.py` — Main entrypoint, starts the FastAPI/Uvicorn server
 - `app/api/server.py` — FastAPI app with all routes and API endpoints
-- `app/engine/` — Trading engine, options engine, orchestrator, scheduler
-- `config.py` — All strategy parameters and broker configuration
+- `app/engine/options_bot.py` — Core OptionsBot class (lifecycle, tick loop)
+- `app/engine/options_signals.py` — Signal generation mixin
+- `app/engine/options_spreads.py` — Spread entry/exit/monitoring mixin
+- `app/engine/options_controls.py` — Operator controls mixin (kill switch, throttle, cooldowns)
+- `app/engine/options_recovery.py` — Startup recovery and state persistence mixin
+- `options_runner.py` — Thin CLI entrypoint for OptionsBot
+- `config.py` — All strategy parameters and broker configuration (supports runtime overrides via `.runtime/settings_override.json`)
 - `data/trade_db.py` — SQLite database layer
 - `broker/` — Broker implementations (paper, IG, IBKR, City Index)
 - `strategies/` — Trading strategy implementations
@@ -36,6 +41,8 @@ Copy `.env.example` to `.env` and fill in credentials:
 - `BROKER_MODE` — paper / demo / live
 - `IG_USERNAME`, `IG_PASSWORD`, `IG_API_KEY` — IG broker credentials
 - `IG_ACC_TYPE`, `IG_ACC_NUMBER` — Account details
+
+Runtime settings can also be edited via the Settings page in the web UI. Overrides are saved to `.runtime/settings_override.json`.
 
 ## Dependencies
 

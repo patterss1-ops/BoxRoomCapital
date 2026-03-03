@@ -6,6 +6,7 @@ import json
 from types import SimpleNamespace
 
 import options_runner
+from app.engine import options_recovery as options_recovery_module
 
 
 class _BrokerStub:
@@ -46,11 +47,11 @@ def test_startup_recovery_marks_pending_open_as_completed_when_broker_and_db_mat
     events: list[tuple] = []
     controls: list[dict] = []
 
-    monkeypatch.setattr(options_runner, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
-    monkeypatch.setattr(options_runner, "get_open_option_positions", lambda: db_positions)
-    monkeypatch.setattr(options_runner, "update_order_action", lambda **kwargs: updates.append(kwargs))
-    monkeypatch.setattr(options_runner, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
-    monkeypatch.setattr(options_runner, "log_control_action", lambda **kwargs: controls.append(kwargs))
+    monkeypatch.setattr(options_recovery_module, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
+    monkeypatch.setattr(options_recovery_module, "get_open_option_positions", lambda: db_positions)
+    monkeypatch.setattr(options_recovery_module, "update_order_action", lambda **kwargs: updates.append(kwargs))
+    monkeypatch.setattr(options_recovery_module, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(options_recovery_module, "log_control_action", lambda **kwargs: controls.append(kwargs))
 
     bot = _build_bot(_BrokerStub(deal_ids=["D-1", "D-2"]))
     bot._startup_recover()
@@ -88,11 +89,11 @@ def test_startup_recovery_flags_stale_position_sync_as_failed(monkeypatch):
     updates: list[dict] = []
     events: list[tuple] = []
 
-    monkeypatch.setattr(options_runner, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
-    monkeypatch.setattr(options_runner, "get_open_option_positions", lambda: db_positions)
-    monkeypatch.setattr(options_runner, "update_order_action", lambda **kwargs: updates.append(kwargs))
-    monkeypatch.setattr(options_runner, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
-    monkeypatch.setattr(options_runner, "log_control_action", lambda **kwargs: None)
+    monkeypatch.setattr(options_recovery_module, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
+    monkeypatch.setattr(options_recovery_module, "get_open_option_positions", lambda: db_positions)
+    monkeypatch.setattr(options_recovery_module, "update_order_action", lambda **kwargs: updates.append(kwargs))
+    monkeypatch.setattr(options_recovery_module, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(options_recovery_module, "log_control_action", lambda **kwargs: None)
 
     bot = _build_bot(_BrokerStub(deal_ids=[]))
     bot._startup_recover()
@@ -125,11 +126,11 @@ def test_startup_recovery_handles_broker_timeout_and_preserves_failure_audit(mon
     updates: list[dict] = []
     events: list[tuple] = []
 
-    monkeypatch.setattr(options_runner, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
-    monkeypatch.setattr(options_runner, "get_open_option_positions", lambda: db_positions)
-    monkeypatch.setattr(options_runner, "update_order_action", lambda **kwargs: updates.append(kwargs))
-    monkeypatch.setattr(options_runner, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
-    monkeypatch.setattr(options_runner, "log_control_action", lambda **kwargs: None)
+    monkeypatch.setattr(options_recovery_module, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
+    monkeypatch.setattr(options_recovery_module, "get_open_option_positions", lambda: db_positions)
+    monkeypatch.setattr(options_recovery_module, "update_order_action", lambda **kwargs: updates.append(kwargs))
+    monkeypatch.setattr(options_recovery_module, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(options_recovery_module, "log_control_action", lambda **kwargs: None)
 
     bot = _build_bot(_BrokerStub(error=TimeoutError("broker timeout during recovery")))
     bot._startup_recover()
