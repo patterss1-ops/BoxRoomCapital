@@ -413,3 +413,43 @@ def dispatch_orchestration(
     )
 
     return result
+
+
+def dispatch_rebalance_check(
+    window_name: str,
+    db_path: str = DB_PATH,
+    target_weight_by_sleeve: Optional[dict[str, float]] = None,
+    drift_threshold_pct: float = 5.0,
+    min_trade_notional: float = 0.0,
+    report_date: Optional[str] = None,
+) -> dict[str, Any]:
+    """Scheduler callback for H-002 sleeve-drift rebalancing checks.
+
+    Designed for ``DailyWorkflowScheduler(rebalance_check_fn=...)``.
+    Returns a plain dict payload so scheduler hooks can log safely.
+    """
+    from portfolio.rebalance import run_rebalance_drift_check
+
+    try:
+        plan = run_rebalance_drift_check(
+            target_weight_by_sleeve=target_weight_by_sleeve,
+            drift_threshold_pct=drift_threshold_pct,
+            min_trade_notional=min_trade_notional,
+            report_date=report_date,
+            db_path=db_path,
+        )
+        payload = plan.to_dict() if hasattr(plan, "to_dict") else {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload["window_name"] = window_name
+        payload["requires_rebalance"] = bool(
+            getattr(plan, "requires_rebalance", payload.get("requires_rebalance", False))
+        )
+        return payload
+    except Exception as exc:
+        logger.warning("Rebalance check dispatch failed for %s: %s", window_name, exc)
+        return {
+            "window_name": window_name,
+            "requires_rebalance": False,
+            "error": str(exc),
+        }

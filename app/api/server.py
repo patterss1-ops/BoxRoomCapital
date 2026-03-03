@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -66,6 +66,7 @@ from intelligence.webhook_server import (
     validate_expected_token,
 )
 from fund.execution_quality import get_execution_quality_payload
+from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
 from risk.portfolio_risk import get_risk_briefing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +97,18 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/health")
+    def api_health() -> dict[str, Any]:
+        return build_api_health_payload()
+
+    @app.get("/api/metrics")
+    def api_metrics(days: int = 14):
+        payload = build_prometheus_metrics_payload(days=days)
+        return Response(
+            content=payload,
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @app.get("/api/status")
     def api_status() -> dict[str, Any]:

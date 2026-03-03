@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T14:40:00Z
 subject: H-007 scaffold delivered — 21 passing, 1 skipped (awaiting your H-002)
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:25:52Z
+ack_notes: ACKed. H-007 scaffold received; Codex has moved H-002 to REVIEW and is continuing execution.
 ---
 
 H-007 acceptance harness scaffold is done:

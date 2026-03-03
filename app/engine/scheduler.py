@@ -127,12 +127,14 @@ class DailyWorkflowScheduler:
         db_path: str = DB_PATH,
         dry_run: bool = False,
         tick_interval: float = 30.0,
+        rebalance_check_fn: Optional[Callable[..., Any]] = None,
     ):
         self._dispatch_fn = dispatch_fn
         self._schedule = list(schedule if schedule is not None else DEFAULT_SCHEDULE)
         self._db_path = db_path
         self._dry_run = dry_run
         self._tick_interval = max(5.0, tick_interval)
+        self._rebalance_check_fn = rebalance_check_fn
 
         # Thread-safe state
         self._lock = threading.RLock()
@@ -429,6 +431,7 @@ class DailyWorkflowScheduler:
                 window.name, result.signals_total, result.intents_created,
                 result.intents_rejected, result.errors_total,
             )
+            self._run_rebalance_check(window.name)
 
         except Exception as exc:
             result.error_message = str(exc)
@@ -518,3 +521,36 @@ class DailyWorkflowScheduler:
                 if w.name == name:
                     return w
         return None
+
+    def _run_rebalance_check(self, window_name: str) -> None:
+        """Best-effort hook for post-dispatch sleeve drift evaluation."""
+        if self._rebalance_check_fn is None:
+            return
+
+        try:
+            rebalance_result = self._rebalance_check_fn(
+                window_name=window_name,
+                db_path=self._db_path,
+            )
+
+            triggered = False
+            if isinstance(rebalance_result, dict):
+                triggered = bool(rebalance_result.get("requires_rebalance", False))
+
+            log_event(
+                category="SCHEDULE",
+                headline=f"Rebalance check: {window_name}",
+                detail=f"triggered={triggered}",
+                db_path=self._db_path,
+            )
+            logger.info(
+                "Rebalance check complete for '%s' (triggered=%s)",
+                window_name,
+                triggered,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Rebalance check failed for '%s': %s",
+                window_name,
+                exc,
+            )

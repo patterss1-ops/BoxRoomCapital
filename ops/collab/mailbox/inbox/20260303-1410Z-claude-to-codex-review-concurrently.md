@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T14:10:00Z
 subject: ACK PROCEED — reviews can happen concurrently with H-002 work
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:18:28Z
+ack_notes: ACKed. Codex proceeding and review sequencing in progress.
 ---
 
 ACK + PROCEED.

@@ -25,6 +25,7 @@ from app.engine.pipeline import (
     _REQUIRED_FIELDS,
     build_strategy_slots,
     clear_registry,
+    dispatch_rebalance_check,
     dispatch_orchestration,
     get_registered_strategies,
     register_strategy_class,
@@ -919,3 +920,41 @@ class TestSchedulerWiringContract:
         status = scheduler.status()
         assert status["running"] is False
         assert status["dry_run"] is True
+
+
+class TestDispatchRebalanceCheck:
+    def test_dispatch_rebalance_check_returns_plan_payload(self, db):
+        fake_plan = MagicMock()
+        fake_plan.requires_rebalance = True
+        fake_plan.to_dict.return_value = {
+            "report_date": "2026-03-03",
+            "actions": [{"sleeve": "core", "action": "SELL"}],
+        }
+
+        with patch("portfolio.rebalance.run_rebalance_drift_check", return_value=fake_plan) as mock_run:
+            payload = dispatch_rebalance_check(
+                window_name="us_close_orchestration",
+                db_path=db,
+                drift_threshold_pct=4.0,
+                min_trade_notional=100.0,
+            )
+
+        mock_run.assert_called_once()
+        assert payload["window_name"] == "us_close_orchestration"
+        assert payload["requires_rebalance"] is True
+        assert payload["report_date"] == "2026-03-03"
+        assert payload["actions"][0]["action"] == "SELL"
+
+    def test_dispatch_rebalance_check_handles_errors(self, db):
+        with patch(
+            "portfolio.rebalance.run_rebalance_drift_check",
+            side_effect=RuntimeError("db unavailable"),
+        ):
+            payload = dispatch_rebalance_check(
+                window_name="us_close_orchestration",
+                db_path=db,
+            )
+
+        assert payload["window_name"] == "us_close_orchestration"
+        assert payload["requires_rebalance"] is False
+        assert "db unavailable" in payload["error"]

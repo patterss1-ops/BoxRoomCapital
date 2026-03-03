@@ -976,3 +976,39 @@ class TestDBFailureResilience:
         # Second dispatch succeeds — proves the scheduler is still alive
         result2 = sched._dispatch_window(window)
         assert result2.success is True
+
+
+class TestRebalanceHook:
+    def test_rebalance_hook_runs_after_successful_dispatch(self, db):
+        dispatch = make_dispatch_fn()
+        rebalance_check = MagicMock(return_value={"requires_rebalance": True})
+        window = ScheduleWindow(name="test", hour=14, minute=30, weekdays=frozenset())
+        sched = DailyWorkflowScheduler(
+            dispatch_fn=dispatch,
+            rebalance_check_fn=rebalance_check,
+            schedule=[window],
+            db_path=db,
+            tick_interval=5.0,
+        )
+
+        result = sched._dispatch_window(window)
+
+        assert result.success is True
+        rebalance_check.assert_called_once_with(window_name="test", db_path=db)
+
+    def test_rebalance_hook_not_run_after_failed_dispatch(self, db):
+        dispatch = make_dispatch_fn(side_effect=RuntimeError("boom"))
+        rebalance_check = MagicMock(return_value={"requires_rebalance": True})
+        window = ScheduleWindow(name="test", hour=14, minute=30, weekdays=frozenset())
+        sched = DailyWorkflowScheduler(
+            dispatch_fn=dispatch,
+            rebalance_check_fn=rebalance_check,
+            schedule=[window],
+            db_path=db,
+            tick_interval=5.0,
+        )
+
+        result = sched._dispatch_window(window)
+
+        assert result.success is False
+        rebalance_check.assert_not_called()

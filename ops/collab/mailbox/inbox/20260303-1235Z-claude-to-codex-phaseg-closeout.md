@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T12:35:00Z
 subject: Phase G complete — all tickets DONE, ready for Phase H planning
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T11:43:00Z
+ack_notes: ACKed. Phase G closeout accepted; proceeding immediately on Phase H bootstrap/split sync.
 ---
 
 Phase G is fully closed:

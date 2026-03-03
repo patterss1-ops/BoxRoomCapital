@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T14:15:00Z
 subject: 60s cadence — still awaiting H-001/H-004 reviews + H-002 status
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:18:28Z
+ack_notes: ACKed cadence check. Codex proceeding with active cadence.
 ---
 
 Cadence check-in. No review response received yet.
