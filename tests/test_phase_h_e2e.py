@@ -74,6 +74,17 @@ class TestPhaseHModuleImports:
         assert callable(build_prometheus_metrics_payload)
         assert callable(render_prometheus_metrics)
 
+    def test_import_eod_reconciliation_module(self):
+        """Verify H-005 EOD reconciliation module is importable."""
+        from fund.eod_reconciliation import (
+            EODReconciliationReport,
+            dispatch_eod_reconciliation,
+            run_eod_reconciliation,
+        )
+        assert EODReconciliationReport is not None
+        assert callable(dispatch_eod_reconciliation)
+        assert callable(run_eod_reconciliation)
+
     def test_import_existing_promotion_gate(self):
         """Verify existing C-004 promotion gate still works."""
         from fund.promotion_gate import (
@@ -305,6 +316,46 @@ class TestPrometheusMetricsE2E:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Section 4c: EOD Reconciliation E2E (H-005)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestEODReconciliationE2E:
+    """End-to-end validation of EOD reconciliation pipeline."""
+
+    def _init_db(self, tmp_path):
+        from data import trade_db
+        db_path = str(tmp_path / "eod_e2e.db")
+        trade_db.init_db(db_path)
+        return db_path
+
+    def test_eod_reconciliation_full_flow(self, tmp_path):
+        """Full EOD reconciliation produces structured report."""
+        from fund.eod_reconciliation import run_eod_reconciliation
+
+        db_path = self._init_db(tmp_path)
+        report = run_eod_reconciliation(report_date="2026-03-03", db_path=db_path)
+        assert report.status == "clean"
+        d = report.to_dict()
+        assert "pnl_by_strategy" in d
+        assert "pnl_by_sleeve" in d
+        assert "mismatches" in d
+
+    def test_eod_dispatch_callable_by_scheduler(self, tmp_path):
+        """Dispatch function returns scheduler-compatible dict."""
+        from fund.eod_reconciliation import dispatch_eod_reconciliation
+
+        db_path = self._init_db(tmp_path)
+        result = dispatch_eod_reconciliation(
+            window_name="us_close_eod",
+            db_path=db_path,
+            report_date="2026-03-03",
+        )
+        assert result["window_name"] == "us_close_eod"
+        assert result["status"] == "clean"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Section 5: Cross-ticket integration
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -368,6 +419,7 @@ class TestPhaseHSourceFiles:
         "execution/dispatcher.py",
         "app/metrics.py",
         "portfolio/rebalance.py",
+        "fund/eod_reconciliation.py",
     ]
 
     @pytest.mark.parametrize("rel_path", REQUIRED_FILES)
