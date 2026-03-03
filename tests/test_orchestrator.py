@@ -712,6 +712,103 @@ class TestRouterIntegration:
         assert payload["account_type"] == "PAPER"
 
 
+# ─── AI Gate Integration Tests ────────────────────────────────────────────
+
+
+class TestAIGateIntegration:
+    def _consensus(self, opinion="buy", confidence=0.8, score=0.6, agreement=0.8):
+        from app.signal.ai_contracts import AIPanelOpinion, PanelConsensus
+
+        return PanelConsensus(
+            ticker="SPY",
+            as_of="2026-03-03T00:00:00Z",
+            consensus_opinion=AIPanelOpinion(opinion),
+            consensus_confidence=confidence,
+            consensus_score=score,
+            agreement_ratio=agreement,
+            opinion_distribution={opinion: 3},
+            models_responded=3,
+            models_failed=0,
+            verdicts=(),
+            failed_models=(),
+            provenance_hash="abc123",
+        )
+
+    def test_ai_gate_rejects_low_confidence_entry(self, db):
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from app.signal.ai_confidence import AIConfidenceGateConfig
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(),
+            tickers=["SPY"],
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            ai_consensus_by_ticker={
+                "SPY": self._consensus(confidence=0.25, score=0.05, agreement=0.4)
+            },
+            ai_gate_config=AIConfidenceGateConfig(min_calibrated_confidence=0.6),
+        )
+
+        assert len(result.intents_created) == 0
+        assert len(result.intents_rejected) == 1
+        assert result.intents_rejected[0]["reject_rule"] == "ai_confidence_below_threshold"
+
+    def test_ai_gate_allows_high_confidence_entry(self, db):
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from app.signal.ai_confidence import AIConfidenceGateConfig
+
+        signal = _make_signal(SignalType.LONG_ENTRY)
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(),
+            tickers=["SPY"],
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            ai_consensus_by_ticker={"SPY": self._consensus(confidence=0.9, score=0.8, agreement=0.9)},
+            ai_gate_config=AIConfidenceGateConfig(min_calibrated_confidence=0.5),
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+    def test_ai_gate_never_blocks_exit_signals(self, db):
+        from app.engine.orchestrator import StrategySlot, run_orchestration_cycle
+        from app.signal.ai_confidence import AIConfidenceGateConfig
+
+        signal = _make_signal(SignalType.LONG_EXIT, reason="close position")
+        slot = StrategySlot(
+            strategy=StubStrategy(signal),
+            config=_make_slot(),
+            tickers=["SPY"],
+        )
+
+        result = run_orchestration_cycle(
+            slots=[slot],
+            db_path=db,
+            dry_run=True,
+            data_provider=StubDataProvider(),
+            ai_consensus_by_ticker={
+                "SPY": self._consensus(opinion="neutral", confidence=0.1, score=0.0, agreement=0.2)
+            },
+            ai_gate_config=AIConfidenceGateConfig(min_calibrated_confidence=0.95),
+        )
+
+        assert len(result.intents_created) == 1
+        assert len(result.intents_rejected) == 0
+
+
 # ─── Universe Data Passthrough Tests ──────────────────────────────────────
 
 

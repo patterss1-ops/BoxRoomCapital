@@ -14,9 +14,18 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Optional
 
+from app.signal.ai_confidence import (
+    AIConfidenceGateConfig,
+    ExecutionQualitySnapshot,
+)
+from app.signal.ai_contracts import PanelConsensus
 from data.trade_db import DB_PATH, get_conn
 from execution.order_intent import OrderIntent
 from execution.policy.capability_policy import StrategyRequirements
+from execution.policy.ai_gate_policy import (
+    AIGatePolicyInput,
+    evaluate_ai_gate_policy,
+)
 from execution.policy.route_policy import RoutePolicyState
 from execution.router import AccountRouter, RouteIntent
 from execution.signal_adapter import StrategySlotConfig, signal_to_order_intent
@@ -218,6 +227,9 @@ def run_orchestration_cycle(
     risk_limits: Optional[RiskLimits] = None,
     router: Optional[AccountRouter] = None,
     policy_state: Optional[RoutePolicyState] = None,
+    ai_consensus_by_ticker: Optional[dict[str, PanelConsensus]] = None,
+    ai_execution_quality: Optional[ExecutionQualitySnapshot] = None,
+    ai_gate_config: AIConfidenceGateConfig = AIConfidenceGateConfig(),
 ) -> OrchestrationResult:
     """Run one orchestration cycle across all registered strategy slots.
 
@@ -242,6 +254,9 @@ def run_orchestration_cycle(
         risk_limits: Hard risk limits. Defaults to conservative limits.
         router: Optional AccountRouter for route/capability validation.
         policy_state: Optional RoutePolicyState (kill switch, cooldowns).
+        ai_consensus_by_ticker: Optional ticker->PanelConsensus map.
+        ai_execution_quality: Optional execution quality calibration snapshot.
+        ai_gate_config: AI confidence gate behavior config.
 
     Returns:
         OrchestrationResult summarising all signals, intents, and errors.
@@ -278,6 +293,9 @@ def run_orchestration_cycle(
                     risk_limits=limits,
                     router=router,
                     policy_state=policy_state,
+                    ai_consensus_by_ticker=ai_consensus_by_ticker,
+                    ai_execution_quality=ai_execution_quality,
+                    ai_gate_config=ai_gate_config,
                 )
             except Exception as exc:
                 error_entry = {
@@ -314,6 +332,9 @@ def _process_one_signal(
     risk_limits: RiskLimits,
     router: Optional[AccountRouter],
     policy_state: Optional[RoutePolicyState],
+    ai_consensus_by_ticker: Optional[dict[str, PanelConsensus]],
+    ai_execution_quality: Optional[ExecutionQualitySnapshot],
+    ai_gate_config: AIConfidenceGateConfig,
 ) -> None:
     """Generate and process one signal for a (strategy, ticker) pair."""
     position = _get_current_position(ticker, db_path)
@@ -410,6 +431,33 @@ def _process_one_signal(
         )
 
     # ── Persist / shadow-log ─────────────────────────────────────────────
+    if not is_exit and ai_consensus_by_ticker is not None:
+        consensus = ai_consensus_by_ticker.get(ticker.upper())
+        if consensus is not None:
+            ai_decision = evaluate_ai_gate_policy(
+                AIGatePolicyInput(
+                    consensus=consensus,
+                    execution_quality=ai_execution_quality,
+                    config=ai_gate_config,
+                )
+            )
+            if not ai_decision.allowed:
+                result.intents_rejected.append({
+                    **intent.to_payload(),
+                    "reject_rule": ai_decision.reason_code,
+                    "reject_message": ai_decision.message,
+                    "ai_calibrated_confidence": ai_decision.calibrated_confidence,
+                    "ai_min_required_confidence": ai_decision.min_required_confidence,
+                })
+                logger.warning(
+                    "AI confidence gate rejected %s/%s: %s — %s",
+                    slot.config.strategy_id,
+                    ticker,
+                    ai_decision.reason_code,
+                    ai_decision.message,
+                )
+                return
+
     if dry_run:
         from data.trade_db import log_shadow_trade
         log_shadow_trade(

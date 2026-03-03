@@ -9,6 +9,10 @@ from execution.policy.capability_policy import (
     validate_order_intent_capabilities,
     validate_route_capabilities,
 )
+from execution.policy.ai_gate_policy import (
+    AIGatePolicyInput,
+    evaluate_ai_gate_policy,
+)
 from execution.policy.route_policy import (
     RouteDecision,
     RoutePolicyState,
@@ -21,11 +25,13 @@ __all__ = [
     "CapabilityValidationError",
     "CapabilityValidationResult",
     "RouteAccountType",
+    "AIGatePolicyInput",
     "RouteDecision",
     "RoutePolicyState",
     "RouteRejectCode",
     "RouteResolution",
     "StrategyRequirements",
+    "evaluate_ai_gate_policy",
     "validate_order_intent_capabilities",
     "validate_route_capabilities",
 ]
