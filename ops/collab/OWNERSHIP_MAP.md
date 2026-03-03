@@ -75,6 +75,14 @@ Defines file-scope locks for parallel execution.
 | H-006 | claude | exclusive | `broker/circuit_breaker.py`, `execution/dispatcher.py` (retry/circuit path only), `tests/test_circuit_breaker.py` | H-003 | H-003 then H-006 | unclaimed | 2026-03-03T13:20:00Z |
 | H-007 | claude | shared | `tests/test_phase_h_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | H-001, H-002, H-003, H-004, H-005, H-006 | H-001..H-006 then H-007 | unclaimed | 2026-03-03T13:20:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
+| I-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md` | none | n/a | released | 2026-03-03T15:20:00Z |
+| I-001 | claude | exclusive | `app/notifications.py` (alert hooks only), `app/alert_router.py`, `tests/test_alert_router.py` | I-003 | I-001 before I-007 | claimed | 2026-03-03T15:20:00Z |
+| I-002 | codex | exclusive | `risk/position_sizer.py`, `risk/limits_engine.py`, `tests/test_position_sizer.py` | I-004 | I-002 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-003 | claude | exclusive | `risk/drawdown_breaker.py`, `tests/test_drawdown_breaker.py` | I-001 | I-003 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-004 | codex | exclusive | `execution/oms.py`, `execution/order_lifecycle.py`, `tests/test_oms.py` | I-002 | I-004 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-005 | codex | exclusive | `data/market_data_monitor.py`, `data/provider.py` (health hooks only), `tests/test_market_data_monitor.py` | I-004 | I-005 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-006 | claude | exclusive | `analytics/decay_detector.py`, `tests/test_decay_detector.py` | I-003 | I-006 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-007 | claude | shared | `tests/test_phase_i_e2e.py`, `ops/collab/HANDOFFS/**` | I-001..I-006 | I-001..I-006 then I-007 | unclaimed | 2026-03-03T15:20:00Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.

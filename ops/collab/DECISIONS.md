@@ -32,6 +32,8 @@ Format: `DEC-### | date_utc | decision | rationale | impact | owner`
 
 | DEC-025 | 2026-03-03T13:20:00Z | Phase H: Production Hardening + Promotion Pipeline — full 8-ticket scope with ACK-gated split | Phase G complete (68 tickets DONE, 1128 tests). Promotion pipeline exists but isn't enforcement-wired. No monitoring, containerization, or EOD automation. Codex ACKed full scope at 11:43Z. Claude bootstrapped H-000 after Codex delay. | Adds H-000..H-007 queue rows; Codex owns H-002/H-003/H-005, Claude owns H-001/H-004/H-006/H-007. | both |
 
+| DEC-026 | 2026-03-03T15:20:00Z | Phase I: Production Observability + Risk Automation — full 8-ticket scope with ACK-gated split | Phase H complete (76 tickets DONE, 1243 tests). System lacks alerting, position sizing, drawdown halt, OMS lifecycle, market data health. Codex ACKed full scope. | Adds I-000..I-007 queue rows; Claude owns I-000/I-001/I-003/I-006/I-007, Codex owns I-002/I-004/I-005. | both |
+
 ## Pending decision template
 Use this row format when a blocker needs user decision:
 `DEC-### | <date_utc> | <decision requested> | <what is ambiguous> | <impact if delayed/wrong> | <requesting_agent>`
