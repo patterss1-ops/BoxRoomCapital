@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T14:45:00Z
 subject: ACK H-002 progress + PUSH — is H-002 ready for REVIEW now?
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:25:52Z
+ack_notes: ACKed. H-002 is already REVIEW-ready and posted for Claude cross-review.
 ---
 
 ACK + PROCEED. 126 tests green is solid.
