@@ -68,6 +68,26 @@ class TestPhaseJModuleImports:
         assert BacktestResult is not None
         assert BacktestTrade is not None
 
+    def test_import_historical_cache(self):
+        """Verify J-004 historical cache is importable."""
+        from data.historical_cache import CacheEntry, GapInfo, HistoricalCache
+        assert HistoricalCache is not None
+        assert CacheEntry is not None
+        assert GapInfo is not None
+
+    def test_import_report_generator(self):
+        """Verify J-006 report generator is importable."""
+        from analytics.report_generator import (
+            BacktestReport,
+            generate_attribution_report,
+            generate_comparison_report,
+            generate_performance_report,
+        )
+        assert callable(generate_performance_report)
+        assert callable(generate_comparison_report)
+        assert callable(generate_attribution_report)
+        assert BacktestReport is not None
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Section 2: Portfolio analytics E2E (J-001)
@@ -291,10 +311,111 @@ class TestPhaseJSourceFiles:
         "analytics/portfolio_analytics.py",
         "analytics/strategy_comparison.py",
         "analytics/risk_attribution.py",
+        "analytics/report_generator.py",
         "analytics/backtester.py",
+        "data/historical_cache.py",
     ]
 
     @pytest.mark.parametrize("rel_path", REQUIRED_FILES)
     def test_source_file_exists(self, rel_path):
         full_path = os.path.join(PROJECT_ROOT, rel_path)
         assert os.path.isfile(full_path), f"Missing: {rel_path}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 7: Historical cache E2E (J-004)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestHistoricalCacheE2E:
+    """End-to-end historical data cache validation."""
+
+    def test_store_retrieve_invalidate_lifecycle(self, tmp_path):
+        """Full cache lifecycle: store → retrieve → invalidate."""
+        from data.historical_cache import HistoricalCache
+
+        hc = HistoricalCache(cache_dir=str(tmp_path))
+        bars = [
+            {"date": f"2026-01-{d:02d}", "open": 100 + d, "high": 101 + d,
+             "low": 99 + d, "close": 100.5 + d, "volume": 10000}
+            for d in range(1, 11)
+        ]
+        stored = hc.store_bars("AAPL", bars)
+        assert stored == 10
+
+        retrieved = hc.get_bars("AAPL")
+        assert len(retrieved) == 10
+
+        entry = hc.get_entry("AAPL")
+        assert entry.bar_count == 10
+
+        hc.invalidate("AAPL")
+        assert hc.get_bars("AAPL") == []
+
+    def test_gap_detection(self, tmp_path):
+        """Detect gaps in cached data."""
+        from data.historical_cache import HistoricalCache
+
+        hc = HistoricalCache(cache_dir=str(tmp_path))
+        bars = [
+            {"date": "2026-01-01", "open": 100, "high": 101, "low": 99, "close": 100, "volume": 1000},
+            {"date": "2026-01-20", "open": 105, "high": 106, "low": 104, "close": 105, "volume": 1000},
+        ]
+        hc.store_bars("MSFT", bars)
+        gaps = hc.detect_gaps("MSFT")
+        assert len(gaps) == 1
+        assert gaps[0].missing_bars > 10
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Section 8: Report generator E2E (J-006)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestReportGeneratorE2E:
+    """End-to-end report generation validation."""
+
+    def test_performance_report_pipeline(self):
+        """Generate performance report from return series."""
+        from analytics.report_generator import generate_performance_report
+
+        np.random.seed(42)
+        returns = list(np.random.normal(0.0005, 0.015, 252))
+        report = generate_performance_report(returns, "IBS++ v3")
+
+        assert len(report.sections) >= 2
+        json_str = report.to_json()
+        assert "IBS++ v3" in json_str
+        text = report.to_text()
+        assert "IBS++ v3" in text
+
+    def test_comparison_report_pipeline(self):
+        """Generate comparison report from strategy results."""
+        from analytics.report_generator import generate_comparison_report
+        from analytics.strategy_comparison import compare_strategies
+
+        np.random.seed(42)
+        result = compare_strategies({
+            "Conservative": list(np.random.normal(0.0003, 0.005, 100)),
+            "Aggressive": list(np.random.normal(0.0008, 0.025, 100)),
+        })
+
+        report = generate_comparison_report(result)
+        assert "Comparison" in report.title
+        assert report.metadata["strategies_compared"] == 2
+
+    def test_attribution_report_pipeline(self):
+        """Generate attribution report from factor analysis."""
+        from analytics.report_generator import generate_attribution_report
+        from analytics.risk_attribution import attribute_portfolio
+
+        np.random.seed(42)
+        market = list(np.random.normal(0.001, 0.02, 100))
+        portfolio = attribute_portfolio(
+            {"momentum": [m * 1.5 for m in market]},
+            {"market": market},
+        )
+        report = generate_attribution_report(portfolio)
+        assert "Portfolio" in report.title
+        j = report.to_json()
+        assert len(j) > 0
