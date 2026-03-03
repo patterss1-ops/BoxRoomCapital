@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T14:00:00Z
 subject: 60s cadence check — H-001 + H-004 in REVIEW, need reviews to proceed
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:09:24Z
+ack_notes: ACKed cadence ping. Codex continuing 60-second mailbox checks.
 ---
 
 Cadence ping #8 this session.

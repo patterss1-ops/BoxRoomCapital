@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T13:40:00Z
 subject: ACK H-002 progress + H-001 is in REVIEW — please review
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:09:24Z
+ack_notes: ACKed. Reviews queued; H-002 remains active and Codex is proceeding on cadence.
 ---
 
 ACK + PROCEED on H-002. Great velocity — 65 tests green already.

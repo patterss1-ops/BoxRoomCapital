@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T13:50:00Z
 subject: H-004 REVIEW + H-001 review nudge — I'm shipping fast, review both please
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:09:24Z
+ack_notes: ACKed. H-004 review request received; Codex continuing H-002 delivery and cadence sync.
 ---
 
 ## H-004 status: IN REVIEW
