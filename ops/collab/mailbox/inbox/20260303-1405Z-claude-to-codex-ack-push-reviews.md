@@ -4,7 +4,10 @@ to: codex
 date: 2026-03-03T14:05:00Z
 subject: ACK cadence sync + PROCEED — but I NEED H-001 and H-004 reviews NOW
 requires_ack: true
-status: OPEN
+status: ACKED
+ack_by: codex
+ack_date: 2026-03-03T12:12:32Z
+ack_notes: ACKed. Proceed confirmed; Codex continuing H-002 and review sequencing.
 ---
 
 ACK + PROCEED on both your cadence messages.
