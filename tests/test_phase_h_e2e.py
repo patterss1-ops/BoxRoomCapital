@@ -58,11 +58,21 @@ class TestPhaseHModuleImports:
 
     def test_import_rebalance_module(self):
         """Verify H-002 rebalance module is importable."""
-        try:
-            from portfolio.rebalance import DriftPlanner
-            assert DriftPlanner is not None
-        except ImportError:
-            pytest.skip("H-002 rebalance module not yet merged")
+        from portfolio.rebalance import DriftPlanner
+        assert DriftPlanner is not None
+
+    def test_import_metrics_module(self):
+        """Verify H-003 metrics module is importable."""
+        from app.metrics import (
+            build_api_health_payload,
+            build_metrics_payload,
+            build_prometheus_metrics_payload,
+            render_prometheus_metrics,
+        )
+        assert callable(build_api_health_payload)
+        assert callable(build_metrics_payload)
+        assert callable(build_prometheus_metrics_payload)
+        assert callable(render_prometheus_metrics)
 
     def test_import_existing_promotion_gate(self):
         """Verify existing C-004 promotion gate still works."""
@@ -240,6 +250,61 @@ class TestDeploymentArtifactsE2E:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Section 4b: Prometheus metrics E2E (H-003)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestPrometheusMetricsE2E:
+    """End-to-end validation of Prometheus metrics pipeline."""
+
+    def test_health_payload_structure(self, tmp_path):
+        """Health endpoint returns structured dependency checks."""
+        from data import trade_db
+        from app.metrics import build_api_health_payload
+
+        db_path = str(tmp_path / "metrics_e2e.db")
+        trade_db.init_db(db_path)
+        payload = build_api_health_payload(db_path=db_path)
+
+        assert payload["status"] in {"ok", "degraded"}
+        assert "generated_at" in payload
+        assert "db" in payload["checks"]
+        assert payload["checks"]["db"]["status"] == "ok"
+
+    def test_prometheus_text_format_valid(self, tmp_path):
+        """Prometheus text output follows exposition format conventions."""
+        from data import trade_db
+        from app.metrics import build_prometheus_metrics_payload
+
+        db_path = str(tmp_path / "prom_e2e.db")
+        trade_db.init_db(db_path)
+        text = build_prometheus_metrics_payload(days=7, db_path=db_path)
+
+        # Must contain HELP and TYPE lines
+        assert "# HELP" in text
+        assert "# TYPE" in text
+        # Must contain expected metric names
+        assert "brc_signal_scoring_total_24h" in text
+        assert "brc_execution_fill_rate_pct" in text
+        assert "brc_execution_mean_latency_ms" in text
+        # Must end with newline
+        assert text.endswith("\n")
+
+    def test_metrics_server_endpoints_wired(self):
+        """Server has /api/health and /api/metrics endpoints registered."""
+        from app.api.server import create_app
+        app = create_app()
+        routes = [r.path for r in app.routes]
+        assert "/api/health" in routes
+        assert "/api/metrics" in routes
+
+    def test_rebalance_dispatch_wired_in_pipeline(self):
+        """Verify H-002 rebalance dispatch function exists in pipeline."""
+        from app.engine.pipeline import dispatch_rebalance_check
+        assert callable(dispatch_rebalance_check)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Section 5: Cross-ticket integration
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -301,6 +366,8 @@ class TestPhaseHSourceFiles:
         ".env.example",
         "app/engine/orchestrator.py",
         "execution/dispatcher.py",
+        "app/metrics.py",
+        "portfolio/rebalance.py",
     ]
 
     @pytest.mark.parametrize("rel_path", REQUIRED_FILES)

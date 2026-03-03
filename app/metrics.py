@@ -132,7 +132,7 @@ def _count_signal_events_last_24h(db_path: str) -> int:
             """SELECT COUNT(*) AS c
                FROM bot_events
                WHERE category = 'SIGNAL'
-                 AND created_at >= ?""",
+                 AND timestamp >= ?""",
             (cutoff,),
         ).fetchone()
         return int(row["c"]) if row else 0
