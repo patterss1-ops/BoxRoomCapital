@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Signal Engine Phase E + F release checks.
+# Signal Engine Phase E + F + G release checks.
 #
 # Validates all Signal Engine components are functional before promotion
 # from shadow-only to staged/live pipeline integration.
 #
-# Sections 1-9:  Phase E components (E-001..E-008)
+# Sections 1-9:   Phase E components (E-001..E-008)
 # Sections 10-14: Phase F components (F-001..F-008)
+# Sections 15-19: Phase G components (G-001..G-005)
 #
 # Usage:  bash ops/collab/release-checks/signal_engine_checks.sh
 #
@@ -239,7 +240,124 @@ for f in "${source_files[@]}"; do
   fi
 done
 
-# ── 11. No existing test regressions ─────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════
+# PHASE G CHECKS (G-001..G-005)
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 12. Execution Quality Rollups (G-002) ────────────────────────────────
+
+header "Execution Quality Rollups (G-002)"
+
+g_tests_quality=(
+  "tests/test_execution_quality.py:Execution quality analytics (G-002)"
+  "tests/test_api_execution_quality.py:Execution quality API (G-002)"
+)
+
+for entry in "${g_tests_quality[@]}"; do
+  IFS=":" read -r test_file label <<< "$entry"
+  if [[ -f "$test_file" ]]; then
+    run_pytest "$label" "$test_file"
+  else
+    fail "$label — $test_file not found"
+  fi
+done
+
+# ── 13. AI Panel Contracts + Adapters (G-003) ────────────────────────────
+
+header "AI Panel Contracts + Adapters (G-003)"
+
+g_tests_panel=(
+  "tests/test_ai_panel_contracts.py:AI verdict contracts (G-003)"
+  "tests/test_ai_panel_clients.py:AI panel adapters (G-003)"
+  "tests/test_ai_panel_coordinator.py:Panel coordinator (G-003)"
+)
+
+for entry in "${g_tests_panel[@]}"; do
+  IFS=":" read -r test_file label <<< "$entry"
+  if [[ -f "$test_file" ]]; then
+    run_pytest "$label" "$test_file"
+  else
+    fail "$label — $test_file not found"
+  fi
+done
+
+# ── 14. AI Confidence Gate (G-004) ───────────────────────────────────────
+
+header "AI Confidence Gate (G-004)"
+if [[ -f tests/test_ai_confidence.py ]]; then
+  run_pytest "AI confidence gate tests" tests/test_ai_confidence.py
+else
+  fail "tests/test_ai_confidence.py not found"
+fi
+
+# ── 15. Phase G E2E Acceptance Harness (G-005) ──────────────────────────
+
+header "Phase G E2E Acceptance Harness (G-005)"
+if [[ -f tests/test_phase_g_e2e.py ]]; then
+  run_pytest "Phase G E2E acceptance" tests/test_phase_g_e2e.py
+else
+  fail "tests/test_phase_g_e2e.py not found"
+fi
+
+# ── 16. Phase G Module Import Smoke Tests ────────────────────────────────
+
+header "Phase G Module Import Smoke Tests"
+
+g_modules=(
+  "app.signal.ai_contracts"
+  "app.signal.ai_confidence"
+  "intelligence.ai_panel"
+  "intelligence.ai_panel.grok_client"
+  "intelligence.ai_panel.claude_client"
+  "intelligence.ai_panel.chatgpt_client"
+  "intelligence.ai_panel.gemini_client"
+  "intelligence.ai_panel.coordinator"
+  "intelligence.ai_panel.prompts"
+  "execution.policy.ai_gate_policy"
+  "fund.execution_quality"
+)
+
+for mod in "${g_modules[@]}"; do
+  if python3 -c "import $mod" 2>/dev/null; then
+    pass "import $mod"
+  else
+    fail "import $mod failed"
+  fi
+done
+
+# ── 17. Phase G Source File Presence ─────────────────────────────────────
+
+header "Phase G Source File Presence"
+
+g_source_files=(
+  "app/signal/ai_contracts.py"
+  "app/signal/ai_confidence.py"
+  "intelligence/ai_panel/__init__.py"
+  "intelligence/ai_panel/_base.py"
+  "intelligence/ai_panel/grok_client.py"
+  "intelligence/ai_panel/claude_client.py"
+  "intelligence/ai_panel/chatgpt_client.py"
+  "intelligence/ai_panel/gemini_client.py"
+  "intelligence/ai_panel/coordinator.py"
+  "intelligence/ai_panel/prompts.py"
+  "execution/policy/ai_gate_policy.py"
+  "fund/execution_quality.py"
+  "app/web/templates/_execution_quality.html"
+)
+
+for f in "${g_source_files[@]}"; do
+  if [[ -f "$f" ]]; then
+    pass "$f exists"
+  else
+    fail "$f MISSING"
+  fi
+done
+
+# ══════════════════════════════════════════════════════════════════════════
+# PRE-EXISTING REGRESSION CHECKS
+# ══════════════════════════════════════════════════════════════════════════
+
+# ── 18. No existing test regressions ─────────────────────────────────────
 
 header "Pre-existing Test Suites"
 
