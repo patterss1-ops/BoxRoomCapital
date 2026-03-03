@@ -1,131 +1,154 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="section-head">
-    <h2>Trading Operations</h2>
-    <p>Execution and risk controls. Use advanced sections for less frequent manual actions.</p>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+
+  <!-- Execution Controls — full width -->
+  <div class="md:col-span-12">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <div class="flex justify-between items-baseline gap-4 mb-3">
+        <h2 class="text-lg font-semibold text-slate-200">Execution Controls</h2>
+        <p class="text-slate-500 text-sm">Core bot lifecycle. Advanced controls below.</p>
+      </div>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+        <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <label class="text-slate-500 text-xs uppercase tracking-wide">Mode</label>
+          <select name="mode" class="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+            <option value="shadow" {% if default_mode == "shadow" %}selected{% endif %}>Shadow</option>
+            <option value="live" {% if default_mode == "live" %}selected{% endif %}>Live</option>
+          </select>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Start Bot</button>
+        </form>
+
+        <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2 justify-end">
+          <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-red-500 transition-colors text-sm">Stop Bot</button>
+        </form>
+
+        <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2 justify-end">
+          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Pause</button>
+        </form>
+
+        <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2 justify-end">
+          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Resume</button>
+        </form>
+
+        <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2 justify-end">
+          <input type="hidden" name="mode" value="shadow" />
+          <button type="submit" class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-4 py-1.5 rounded-lg border border-slate-700 transition-colors text-sm">Run Scan</button>
+        </form>
+
+        <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2 justify-end">
+          <button type="submit" class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-4 py-1.5 rounded-lg border border-slate-700 transition-colors text-sm">Reconcile</button>
+        </form>
+      </div>
+    </div>
   </div>
 
-  <div class="action-row">
-    <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
-      <label>Mode
-        <select name="mode">
-          <option value="shadow" {% if default_mode == "shadow" %}selected{% endif %}>Shadow</option>
-          <option value="live" {% if default_mode == "live" %}selected{% endif %}>Live</option>
-        </select>
-      </label>
-      <button type="submit" class="btn">Start Bot</button>
-    </form>
+  <!-- Risk Controls — full width collapsible -->
+  <div class="md:col-span-12">
+    <details class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg" open>
+      <summary class="font-semibold text-slate-200 cursor-pointer">Risk Controls</summary>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+        <form hx-post="/api/actions/kill-switch-enable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Enable kill switch? New entries will be blocked." class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <label class="text-slate-500 text-xs uppercase tracking-wide">Reason</label>
+          <input type="text" name="reason" value="Manual operator kill switch" class="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+          <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-red-500 transition-colors text-sm">Enable Kill Switch</button>
+        </form>
 
-    <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?">
-      <button type="submit" class="btn danger">Stop Bot</button>
-    </form>
+        <form hx-post="/api/actions/kill-switch-disable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Disable kill switch and allow entries again?" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <label class="text-slate-500 text-xs uppercase tracking-wide">Reason</label>
+          <input type="text" name="reason" value="Manual clear from control plane" class="bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Disable Kill Switch</button>
+        </form>
 
-    <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn secondary">Pause</button>
-    </form>
+        <form hx-post="/api/actions/risk-throttle" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Throttle (%)</label>
+              <input type="number" name="throttle_pct" min="10" max="100" value="100" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Reason</label>
+              <input type="text" name="reason" value="Manual risk throttle" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+          </div>
+          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Set Throttle</button>
+        </form>
 
-    <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn secondary">Resume</button>
-    </form>
+        <form hx-post="/api/actions/cooldown-set" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Ticker</label>
+              <input type="text" name="ticker" placeholder="SPY" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Minutes</label>
+              <input type="number" name="minutes" min="1" value="30" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Reason</label>
+              <input type="text" name="reason" value="Manual market cooldown" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+          </div>
+          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Set Cooldown</button>
+        </form>
 
-    <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML">
-      <input type="hidden" name="mode" value="shadow" />
-      <button type="submit" class="btn ghost">Run Scan</button>
-    </form>
-
-    <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn ghost">Reconcile</button>
-    </form>
+        <form hx-post="/api/actions/cooldown-clear" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Ticker</label>
+              <input type="text" name="ticker" placeholder="SPY" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Reason</label>
+              <input type="text" name="reason" value="Manual cooldown clear" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+          </div>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Clear Cooldown</button>
+        </form>
+      </div>
+    </details>
   </div>
-</section>
 
-<details class="card" open>
-  <summary>Risk Controls</summary>
-  <div class="action-grid">
-    <form hx-post="/api/actions/kill-switch-enable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Enable kill switch? New entries will be blocked.">
-      <label>Reason
-        <input type="text" name="reason" value="Manual operator kill switch" />
-      </label>
-      <button type="submit" class="btn danger">Enable Kill Switch</button>
-    </form>
-
-    <form hx-post="/api/actions/kill-switch-disable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Disable kill switch and allow entries again?">
-      <label>Reason
-        <input type="text" name="reason" value="Manual clear from control plane" />
-      </label>
-      <button type="submit" class="btn">Disable Kill Switch</button>
-    </form>
-
-    <form hx-post="/api/actions/risk-throttle" hx-target="#action-result" hx-swap="innerHTML">
-      <label>Throttle (%)
-        <input type="number" name="throttle_pct" min="10" max="100" value="100" />
-      </label>
-      <label>Reason
-        <input type="text" name="reason" value="Manual risk throttle" />
-      </label>
-      <button type="submit" class="btn secondary">Set Throttle</button>
-    </form>
-
-    <form hx-post="/api/actions/cooldown-set" hx-target="#action-result" hx-swap="innerHTML">
-      <label>Ticker
-        <input type="text" name="ticker" placeholder="SPY" />
-      </label>
-      <label>Minutes
-        <input type="number" name="minutes" min="1" value="30" />
-      </label>
-      <label>Reason
-        <input type="text" name="reason" value="Manual market cooldown" />
-      </label>
-      <button type="submit" class="btn secondary">Set Cooldown</button>
-    </form>
-
-    <form hx-post="/api/actions/cooldown-clear" hx-target="#action-result" hx-swap="innerHTML">
-      <label>Ticker
-        <input type="text" name="ticker" placeholder="SPY" />
-      </label>
-      <label>Reason
-        <input type="text" name="reason" value="Manual cooldown clear" />
-      </label>
-      <button type="submit" class="btn">Clear Cooldown</button>
-    </form>
+  <!-- Advanced Manual Position Actions — full width collapsible -->
+  <div class="md:col-span-12">
+    <details class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <summary class="font-semibold text-slate-200 cursor-pointer">Advanced Manual Position Actions</summary>
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
+        <form hx-post="/api/actions/close-spread" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Close spread now?" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Spread ID</label>
+              <input type="text" name="spread_id" placeholder="SPY:abcd1234" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Ticker</label>
+              <input type="text" name="ticker" placeholder="SPY" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-slate-500 text-xs uppercase tracking-wide">Reason</label>
+              <input type="text" name="reason" value="Manual close from control plane" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+          </div>
+          <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-red-500 transition-colors text-sm">Close Spread</button>
+        </form>
+      </div>
+    </details>
   </div>
-</details>
 
-<details class="card">
-  <summary>Advanced Manual Position Actions</summary>
-  <div class="action-grid">
-    <form hx-post="/api/actions/close-spread" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Close spread now?">
-      <label>Spread ID
-        <input type="text" name="spread_id" placeholder="SPY:abcd1234" />
-      </label>
-      <label>Ticker
-        <input type="text" name="ticker" placeholder="SPY" />
-      </label>
-      <label>Reason
-        <input type="text" name="reason" value="Manual close from control plane" />
-      </label>
-      <button type="submit" class="btn danger">Close Spread</button>
-    </form>
-  </div>
-</details>
+  <!-- Status + Order Actions — 2 column -->
+  <div class="md:col-span-6" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="order-actions-panel" hx-get="/fragments/order-actions" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
 
-<section class="grid-2">
-  <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div id="order-actions-panel" hx-get="/fragments/order-actions" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Reconcile + Control Actions — 2 column -->
+  <div class="md:col-span-6" id="reconcile-panel" hx-get="/fragments/reconcile-report" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
 
-<section class="grid-2">
-  <div id="reconcile-panel" hx-get="/fragments/reconcile-report" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-  <div id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Broker Health + Intent Audit — 2 column -->
+  <div class="md:col-span-6" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
 
-<section class="grid-2">
-  <div id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Ledger — full width -->
+  <div class="md:col-span-12" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
 
-<section>
-  <div id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-</section>
+</div>
 {% endblock %}
