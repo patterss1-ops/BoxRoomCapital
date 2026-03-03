@@ -1,28 +1,29 @@
-<section class="card">
-  <h2>Broker Health</h2>
-  <div class="row">
-    <span class="label">Readiness</span>
-    <span class="value {% if broker_health.ready %}ok{% else %}muted{% endif %}">
-      {{ "READY" if broker_health.ready else "DEGRADED" }}
-    </span>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Broker Health</h2>
+    <p class="text-slate-500 text-sm">Connectivity and capability posture.</p>
   </div>
-  <div class="row"><span class="label">Engine Running</span><span class="value">{{ "YES" if broker_health.engine_running else "NO" }}</span></div>
-  <div class="row"><span class="label">Mode</span><span class="value">{{ broker_health.engine_mode or "-" }}</span></div>
-  <div class="row"><span class="label">Broker</span><span class="value">{{ broker_health.broker_class or "-" }}</span></div>
-  <div class="row"><span class="label">Connected</span><span class="value">{{ "YES" if broker_health.connected else "NO" }}</span></div>
-  <div class="row"><span class="label">Account</span><span class="value code">{{ broker_health.account or "-" }}</span></div>
-  <div class="row"><span class="label">Host</span><span class="value code">{{ broker_health.host or "-" }}</span></div>
-  <div class="row"><span class="label">Port</span><span class="value">{{ broker_health.port or "-" }}</span></div>
-  <div class="row"><span class="label">Server Time</span><span class="value">{{ broker_health.server_time or "-" }}</span></div>
-  <div class="row"><span class="label">Kill Switch</span><span class="value">{{ "ON" if broker_health.kill_switch_active else "OFF" }}</span></div>
-  <div class="row"><span class="label">Message</span><span class="value">{{ broker_health.message or "-" }}</span></div>
-  <div class="row"><span class="label">Error</span><span class="value">{{ broker_health.error or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+    <span class="text-slate-500 text-sm">Readiness</span>
+    <span class="text-sm {% if broker_health.ready %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "READY" if broker_health.ready else "DEGRADED" }}</span>
+  </div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Engine Running</span><span class="text-slate-300 text-sm">{{ "YES" if broker_health.engine_running else "NO" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Mode</span><span class="text-slate-300 text-sm">{{ broker_health.engine_mode or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Broker</span><span class="text-slate-300 text-sm">{{ broker_health.broker_class or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Connected</span><span class="text-slate-300 text-sm">{{ "YES" if broker_health.connected else "NO" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Account</span><span class="font-mono text-slate-300 text-xs">{{ broker_health.account or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Host</span><span class="font-mono text-slate-300 text-xs">{{ broker_health.host or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Port</span><span class="text-slate-300 text-sm">{{ broker_health.port or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Server Time</span><span class="font-mono text-slate-300 text-xs">{{ broker_health.server_time or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Kill Switch</span><span class="text-slate-300 text-sm">{{ "ON" if broker_health.kill_switch_active else "OFF" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Message</span><span class="text-slate-300 text-sm">{{ broker_health.message or "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-slate-500 text-sm">Error</span><span class="text-slate-300 text-sm">{{ broker_health.error or "-" }}</span></div>
 
   {% if broker_health.capabilities %}
-    <h3>Capabilities</h3>
-    <div class="badge-wrap">
+    <h3 class="text-slate-200 font-semibold mt-4 mb-2">Capabilities</h3>
+    <div class="flex flex-wrap gap-2">
       {% for name, enabled in broker_health.capabilities.items() %}
-        <span class="badge {% if enabled %}completed{% else %}failed{% endif %}">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if enabled %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">
           {{ name|replace("supports_", "") }}
         </span>
       {% endfor %}

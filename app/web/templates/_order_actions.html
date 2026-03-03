@@ -1,33 +1,36 @@
-<section class="card">
-  <h2>Order Actions</h2>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Order Actions</h2>
+    <p class="text-slate-500 text-sm">Open/close lifecycle and retries.</p>
+  </div>
   {% if order_actions %}
-    <table>
+    <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th>Time</th>
-          <th>Type</th>
-          <th>Status</th>
-          <th>Attempt</th>
-          <th>Ticker</th>
-          <th>Detail</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Time</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Type</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Attempt</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ticker</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Detail</th>
         </tr>
       </thead>
       <tbody>
       {% for action in order_actions %}
         <tr>
-          <td>{{ action.updated_at or action.created_at }}</td>
-          <td>{{ action.action_type }}</td>
-          <td>
-            <span class="badge {{ action.status }}">{{ action.status }}</span>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ action.updated_at or action.created_at }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ action.action_type }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if action.status in ['completed', 'ok', 'live'] %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif action.status in ['running', 'retrying', 'staged_live'] %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif action.status in ['failed', 'error', 'rejection'] %}bg-red-500/15 text-red-400 border-red-500/30{% elif action.status in ['queued', 'shadow'] %}bg-blue-500/15 text-blue-400 border-blue-500/30{% else %}bg-slate-500/15 text-slate-400 border-slate-500/30{% endif %}">{{ action.status }}</span>
           </td>
-          <td>{{ action.attempt }}/{{ action.max_attempts }}</td>
-          <td>{{ action.ticker or "-" }}</td>
-          <td>{{ action.error_code or action.error_message or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ action.attempt }}/{{ action.max_attempts }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ action.ticker or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ action.error_code or action.error_message or "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="muted">No order actions yet.</p>
+    <p class="text-sm text-slate-500">No order actions yet.</p>
   {% endif %}
 </section>

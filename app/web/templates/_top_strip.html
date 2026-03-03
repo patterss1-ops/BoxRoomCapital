@@ -1,17 +1,29 @@
-<div class="status-strip">
-  <div class="chip {% if status.running %}ok{% else %}warn{% endif %}">
+<div class="flex flex-wrap items-center gap-2">
+  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border {% if status.running %}bg-emerald-500/20 text-emerald-300 border-emerald-500/40{% else %}bg-amber-500/20 text-amber-300 border-amber-500/40{% endif %}">
     Engine {{ "RUNNING" if status.running else "STOPPED" }}
   </div>
-  <div class="chip">Mode {{ status.mode or "-" }}</div>
-  <div class="chip {% if status.kill_switch_active %}danger{% endif %}">
+  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
+    Mode {{ status.mode or "-" }}
+  </div>
+  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border {% if status.kill_switch_active %}bg-red-500/20 text-red-300 border-red-500/40{% else %}bg-slate-800/50 text-slate-300 border-slate-700{% endif %}">
     Kill {{ "ON" if status.kill_switch_active else "OFF" }}
   </div>
-  <div class="chip">Throttle {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</div>
-  <div class="chip">Open {{ status.open_spreads or 0 }}</div>
-  <div class="chip">Cooldowns {{ status.cooldowns_count or 0 }}</div>
+  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
+    Throttle {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%
+  </div>
+  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
+    Open {{ status.open_spreads or 0 }}
+  </div>
+  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
+    Cooldowns {{ status.cooldowns_count or 0 }}
+  </div>
   {% if latest_incident %}
-    <div class="chip danger">Latest Incident: {{ latest_incident.title }}</div>
+    <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-500/20 text-red-300 border-red-500/40">
+      Latest Incident: {{ latest_incident.title }}
+    </div>
   {% else %}
-    <div class="chip ok">No active incidents</div>
+    <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
+      No active incidents
+    </div>
   {% endif %}
 </div>

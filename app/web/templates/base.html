@@ -10,7 +10,6 @@
       href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/static/styles.css" />
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
@@ -45,8 +44,7 @@
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
       ::-webkit-scrollbar-thumb:hover { background: #475569; }
-      /* Override old styles.css where Tailwind takes precedence */
-      body { background: #0f172a !important; color: #cbd5e1 !important; }
+      /* Tailwind handles all styling — no legacy CSS */
     </style>
   </head>
   <body class="bg-slate-950 text-slate-300 font-sans m-0" data-page="{{ page_key or 'overview' }}">

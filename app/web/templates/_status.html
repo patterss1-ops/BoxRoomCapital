@@ -1,55 +1,64 @@
-<section class="card">
-  <h2>Engine Status</h2>
-  <div class="row">
-    <span class="label">State</span>
-    <span class="value {% if status.running %}ok{% else %}muted{% endif %}">
-      {{ "RUNNING" if status.running else "STOPPED" }}
-    </span>
-  </div>
-  <div class="row"><span class="label">Paused</span><span class="value">{{ "YES" if status.paused else "NO" }}</span></div>
-  <div class="row"><span class="label">Mode</span><span class="value">{{ status.mode }}</span></div>
-  <div class="row"><span class="label">Thread</span><span class="value">{{ status.thread_name or "-" }}</span></div>
-  <div class="row"><span class="label">Started</span><span class="value">{{ status.started_at or "-" }}</span></div>
-  <div class="row"><span class="label">Last Action</span><span class="value">{{ status.last_action or "-" }}</span></div>
-  <div class="row"><span class="label">Action Time</span><span class="value">{{ status.last_action_at or "-" }}</span></div>
-  <div class="row"><span class="label">Engine Open Spreads</span><span class="value">{{ status.open_spreads or 0 }}</span></div>
-  <div class="row"><span class="label">Kill Switch</span><span class="value">{{ "ON" if status.kill_switch_active else "OFF" }}</span></div>
-  <div class="row"><span class="label">Kill Reason</span><span class="value">{{ status.kill_switch_reason or "-" }}</span></div>
-  <div class="row"><span class="label">Risk Throttle</span><span class="value">{{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span></div>
-  <div class="row"><span class="label">Cooldowns</span><span class="value">{{ status.cooldowns_count or 0 }}</span></div>
-  <div class="row"><span class="label">Last Error</span><span class="value">{{ status.last_error or "-" }}</span></div>
-  <div class="row"><span class="label">Log</span><span class="value code">{{ status.log_file }}</span></div>
-</section>
+<div class="space-y-4">
+  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="flex justify-between items-baseline gap-4 mb-3">
+      <h2 class="text-lg font-semibold text-slate-200">Engine Status</h2>
+      <p class="text-slate-500 text-sm">Runtime and control state.</p>
+    </div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+      <span class="text-slate-500 text-sm">State</span>
+      <span class="text-sm {% if status.running %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "RUNNING" if status.running else "STOPPED" }}</span>
+    </div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Paused</span><span class="text-slate-300 text-sm">{{ "YES" if status.paused else "NO" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Mode</span><span class="text-slate-300 text-sm">{{ status.mode }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Thread</span><span class="text-slate-300 text-sm">{{ status.thread_name or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Started</span><span class="font-mono text-slate-300 text-xs">{{ status.started_at or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Last Action</span><span class="text-slate-300 text-sm">{{ status.last_action or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Action Time</span><span class="font-mono text-slate-300 text-xs">{{ status.last_action_at or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Engine Open Spreads</span><span class="text-slate-300 text-sm">{{ status.open_spreads or 0 }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Kill Switch</span><span class="text-slate-300 text-sm">{{ "ON" if status.kill_switch_active else "OFF" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Kill Reason</span><span class="text-slate-300 text-sm">{{ status.kill_switch_reason or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Risk Throttle</span><span class="text-slate-300 text-sm">{{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Cooldowns</span><span class="text-slate-300 text-sm">{{ status.cooldowns_count or 0 }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Last Error</span><span class="text-slate-300 text-sm">{{ status.last_error or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-slate-500 text-sm">Log</span><span class="font-mono text-slate-300 text-xs">{{ status.log_file }}</span></div>
+  </section>
 
-<section class="card">
-  <h2>Portfolio Snapshot</h2>
-  <div class="row"><span class="label">Closed Trades</span><span class="value">{{ summary.total_closed_trades }}</span></div>
-  <div class="row"><span class="label">Total P&L</span><span class="value">GBP {{ "%.2f"|format(summary.total_pnl) }}</span></div>
-  <div class="row"><span class="label">Today P&L</span><span class="value">GBP {{ "%.2f"|format(summary.today_pnl) }}</span></div>
-  <div class="row"><span class="label">Open Positions</span><span class="value">{{ summary.open_positions }}</span></div>
-  <div class="row"><span class="label">Latest Equity</span><span class="value">GBP {{ "%.2f"|format(summary.latest_equity) }}</span></div>
-</section>
+  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="flex justify-between items-baseline gap-4 mb-3">
+      <h2 class="text-lg font-semibold text-slate-200">Portfolio Snapshot</h2>
+      <p class="text-slate-500 text-sm">Current close/open and equity stats.</p>
+    </div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Closed Trades</span><span class="text-slate-300 text-sm">{{ summary.total_closed_trades }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Total P&amp;L</span><span class="text-slate-300 text-sm">GBP {{ "%.2f"|format(summary.total_pnl) }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Today P&amp;L</span><span class="text-slate-300 text-sm">GBP {{ "%.2f"|format(summary.today_pnl) }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Open Positions</span><span class="text-slate-300 text-sm">{{ summary.open_positions }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-slate-500 text-sm">Latest Equity</span><span class="text-slate-300 text-sm">GBP {{ "%.2f"|format(summary.latest_equity) }}</span></div>
+  </section>
 
-<section class="card">
-  <h2>Open Option Spreads</h2>
-  {% if open_positions %}
-    <table>
-      <thead>
-        <tr><th>Ticker</th><th>Type</th><th>Size</th><th>Max Loss</th><th>Entry</th></tr>
-      </thead>
-      <tbody>
-      {% for p in open_positions %}
-        <tr>
-          <td>{{ p.ticker }}</td>
-          <td>{{ p.trade_type }}</td>
-          <td>{{ p.size }}</td>
-          <td>GBP {{ "%.2f"|format(p.max_loss or 0) }}</td>
-          <td>{{ p.entry_date }}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-  {% else %}
-    <p class="muted">No open option positions.</p>
-  {% endif %}
-</section>
+  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="flex justify-between items-baseline gap-4 mb-3">
+      <h2 class="text-lg font-semibold text-slate-200">Open Option Spreads</h2>
+      <p class="text-slate-500 text-sm">Current risk-bearing positions.</p>
+    </div>
+    {% if open_positions %}
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr><th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ticker</th><th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Type</th><th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Size</th><th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Max Loss</th><th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Entry</th></tr>
+        </thead>
+        <tbody>
+        {% for p in open_positions %}
+          <tr>
+            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ p.ticker }}</td>
+            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ p.trade_type }}</td>
+            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ p.size }}</td>
+            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">GBP {{ "%.2f"|format(p.max_loss or 0) }}</td>
+            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ p.entry_date }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p class="text-sm text-slate-500">No open option positions.</p>
+    {% endif %}
+  </section>
+</div>
