@@ -1,0 +1,22 @@
+services:
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "${CONTROL_PLANE_PORT:-8000}:8000"
+    volumes:
+      - ./trades.db:/app/trades.db
+      - ./.runtime:/app/.runtime
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - BROKER_MODE=${BROKER_MODE:-paper}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
