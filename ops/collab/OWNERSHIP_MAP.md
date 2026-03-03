@@ -67,8 +67,8 @@ Defines file-scope locks for parallel execution.
 | G-004 | codex | shared | `app/signal/ai_confidence.py`, `execution/policy/**ai**`, `app/engine/orchestrator.py`, `tests/test_ai_confidence.py`, `tests/test_orchestrator.py` | G-002, G-003 | G-002/G-003 then G-004 | released | 2026-03-03T11:03:31Z |
 | G-005 | claude | shared | `tests/test_phase_g_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | G-004 | G-004 then G-005 | unclaimed | 2026-03-02T17:42:23Z |
 | H-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `ops/collab/mailbox/inbox/**`, `ops/collab/HANDOFFS/**` | none | n/a | released | 2026-03-03T13:20:00Z |
-| H-001 | claude | exclusive | `fund/promotion_gate.py`, `execution/dispatcher.py`, `app/engine/orchestrator.py`, `tests/test_promotion_enforcement.py` | H-004 | H-001 before H-007 | unclaimed | 2026-03-03T13:20:00Z |
-| H-002 | codex | exclusive | `portfolio/rebalance.py`, `app/engine/scheduler.py` (rebalance hooks only), `tests/test_rebalance.py` | H-005 | H-002 before H-005 | unclaimed | 2026-03-03T13:20:00Z |
+| H-001 | claude | exclusive | `fund/promotion_gate.py`, `execution/dispatcher.py`, `app/engine/orchestrator.py`, `tests/test_promotion_enforcement.py` | H-004 | H-001 before H-007 | claimed | 2026-03-03T13:25:00Z |
+| H-002 | codex | exclusive | `portfolio/rebalance.py`, `app/engine/scheduler.py` (rebalance hooks only), `tests/test_rebalance.py` | H-005 | H-002 before H-005 | claimed | 2026-03-03T11:52:54Z |
 | H-003 | codex | exclusive | `app/metrics.py`, `app/api/server.py` (metrics/health endpoints only), `tests/test_metrics.py` | H-006 | H-003 before H-006 | unclaimed | 2026-03-03T13:20:00Z |
 | H-004 | claude | exclusive | `Dockerfile`, `docker-compose.yml`, `.env.example`, `tests/test_docker_build.py` | H-001 | H-000 then H-004 | unclaimed | 2026-03-03T13:20:00Z |
 | H-005 | codex | exclusive | `fund/eod_reconciliation.py`, `fund/pnl_attribution.py`, `tests/test_eod_reconciliation.py` | H-002 | H-002 then H-005 | unclaimed | 2026-03-03T13:20:00Z |

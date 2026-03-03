@@ -20,6 +20,10 @@ from app.signal.ai_confidence import (
 )
 from app.signal.ai_contracts import PanelConsensus
 from data.trade_db import DB_PATH, get_conn
+from fund.promotion_gate import (
+    PromotionGateConfig,
+    evaluate_promotion_gate,
+)
 from execution.order_intent import OrderIntent
 from execution.policy.capability_policy import StrategyRequirements
 from execution.policy.ai_gate_policy import (
@@ -230,6 +234,7 @@ def run_orchestration_cycle(
     ai_consensus_by_ticker: Optional[dict[str, PanelConsensus]] = None,
     ai_execution_quality: Optional[ExecutionQualitySnapshot] = None,
     ai_gate_config: AIConfidenceGateConfig = AIConfidenceGateConfig(),
+    promotion_gate_config: Optional[PromotionGateConfig] = None,
 ) -> OrchestrationResult:
     """Run one orchestration cycle across all registered strategy slots.
 
@@ -240,7 +245,8 @@ def run_orchestration_cycle(
       4. If actionable, convert to OrderIntent
       5. Validate through account router (if provided)
       6. Validate through pre-trade risk gate (entries only; exits always pass)
-      7. Persist the intent (or log as shadow trade if dry_run)
+      7. Validate through promotion gate (entries only; exits bypass)
+      8. Persist the intent (or log as shadow trade if dry_run)
 
     The risk context accumulates intra-cycle: each approved intent's
     notional is added to ticker/sleeve exposure before evaluating the next.
@@ -257,6 +263,7 @@ def run_orchestration_cycle(
         ai_consensus_by_ticker: Optional ticker->PanelConsensus map.
         ai_execution_quality: Optional execution quality calibration snapshot.
         ai_gate_config: AI confidence gate behavior config.
+        promotion_gate_config: Optional promotion lane enforcement config.
 
     Returns:
         OrchestrationResult summarising all signals, intents, and errors.
@@ -296,6 +303,7 @@ def run_orchestration_cycle(
                     ai_consensus_by_ticker=ai_consensus_by_ticker,
                     ai_execution_quality=ai_execution_quality,
                     ai_gate_config=ai_gate_config,
+                    promotion_gate_config=promotion_gate_config,
                 )
             except Exception as exc:
                 error_entry = {
@@ -335,6 +343,7 @@ def _process_one_signal(
     ai_consensus_by_ticker: Optional[dict[str, PanelConsensus]],
     ai_execution_quality: Optional[ExecutionQualitySnapshot],
     ai_gate_config: AIConfidenceGateConfig,
+    promotion_gate_config: Optional[PromotionGateConfig] = None,
 ) -> None:
     """Generate and process one signal for a (strategy, ticker) pair."""
     position = _get_current_position(ticker, db_path)
@@ -430,7 +439,30 @@ def _process_one_signal(
             risk_ctx_dict["sleeve_exposure"].get(slot.config.sleeve, 0.0) + notional
         )
 
-    # ── Persist / shadow-log ─────────────────────────────────────────────
+    # ── Promotion gate (entries only — exits bypass) ────────────────────
+    if promotion_gate_config is not None:
+        promo_decision = evaluate_promotion_gate(
+            strategy_key=slot.config.strategy_id,
+            is_exit=is_exit,
+            config=promotion_gate_config,
+            db_path=db_path,
+        )
+        if not promo_decision.allowed:
+            result.intents_rejected.append({
+                **intent.to_payload(),
+                "reject_rule": promo_decision.reason_code,
+                "reject_message": promo_decision.message,
+            })
+            logger.warning(
+                "Promotion gate rejected %s/%s: %s — %s",
+                slot.config.strategy_id,
+                ticker,
+                promo_decision.reason_code,
+                promo_decision.message,
+            )
+            return
+
+    # ── AI confidence gate (entries only — exits bypass) ─────────────────
     if not is_exit and ai_consensus_by_ticker is not None:
         consensus = ai_consensus_by_ticker.get(ticker.upper())
         if consensus is not None:
