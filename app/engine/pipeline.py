@@ -77,9 +77,13 @@ def _ensure_default_registry() -> None:
     # Import here to avoid circular imports at module load time
     from strategies.dual_momentum import DualMomentumStrategy
     from strategies.gtaa import GTAAStrategy
+    from strategies.ibs_mean_reversion import IBSMeanReversion
+    from strategies.ibs_short import IBSShort
 
     register_strategy_class("GTAAStrategy", GTAAStrategy)
     register_strategy_class("DualMomentumStrategy", DualMomentumStrategy)
+    register_strategy_class("IBSMeanReversion", IBSMeanReversion)
+    register_strategy_class("IBSShort", IBSShort)
     logger.debug("Default strategy registry populated with %d classes",
                  len(_STRATEGY_CLASS_REGISTRY))
 

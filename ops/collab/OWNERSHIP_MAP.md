@@ -117,6 +117,17 @@ Defines file-scope locks for parallel execution.
 | N-006 | claude | exclusive | `app/web/templates/trading.html`, `app/web/templates/research_page.html`, `app/web/templates/incidents_page.html`, `app/web/templates/settings_page.html` | N-001 | N-001 then N-006 | unclaimed | 2026-03-03T18:00:00Z |
 | N-007 | claude | shared | `tests/test_phase_n_ui.py`, `app/web/static/styles.css` | N-002..N-006 | N-002..N-006 then N-007 | unclaimed | 2026-03-03T18:00:00Z |
 
+| O-000 | claude | exclusive | `ops/collab/DECISIONS.md`, `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md` | none | n/a | released | 2026-03-03T21:00:00Z |
+| O-001 | claude | exclusive | `seed_demo_data.py` | none | O-001 before O-009 | claimed | 2026-03-03T21:00:00Z |
+| O-002 | claude | exclusive | `app/api/server.py` (webhook handler only) | O-004 | O-004 then O-002 | unclaimed | 2026-03-03T21:00:00Z |
+| O-003 | codex | exclusive | `app/engine/pipeline.py`, `config.py` (strategy slots only) | none | O-003 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-004 | claude | exclusive | `data/order_intent_store.py` (notional fallback only) | O-002 | O-004 before O-002 | unclaimed | 2026-03-03T21:00:00Z |
+| O-005 | codex | exclusive | `app/api/server.py` (analytics endpoints only), new fragment template | none | O-005 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-006 | claude | exclusive | `fund/nav.py` (sleeve P&L only) | none | O-006 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-007 | codex | exclusive | `config.py` (validation/hardening only), `.env.example` | none | O-007 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-008 | claude | exclusive | `app/api/server.py` (backtest endpoints only), `app/web/templates/_backtest.html`, `app/web/templates/research_page.html` | none | O-008 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-009 | claude | shared | `tests/test_phase_o.py` | O-001..O-008 | O-001..O-008 then O-009 | unclaimed | 2026-03-03T21:00:00Z |
+
 ## Conflict protocol
 1. Stop editing immediately.
 2. Set queue status to `BLOCKED`.

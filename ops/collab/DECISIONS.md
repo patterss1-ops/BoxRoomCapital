@@ -44,6 +44,8 @@ Format: `DEC-### | date_utc | decision | rationale | impact | owner`
 
 | DEC-031 | 2026-03-03T18:00:00Z | Phase N: Tactical Dark Mode UI Overhaul — 8-ticket scope with design-token-first approach | Phase M complete (119 tickets DONE, 1877 tests). UI is functional but uses custom CSS light theme. Bloomberg/Vercel-inspired dark mode with Tailwind CSS migration, sidebar layout, bento grid overview, TradingView charts. Design tokens sent upfront so Codex fragments match shell exactly. | Adds N-000..N-007 queue rows; Claude owns N-000/N-001/N-006/N-007, Codex owns N-002/N-003/N-004/N-005. | both |
 
+| DEC-032 | 2026-03-03T21:00:00Z | Phase O: Full-Stack Completion — 10-ticket scope closing backend wiring gaps | Phase N complete (127 tickets DONE, 97 acceptance tests). UI shell renders but backend has critical wiring gaps: no seed data, webhook dead-end, notional fallback bug, hardcoded sleeve P&L, no backtest surface. User requested seed/demo data for look-and-feel testing. | Adds O-000..O-009 queue rows; Claude owns O-000/O-001/O-002/O-004/O-006/O-008/O-009, Codex owns O-003/O-005/O-007. | both |
+
 ## Pending decision template
 Use this row format when a blocker needs user decision:
 `DEC-### | <date_utc> | <decision requested> | <what is ambiguous> | <impact if delayed/wrong> | <requesting_agent>`

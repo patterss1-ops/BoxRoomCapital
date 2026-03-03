@@ -598,7 +598,10 @@ class TestDispatchOrchestration:
             assert hasattr(result, "summary")
             # Verify slots were built from real config
             call_args = mock_orch.call_args
-            assert len(call_args.kwargs["slots"]) == 2  # gtaa + dual_momentum
+            assert len(call_args.kwargs["slots"]) >= 2
+            slot_ids = {s.config.strategy_id for s in call_args.kwargs["slots"]}
+            assert "gtaa_isa" in slot_ids
+            assert "dual_momentum_isa" in slot_ids
 
     def test_ai_overrides_passed_through(self, db):
         """Explicit AI consensus/quality/config are forwarded to orchestrator."""
@@ -807,8 +810,8 @@ class TestConfigIntegration:
 
         import config
         slots = build_strategy_slots(config.STRATEGY_SLOTS)
-        # Should have 2 slots: gtaa_isa and dual_momentum_isa
-        assert len(slots) == 2
+        # Should include baseline IBKR slots plus optional IG slots
+        assert len(slots) >= 2
         ids = {s.config.strategy_id for s in slots}
         assert "gtaa_isa" in ids
         assert "dual_momentum_isa" in ids

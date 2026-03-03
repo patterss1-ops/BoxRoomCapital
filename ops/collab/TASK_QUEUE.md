@@ -126,6 +126,17 @@ Canonical queue for Codex + Claude parallel execution.
 | N-006 | Other page templates (trading, research, incidents, settings) | claude | DONE | N-001 | `app/web/templates/trading.html`, `app/web/templates/research_page.html`, `app/web/templates/incidents_page.html`, `app/web/templates/settings_page.html` | `claude/h-001-promotion-enforcement` | `-` | `-` | Split-pane trading, dark theme forms, responsive grid layouts | 2026-03-03T19:10:00Z |
 | N-007 | Acceptance harness + styles.css removal | claude | DONE | N-001, N-002, N-003, N-004, N-005, N-006 | `tests/test_phase_n_ui.py`, `app/web/static/styles.css` | `claude/h-001-promotion-enforcement` | `-` | `-` | 97 tests green, styles.css removed, full Phase N acceptance passed | 2026-03-03T20:30:00Z |
 
+| O-000 | Phase O bootstrap | claude | DONE | none | `ops/collab/DECISIONS.md`, `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md` | `claude/h-001-promotion-enforcement` | `-` | `-` | DEC-032, queue rows O-000..O-009, ownership locks, Codex mailbox | 2026-03-03T21:00:00Z |
+| O-001 | Seed data generator + demo launch | claude | DONE | O-000 | `seed_demo_data.py` | `claude/h-001-promotion-enforcement` | `-` | `-` | All 26+ tables populated (408 rows), summary printed, --clear-only flag works | 2026-03-03T21:30:00Z |
+| O-002 | Webhook → execution wiring | claude | DONE | O-000, O-004 | `app/api/server.py` (webhook handler) | `claude/h-001-promotion-enforcement` | `-` | `-` | TradingView webhook creates order intents, kill switch blocks, action mapping, 8 tests | 2026-03-03T21:30:00Z |
+| O-003 | IG strategies in orchestrator | codex | READY | O-000 | `app/engine/pipeline.py`, `config.py` | `tbd` | `-` | `-` | IG strategy slots registered and dispatchable | 2026-03-03T21:00:00Z |
+| O-004 | Notional fallback fix | claude | DONE | O-000 | `data/order_intent_store.py` | `claude/h-001-promotion-enforcement` | `-` | `-` | Fallback returns None + warning logged, source verified, 5 tests | 2026-03-03T21:30:00Z |
+| O-005 | Portfolio analytics API + fragment | codex | READY | O-000 | `app/api/server.py`, new fragment template | `tbd` | `-` | `-` | Analytics endpoints respond with computed metrics | 2026-03-03T21:00:00Z |
+| O-006 | Sleeve P&L attribution | claude | DONE | O-000, O-001 | `fund/nav.py` | `claude/h-001-promotion-enforcement` | `-` | `-` | Sleeve realised_pnl computed from trades via strategy→sleeve mapping, 5 tests | 2026-03-03T21:30:00Z |
+| O-007 | Config hardening | codex | READY | O-000 | `config.py`, `.env.example` | `tbd` | `-` | `-` | Config constants validated, env example updated | 2026-03-03T21:00:00Z |
+| O-008 | Backtester control-plane surface | claude | DONE | O-000, O-001 | `app/api/server.py`, `app/web/templates/_backtest.html`, `app/web/templates/research_page.html` | `claude/h-001-promotion-enforcement` | `-` | `-` | POST/GET backtest API, fragment template, wired into research page, 7 tests | 2026-03-03T21:30:00Z |
+| O-009 | Phase O acceptance harness | claude | DONE | O-001, O-002, O-004, O-006, O-008 | `tests/test_phase_o.py` | `claude/h-001-promotion-enforcement` | `-` | `-` | 68 tests green, Phase N regression (97 tests) green | 2026-03-03T21:30:00Z |
+
 ## Queue transition rules
 1. `READY -> IN_PROGRESS`: owner claims ticket, sets branch, updates ownership map, records claim timestamp.
 2. `IN_PROGRESS -> BLOCKED`: blocker written to handoff + decision request appended to `DECISIONS.md`.

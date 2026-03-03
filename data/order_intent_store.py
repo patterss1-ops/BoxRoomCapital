@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
 from typing import Any, Optional
 import uuid
+
+logger = logging.getLogger(__name__)
 
 from data.trade_db import DB_PATH, create_order_action, get_conn, update_order_action
 from execution.order_intent import OrderIntent, OrderIntentStatus, normalize_actor, normalize_status
@@ -767,11 +770,14 @@ def record_execution_metric(
     )
     dispatch_latency_ms = _compute_latency_ms(dispatch_at, broker_timestamp)
 
-    notional_requested = (
-        qty_requested * reference_price
-        if reference_price and reference_price > 0
-        else qty_requested
-    )
+    if reference_price and reference_price > 0:
+        notional_requested = qty_requested * reference_price
+    else:
+        notional_requested = None
+        logger.warning(
+            "No valid reference_price for intent %s attempt %s; notional_requested set to None",
+            intent_id, attempt,
+        )
     notional_filled = (
         qty_filled * fill_price
         if fill_price is not None and fill_price > 0 and qty_filled > 0
