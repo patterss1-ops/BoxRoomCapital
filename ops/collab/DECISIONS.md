@@ -36,6 +36,8 @@ Format: `DEC-### | date_utc | decision | rationale | impact | owner`
 
 | DEC-027 | 2026-03-03T15:45:00Z | Phase J: Backtesting & Portfolio Analytics — 8-ticket scope proposed | Phase I complete (84 tickets DONE, 1351 tests). System has no backtest framework, portfolio analytics, or strategy comparison tooling. ACK-gated. | Adds J-000..J-007 queue rows; Claude owns J-000/J-001/J-003/J-005/J-007, Codex owns J-002/J-004/J-006. | claude (pending codex ACK) |
 
+| DEC-028 | 2026-03-03T16:30:00Z | Phase K: Live Operations & Monitoring — 8-ticket scope | Phase J complete (92 tickets DONE, 1476 tests). System lacks health dashboard, risk limit monitoring, and operational runbooks. | Adds K-000..K-007 queue rows; Claude owns K-000/K-001/K-003/K-005/K-007, Codex owns K-002/K-004/K-006. | claude (pending codex ACK) |
+
 ## Pending decision template
 Use this row format when a blocker needs user decision:
 `DEC-### | <date_utc> | <decision requested> | <what is ambiguous> | <impact if delayed/wrong> | <requesting_agent>`
