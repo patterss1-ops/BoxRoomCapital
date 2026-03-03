@@ -93,9 +93,9 @@ Defines file-scope locks for parallel execution.
 | L-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md` | none | n/a | released | 2026-03-03T17:05:00Z |
 | L-001 | claude | exclusive | `data/pipeline_orchestrator.py`, `tests/test_pipeline_orchestrator.py` | none | L-001 before L-007 | claimed | 2026-03-03T17:06:00Z |
 | L-002 | codex | exclusive | `data/market_calendar.py`, `tests/test_market_calendar.py` | none | L-002 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
-| L-003 | claude | exclusive | `data/signal_store.py`, `tests/test_signal_store.py` | none | L-003 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
+| L-003 | claude | exclusive | `data/signal_store.py`, `tests/test_signal_store.py` | none | L-003 before L-007 | claimed | 2026-03-03T17:10:00Z |
 | L-004 | codex | exclusive | `analytics/correlation_monitor.py`, `tests/test_correlation_monitor.py` | none | L-004 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
-| L-005 | claude | exclusive | `app/notification_templates.py`, `tests/test_notification_templates.py` | none | L-005 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
+| L-005 | claude | exclusive | `app/notification_templates.py`, `tests/test_notification_templates.py` | none | L-005 before L-007 | claimed | 2026-03-03T17:14:00Z |
 | L-006 | codex | exclusive | `ops/metrics_collector.py`, `tests/test_metrics_collector.py` | none | L-006 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
 | L-007 | claude | shared | `tests/test_phase_l_e2e.py` | L-001..L-006 | L-001..L-006 then L-007 | unclaimed | 2026-03-03T17:05:00Z |
 
