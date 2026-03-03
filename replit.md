@@ -44,3 +44,10 @@ All Python dependencies are in `requirements.txt` and installed via pip.
 ## Deployment
 
 Configured as a VM deployment (always-on) via `python3 run_console.py`.
+
+## Git / GitHub
+
+- Repository: `patterss1-ops/BoxRoomCapital`
+- GitHub CLI (`gh`) is installed and authenticated via Replit GitHub integration
+- All work has been merged into `main` via PR #55 (phases G–O, 67 commits)
+- Stale feature branches were cleaned up; only `main` remains on GitHub
