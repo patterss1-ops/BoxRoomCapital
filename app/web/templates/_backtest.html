@@ -1,0 +1,73 @@
+<div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h3 class="text-sm font-semibold text-slate-200 uppercase tracking-wide">Backtest Runs</h3>
+    <span class="text-slate-500 text-xs">{{ backtest_jobs|length }} run{{ 's' if backtest_jobs|length != 1 }}</span>
+  </div>
+
+  {% if backtest_jobs %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-800">
+          <th class="text-left text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Strategy</th>
+          <th class="text-left text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Status</th>
+          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Return</th>
+          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Sharpe</th>
+          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Max DD</th>
+          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Trades</th>
+          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2">Win%</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for job in backtest_jobs %}
+        <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
+          <td class="py-1.5 pr-3 text-slate-300 font-mono text-xs">
+            {% set detail = job.detail %}
+            {% if detail %}
+              {% set d = detail if detail is mapping else {} %}
+              {{ d.strategy if d is mapping and d.strategy else detail[:30] }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
+          <td class="py-1.5 pr-3">
+            {% if job.status == 'completed' %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">done</span>
+            {% elif job.status == 'running' %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-500/20 text-blue-300 border border-blue-500/30">running</span>
+            {% elif job.status == 'failed' %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300 border border-red-500/30">failed</span>
+            {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700/50 text-slate-400 border border-slate-600">{{ job.status }}</span>
+            {% endif %}
+          </td>
+          {% if job.result_parsed and job.result_parsed is mapping %}
+            <td class="py-1.5 pr-3 text-right font-mono text-xs {% if job.result_parsed.total_return_pct and job.result_parsed.total_return_pct > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
+              {{ "%.1f"|format(job.result_parsed.total_return_pct) if job.result_parsed.total_return_pct is not none else '-' }}%
+            </td>
+            <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
+              {{ "%.2f"|format(job.result_parsed.sharpe_ratio) if job.result_parsed.sharpe_ratio is not none else '-' }}
+            </td>
+            <td class="py-1.5 pr-3 text-right font-mono text-xs text-red-400">
+              {{ "%.1f"|format(job.result_parsed.max_drawdown_pct) if job.result_parsed.max_drawdown_pct is not none else '-' }}%
+            </td>
+            <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
+              {{ job.result_parsed.total_trades if job.result_parsed.total_trades is not none else '-' }}
+            </td>
+            <td class="py-1.5 text-right font-mono text-xs text-slate-300">
+              {{ "%.1f"|format(job.result_parsed.win_rate) if job.result_parsed.win_rate is not none else '-' }}%
+            </td>
+          {% else %}
+            <td class="py-1.5 pr-3 text-right text-slate-500 text-xs" colspan="5">
+              {% if job.status == 'running' %}computing...{% elif job.error %}{{ job.error[:40] }}{% else %}-{% endif %}
+            </td>
+          {% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-slate-500 text-sm">No backtest runs yet. Submit one via POST /api/backtest.</p>
+  {% endif %}
+</div>

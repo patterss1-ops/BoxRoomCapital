@@ -133,6 +133,45 @@ def calculate_fund_nav(
     )
 
 
+def _compute_sleeve_realised_pnl(db_path: str = DB_PATH) -> dict[str, float]:
+    """
+    O-006: Compute realised P&L per sleeve from closed trades.
+
+    Strategy → sleeve mapping comes from broker_positions (which has both
+    strategy and sleeve columns). Trades missing a sleeve mapping fall into
+    the 'default' sleeve.
+    """
+    conn = get_conn(db_path)
+
+    # Build strategy → sleeve map from broker_positions
+    strat_sleeve_rows = conn.execute("""
+        SELECT DISTINCT strategy, COALESCE(sleeve, 'default') as sleeve
+        FROM broker_positions
+        WHERE strategy IS NOT NULL
+    """).fetchall()
+    strategy_to_sleeve: dict[str, str] = {}
+    for row in strat_sleeve_rows:
+        if row["strategy"]:
+            strategy_to_sleeve[row["strategy"]] = row["sleeve"]
+
+    # Sum realised P&L from closed trades grouped by strategy
+    pnl_rows = conn.execute("""
+        SELECT strategy, COALESCE(SUM(pnl), 0) as total_pnl
+        FROM trades
+        WHERE action = 'CLOSE' AND pnl IS NOT NULL
+        GROUP BY strategy
+    """).fetchall()
+    conn.close()
+
+    sleeve_pnl: dict[str, float] = {}
+    for row in pnl_rows:
+        strat = row["strategy"]
+        sleeve = strategy_to_sleeve.get(strat, "default")
+        sleeve_pnl[sleeve] = sleeve_pnl.get(sleeve, 0.0) + float(row["total_pnl"])
+
+    return sleeve_pnl
+
+
 def calculate_sleeve_navs(
     report_date: Optional[str] = None,
     db_path: str = DB_PATH,
@@ -175,6 +214,9 @@ def calculate_sleeve_navs(
 
     conn.close()
 
+    # O-006: Get realised P&L per sleeve from closed trades
+    sleeve_rpnl = _compute_sleeve_realised_pnl(db_path)
+
     # ── Build sleeve NAVs ──
     sleeve_data = []
     total_positions = sum(float(r["positions_value"]) for r in rows)
@@ -205,7 +247,7 @@ def calculate_sleeve_navs(
             positions_value=pv,
             cash_allocated=cash_alloc,
             unrealised_pnl=upnl,
-            realised_pnl=0.0,  # Sleeve-level realised P&L requires trade attribution
+            realised_pnl=round(sleeve_rpnl.get(s, 0.0), 2),
             weight_pct=round(weight, 2),
             daily_return_pct=daily_ret,
         ))

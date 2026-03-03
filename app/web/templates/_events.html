@@ -1,16 +1,19 @@
-<section class="card">
-  <h2>Bot Events</h2>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Bot Events</h2>
+    <p class="text-slate-500 text-sm">Recent control-plane activity.</p>
+  </div>
   {% if events %}
-    <ul class="events">
+    <ul class="space-y-0 max-h-[460px] overflow-auto">
     {% for event in events %}
-      <li>
-        <span class="stamp">{{ event.timestamp }}</span>
-        <span class="headline">{{ event.icon }} {{ event.headline }}</span>
-        {% if event.detail %}<div class="detail">{{ event.detail }}</div>{% endif %}
+      <li class="border-b border-slate-800 py-2">
+        <span class="inline-block min-w-[165px] font-mono text-xs text-slate-500">{{ event.timestamp }}</span>
+        <span class="font-semibold text-slate-200">{{ event.icon }} {{ event.headline }}</span>
+        {% if event.detail %}<p class="ml-[165px] mt-0.5 text-slate-500 text-sm">{{ event.detail }}</p>{% endif %}
       </li>
     {% endfor %}
     </ul>
   {% else %}
-    <p class="muted">No events yet.</p>
+    <p class="text-sm text-slate-500">No events yet.</p>
   {% endif %}
 </section>

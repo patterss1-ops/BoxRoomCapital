@@ -1,29 +1,32 @@
-<section class="card">
-  <h2>Control Acknowledgements</h2>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Control Acknowledgements</h2>
+    <p class="text-slate-500 text-sm">Operator override and control audit trail.</p>
+  </div>
   {% if control_actions %}
-    <table>
+    <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th>Time</th>
-          <th>Action</th>
-          <th>Value</th>
-          <th>Reason</th>
-          <th>Actor</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Time</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Action</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Value</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Reason</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Actor</th>
         </tr>
       </thead>
       <tbody>
       {% for item in control_actions %}
         <tr>
-          <td>{{ item.timestamp }}</td>
-          <td>{{ item.action }}</td>
-          <td>{{ item.value or "-" }}</td>
-          <td>{{ item.reason or "-" }}</td>
-          <td>{{ item.actor }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ item.timestamp }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.action }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.value or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.reason or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.actor }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="muted">No control acknowledgements yet.</p>
+    <p class="text-sm text-slate-500">No control acknowledgements yet.</p>
   {% endif %}
 </section>

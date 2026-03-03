@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import FastAPI, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -21,6 +21,11 @@ from app.api.ledger import router as ledger_router
 from app.engine.control import BotControlService
 from app.engine.signal_shadow import get_signal_shadow_report, run_signal_shadow_cycle
 from app.research.service import ResearchService
+from analytics.portfolio_analytics import (
+    compute_drawdowns,
+    compute_metrics,
+    compute_rolling_stats,
+)
 from fund.promotion_gate import build_promotion_gate_report, validate_lane_transition
 from fund.nav import calculate_fund_nav
 from intelligence.jobs.signal_layer_jobs import (
@@ -37,6 +42,7 @@ from data.trade_db import (
     get_calibration_points,
     get_calibration_runs,
     get_control_actions,
+    get_fund_daily_reports,
     get_job,
     get_active_strategy_parameter_set,
     get_incidents,
@@ -65,7 +71,10 @@ from intelligence.webhook_server import (
     summarize_payload,
     validate_expected_token,
 )
+from execution.order_intent import OrderIntent, OrderSide
+from data.order_intent_store import create_order_intent_envelope
 from fund.execution_quality import get_execution_quality_payload
+from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
 from risk.portfolio_risk import get_risk_briefing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -96,6 +105,18 @@ def create_app() -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/api/health")
+    def api_health() -> dict[str, Any]:
+        return build_api_health_payload()
+
+    @app.get("/api/metrics")
+    def api_metrics(days: int = 14):
+        payload = build_prometheus_metrics_payload(days=days)
+        return Response(
+            content=payload,
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+        )
 
     @app.get("/api/status")
     def api_status() -> dict[str, Any]:
@@ -244,6 +265,24 @@ def create_app() -> FastAPI:
     def api_execution_quality(days: int = 30):
         return get_execution_quality_payload(days=days)
 
+    @app.get("/api/analytics/portfolio")
+    def api_portfolio_analytics(days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS):
+        bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
+        return build_portfolio_analytics_payload(days=bounded_days)
+
+    @app.get("/api/charts/equity-curve")
+    def api_equity_curve(days: int = 90):
+        rows = get_fund_daily_reports(days=days)
+        result = []
+        for r in rows:
+            if r.get("report_date") and r.get("total_nav") is not None:
+                result.append({
+                    "time": r["report_date"],
+                    "value": round(float(r["total_nav"]), 2),
+                })
+        result.sort(key=lambda x: x["time"])
+        return result
+
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
         payload: Optional[dict[str, Any]] = None
@@ -287,13 +326,75 @@ def create_app() -> FastAPI:
             ticker=signal.ticker or None,
             strategy=signal.strategy or "tradingview_webhook",
         )
+
+        # O-002: Check kill switch before creating intent
+        engine_status = control.status()
+        if engine_status.get("kill_switch_active"):
+            _safe_log_event(
+                category="REJECTION",
+                headline="Kill switch active — webhook intent blocked",
+                detail=f"ticker={signal.ticker}, action={signal.action}",
+                ticker=signal.ticker,
+                strategy=signal.strategy or "tradingview_webhook",
+            )
+            return JSONResponse(
+                {"ok": False, "error": "KILL_SWITCH_ACTIVE",
+                 "detail": "Kill switch is active. Order intent not created."},
+                status_code=403,
+            )
+
+        # O-002: Map action → side and create order intent
+        action_lower = (signal.action or "").lower().strip()
+        action_to_side = {"buy": "BUY", "sell": "SELL", "long": "BUY", "short": "SELL"}
+        side_str = action_to_side.get(action_lower)
+        if not side_str:
+            return JSONResponse(
+                {"ok": False, "error": "INVALID_ACTION",
+                 "detail": f"Unmapped action '{signal.action}'. Expected buy/sell/long/short."},
+                status_code=422,
+            )
+
+        if not signal.ticker:
+            return JSONResponse(
+                {"ok": False, "error": "MISSING_TICKER",
+                 "detail": "Webhook payload missing ticker/symbol field."},
+                status_code=422,
+            )
+
+        try:
+            qty = float(payload.get("qty") or payload.get("quantity") or payload.get("size") or 1.0)
+            if qty <= 0:
+                raise ValueError("qty must be positive")
+        except (ValueError, TypeError):
+            qty = 1.0
+
+        intent = OrderIntent(
+            strategy_id=signal.strategy or "tradingview_webhook",
+            strategy_version="1",
+            sleeve="default",
+            account_type="ISA",
+            broker_target="IBKR_ISA",
+            instrument=signal.ticker,
+            side=side_str,
+            qty=qty,
+            order_type="MARKET",
+            metadata={"source": "tradingview_webhook", "raw_payload": payload},
+        )
+        envelope = create_order_intent_envelope(
+            intent=intent,
+            action_type="webhook_signal",
+            actor="system",
+        )
+        intent_id = envelope.get("intent_id", "")
+
         return {
             "ok": True,
-            "message": "TradingView webhook accepted.",
+            "message": "TradingView webhook accepted and order intent created.",
             "ticker": signal.ticker,
             "action": signal.action,
             "strategy": signal.strategy,
             "timeframe": signal.timeframe,
+            "intent_id": intent_id,
         }
 
     @app.post("/api/actions/start", response_class=HTMLResponse)
@@ -956,6 +1057,18 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/fragments/portfolio-analytics", response_class=HTMLResponse)
+    def portfolio_analytics_fragment(request: Request, days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS):
+        bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_portfolio_analytics.html",
+            {
+                "request": request,
+                "analytics": build_portfolio_analytics_payload(days=bounded_days),
+            },
+        )
+
     @app.get("/fragments/promotion-gate", response_class=HTMLResponse)
     def promotion_gate_fragment(
         request: Request,
@@ -1060,6 +1173,102 @@ def create_app() -> FastAPI:
                 await asyncio.sleep(2)
 
         return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+    # ── O-008: Backtester control-plane surface ──────────────────────────────
+
+    @app.post("/api/backtest")
+    def submit_backtest(request_body: dict[str, Any] | None = None):
+        """Submit a backtest job for a strategy + date range."""
+        if request_body is None:
+            request_body = {}
+
+        strategy = str(request_body.get("strategy") or "").strip()
+        start_date = str(request_body.get("start_date") or "").strip()
+        end_date = str(request_body.get("end_date") or "").strip()
+        tickers = request_body.get("tickers") or []
+
+        if not strategy:
+            return JSONResponse(
+                {"ok": False, "error": "MISSING_STRATEGY", "detail": "strategy is required"},
+                status_code=422,
+            )
+
+        job_id = str(uuid.uuid4())
+        create_job(
+            job_id=job_id,
+            job_type="backtest",
+            status="running",
+            mode="backtest",
+            detail=json.dumps({
+                "strategy": strategy,
+                "start_date": start_date or None,
+                "end_date": end_date or None,
+                "tickers": tickers,
+            }),
+        )
+
+        # Launch backtest in background thread
+        def _run_backtest():
+            try:
+                from analytics.backtester import Backtester
+                bt = Backtester(lookback_days=750)
+                result = bt.run(
+                    strategy_name=strategy,
+                    tickers=tickers or None,
+                    start_date=start_date or None,
+                    end_date=end_date or None,
+                )
+                summary = {
+                    "total_return_pct": round(result.total_return_pct, 2),
+                    "sharpe_ratio": round(result.sharpe, 4) if result.sharpe else None,
+                    "max_drawdown_pct": round(result.max_drawdown_pct, 2),
+                    "total_trades": result.total_trades,
+                    "win_rate": round(result.win_rate * 100, 1) if result.win_rate else None,
+                    "profit_factor": round(result.profit_factor, 2) if result.profit_factor else None,
+                }
+                update_job(job_id, status="completed", result=json.dumps(summary))
+            except Exception as e:
+                update_job(job_id, status="failed", error=str(e))
+
+        thread = threading.Thread(target=_run_backtest, daemon=True)
+        thread.start()
+
+        return {"ok": True, "job_id": job_id, "message": f"Backtest '{strategy}' submitted."}
+
+    @app.get("/api/backtest/{job_id}")
+    def get_backtest_result(job_id: str):
+        """Get status/results of a backtest job."""
+        job = get_job(job_id.strip())
+        if not job:
+            return JSONResponse(
+                {"ok": False, "error": "NOT_FOUND", "detail": f"Job {job_id} not found"},
+                status_code=404,
+            )
+        result = _parse_job_result(job.get("result") or "")
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "status": job.get("status"),
+            "result": result,
+            "error": job.get("error"),
+            "created_at": job.get("created_at"),
+            "updated_at": job.get("updated_at"),
+        }
+
+    @app.get("/fragments/backtest", response_class=HTMLResponse)
+    def backtest_fragment(request: Request):
+        """Fragment showing recent backtest runs."""
+        backtest_jobs = [
+            j for j in get_jobs(limit=20)
+            if j.get("job_type") == "backtest"
+        ]
+        for j in backtest_jobs:
+            j["result_parsed"] = _parse_job_result(j.get("result") or "")
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_backtest.html",
+            {"request": request, "backtest_jobs": backtest_jobs},
+        )
 
     return app
 
@@ -1181,6 +1390,91 @@ def build_risk_briefing_payload() -> dict[str, Any]:
             action="Check risk/nav services and retry.",
             code="RISK_DATA_ERROR",
         )
+
+
+def build_portfolio_analytics_payload(days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS) -> dict[str, Any]:
+    """Build portfolio analytics payload from fund daily NAV history."""
+    bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
+    rows = get_fund_daily_reports(days=bounded_days)
+    ordered = sorted(
+        [r for r in rows if r.get("report_date") and r.get("total_nav") is not None],
+        key=lambda r: str(r["report_date"]),
+    )
+
+    generated_at = datetime.now(timezone.utc).isoformat()
+    if len(ordered) < 2:
+        return {
+            "ok": False,
+            "generated_at": generated_at,
+            "days": bounded_days,
+            "points": len(ordered),
+            "latest_nav": float(ordered[-1]["total_nav"]) if ordered else None,
+            "metrics": {},
+            "drawdowns": [],
+            "rolling": {"window": config.PORTFOLIO_ANALYTICS_ROLLING_WINDOW, "dates": [], "rolling_return_pct": [], "rolling_volatility_pct": [], "rolling_sharpe": []},
+            "message": "Insufficient fund history for analytics.",
+        }
+
+    dates = [str(r["report_date"]) for r in ordered]
+    equity_curve = [float(r["total_nav"]) for r in ordered]
+    returns: list[float] = []
+    for idx in range(1, len(equity_curve)):
+        prev = equity_curve[idx - 1]
+        curr = equity_curve[idx]
+        if prev <= 0:
+            returns.append(0.0)
+        else:
+            returns.append((curr / prev) - 1.0)
+
+    metrics = compute_metrics(
+        returns=returns,
+        periods_per_year=252.0,
+        risk_free_rate=float(config.PORTFOLIO_ANALYTICS_RISK_FREE_RATE),
+    ).to_dict()
+    drawdowns = [
+        {
+            "start_idx": d.start_idx,
+            "trough_idx": d.trough_idx,
+            "end_idx": d.end_idx,
+            "depth_pct": d.depth_pct,
+            "duration_bars": d.duration_bars,
+            "recovery_bars": d.recovery_bars,
+            "start_date": dates[d.start_idx] if 0 <= d.start_idx < len(dates) else "",
+            "trough_date": dates[d.trough_idx] if 0 <= d.trough_idx < len(dates) else "",
+            "end_date": dates[d.end_idx] if 0 <= d.end_idx < len(dates) else "",
+        }
+        for d in compute_drawdowns(equity_curve, top_n=3)
+    ]
+
+    rolling_window = min(
+        int(config.PORTFOLIO_ANALYTICS_ROLLING_WINDOW),
+        len(returns) if returns else int(config.PORTFOLIO_ANALYTICS_ROLLING_WINDOW),
+    )
+    rolling = compute_rolling_stats(
+        returns=returns,
+        window=max(5, rolling_window),
+        periods_per_year=252.0,
+        dates=dates[1:],
+    )
+
+    return {
+        "ok": True,
+        "generated_at": generated_at,
+        "days": bounded_days,
+        "points": len(ordered),
+        "latest_nav": equity_curve[-1],
+        "latest_daily_return_pct": round(returns[-1] * 100.0, 4) if returns else 0.0,
+        "metrics": metrics,
+        "drawdowns": drawdowns,
+        "rolling": {
+            "window": rolling.window,
+            "dates": rolling.dates,
+            "rolling_return_pct": rolling.rolling_return_pct,
+            "rolling_volatility_pct": rolling.rolling_volatility_pct,
+            "rolling_sharpe": rolling.rolling_sharpe,
+        },
+        "series": [{"date": d, "nav": n} for d, n in zip(dates, equity_curve)],
+    }
 
 
 def _page_context(request: Request, page_key: str, title: str) -> dict[str, Any]:

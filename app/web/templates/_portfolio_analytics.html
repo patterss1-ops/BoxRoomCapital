@@ -1,0 +1,60 @@
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Portfolio Analytics</h2>
+    <p class="text-slate-500 text-sm">{{ analytics.days }}d window · generated {{ analytics.generated_at }}</p>
+  </div>
+
+  {% if analytics.ok %}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+      <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+        <p class="text-slate-500 text-xs uppercase tracking-wide">Total Return</p>
+        <p class="text-lg font-semibold text-slate-200">{{ "%.2f"|format(analytics.metrics.total_return_pct or 0) }}%</p>
+      </div>
+      <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+        <p class="text-slate-500 text-xs uppercase tracking-wide">Sharpe</p>
+        <p class="text-lg font-semibold text-slate-200">{{ "%.2f"|format(analytics.metrics.sharpe_ratio or 0) }}</p>
+      </div>
+      <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+        <p class="text-slate-500 text-xs uppercase tracking-wide">Max Drawdown</p>
+        <p class="text-lg font-semibold {% if (analytics.metrics.max_drawdown_pct or 0) < 0 %}text-red-500{% else %}text-emerald-400{% endif %}">{{ "%.2f"|format(analytics.metrics.max_drawdown_pct or 0) }}%</p>
+      </div>
+      <div class="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
+        <p class="text-slate-500 text-xs uppercase tracking-wide">Win Rate</p>
+        <p class="text-lg font-semibold text-slate-200">{{ "%.2f"|format(analytics.metrics.win_rate_pct or 0) }}%</p>
+      </div>
+    </div>
+
+    <table class="w-full text-sm text-left">
+      <thead>
+        <tr>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Metric</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Value</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Metric</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">Annualised Return</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(analytics.metrics.annualised_return_pct or 0) }}%</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">Annualised Volatility</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(analytics.metrics.annualised_volatility_pct or 0) }}%</td>
+        </tr>
+        <tr>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">Sortino</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(analytics.metrics.sortino_ratio or 0) }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">Calmar</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(analytics.metrics.calmar_ratio or 0) }}</td>
+        </tr>
+        <tr>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">Profit Factor</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(analytics.metrics.profit_factor or 0) }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">Latest NAV</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(analytics.latest_nav or 0) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-sm text-slate-500">{{ analytics.message }}</p>
+  {% endif %}
+</section>

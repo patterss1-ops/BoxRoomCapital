@@ -1,131 +1,131 @@
-<section class="card">
-  <div class="section-head">
-    <h2>Execution Quality</h2>
-    <p>Fill rate, slippage, and latency analytics ({{ eq.window_label }}).</p>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Execution Quality</h2>
+    <p class="text-slate-500 text-sm">Fill rate, slippage, and latency analytics ({{ eq.window_label }}).</p>
   </div>
 
   {% set verdict = (eq.verdict or "no_data")|lower %}
-  <div class="badge-wrap" style="margin-bottom: 0.7rem;">
-    <span class="badge {{ 'ok' if verdict == 'healthy' else ('running' if verdict == 'attention' else ('failed' if verdict == 'degraded' else 'muted')) }}">{{ verdict|upper }}</span>
-    <span class="muted">Generated: {{ eq.generated_at or '-' }}</span>
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if verdict == 'healthy' %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif verdict == 'attention' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif verdict == 'degraded' %}bg-red-500/15 text-red-400 border-red-500/30{% else %}bg-slate-500/15 text-slate-400 border-slate-500/30{% endif %}">{{ verdict|upper }}</span>
+    <span class="font-mono text-xs text-slate-500">Generated: {{ eq.generated_at or '-' }}</span>
   </div>
 
   {% if eq.fills.total_attempts == 0 %}
-    <p class="muted">No execution data available for this window.</p>
+    <p class="text-sm text-slate-500">No execution data available for this window.</p>
   {% else %}
 
   {# ── Fill Metrics ── #}
-  <h3 style="margin-top: 0.85rem;">Fill Metrics</h3>
-  <table>
+  <h3 class="text-slate-200 font-semibold mt-4 mb-2">Fill Metrics</h3>
+  <table class="w-full text-sm text-left">
     <thead>
       <tr>
-        <th>Total</th>
-        <th>Completed</th>
-        <th>Failed</th>
-        <th>Retrying</th>
-        <th>Fill Rate</th>
-        <th>Reject Rate</th>
-        <th>Partial Fill</th>
-        <th>Avg Fill Ratio</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Total</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Completed</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Failed</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Retrying</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Fill Rate</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Reject Rate</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Partial Fill</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Avg Fill Ratio</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>{{ eq.fills.total_attempts }}</td>
-        <td>{{ eq.fills.completed }}</td>
-        <td>{{ eq.fills.failed }}</td>
-        <td>{{ eq.fills.retrying }}</td>
-        <td>{{ "%.1f%%"|format(eq.fills.fill_rate_pct) }}</td>
-        <td>{{ "%.1f%%"|format(eq.fills.reject_rate_pct) }}</td>
-        <td>{{ "%.1f%%"|format(eq.fills.partial_fill_rate_pct) }}</td>
-        <td>{{ "%.4f"|format(eq.fills.avg_fill_ratio) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ eq.fills.total_attempts }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ eq.fills.completed }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ eq.fills.failed }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ eq.fills.retrying }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(eq.fills.fill_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(eq.fills.reject_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(eq.fills.partial_fill_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.4f"|format(eq.fills.avg_fill_ratio) }}</td>
       </tr>
     </tbody>
   </table>
 
   {# ── Slippage ── #}
-  <h3 style="margin-top: 0.85rem;">Slippage (bps)</h3>
+  <h3 class="text-slate-200 font-semibold mt-4 mb-2">Slippage (bps)</h3>
   {% if eq.slippage.sample_count > 0 %}
-  <table>
+  <table class="w-full text-sm text-left">
     <thead>
       <tr>
-        <th>Samples</th>
-        <th>Mean</th>
-        <th>Median</th>
-        <th>P5</th>
-        <th>P95</th>
-        <th>Min</th>
-        <th>Max</th>
-        <th>Total Cost</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Samples</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Mean</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Median</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">P5</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">P95</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Min</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Max</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Total Cost</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>{{ eq.slippage.sample_count }}</td>
-        <td>{{ "%.1f"|format(eq.slippage.mean_bps) if eq.slippage.mean_bps is not none else "-" }}</td>
-        <td>{{ "%.1f"|format(eq.slippage.median_bps) if eq.slippage.median_bps is not none else "-" }}</td>
-        <td>{{ "%.1f"|format(eq.slippage.p5_bps) if eq.slippage.p5_bps is not none else "-" }}</td>
-        <td>{{ "%.1f"|format(eq.slippage.p95_bps) if eq.slippage.p95_bps is not none else "-" }}</td>
-        <td>{{ "%.1f"|format(eq.slippage.min_bps) if eq.slippage.min_bps is not none else "-" }}</td>
-        <td>{{ "%.1f"|format(eq.slippage.max_bps) if eq.slippage.max_bps is not none else "-" }}</td>
-        <td>{{ "%.2f"|format(eq.slippage.total_slippage_cost) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ eq.slippage.sample_count }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f"|format(eq.slippage.mean_bps) if eq.slippage.mean_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f"|format(eq.slippage.median_bps) if eq.slippage.median_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f"|format(eq.slippage.p5_bps) if eq.slippage.p5_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f"|format(eq.slippage.p95_bps) if eq.slippage.p95_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f"|format(eq.slippage.min_bps) if eq.slippage.min_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f"|format(eq.slippage.max_bps) if eq.slippage.max_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(eq.slippage.total_slippage_cost) }}</td>
       </tr>
     </tbody>
   </table>
   {% else %}
-  <p class="muted">No slippage data available.</p>
+  <p class="text-sm text-slate-500">No slippage data available.</p>
   {% endif %}
 
   {# ── Latency ── #}
-  <h3 style="margin-top: 0.85rem;">Latency (ms)</h3>
+  <h3 class="text-slate-200 font-semibold mt-4 mb-2">Latency (ms)</h3>
   {% if eq.latency.sample_count > 0 %}
-  <table>
+  <table class="w-full text-sm text-left">
     <thead>
       <tr>
-        <th>Samples</th>
-        <th>Mean</th>
-        <th>P50</th>
-        <th>P95</th>
-        <th>Max</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Samples</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Mean</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">P50</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">P95</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Max</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>{{ eq.latency.sample_count }}</td>
-        <td>{{ "%.0f"|format(eq.latency.mean_ms) if eq.latency.mean_ms is not none else "-" }}</td>
-        <td>{{ "%.0f"|format(eq.latency.p50_ms) if eq.latency.p50_ms is not none else "-" }}</td>
-        <td>{{ "%.0f"|format(eq.latency.p95_ms) if eq.latency.p95_ms is not none else "-" }}</td>
-        <td>{{ "%.0f"|format(eq.latency.max_ms) if eq.latency.max_ms is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ eq.latency.sample_count }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f"|format(eq.latency.mean_ms) if eq.latency.mean_ms is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f"|format(eq.latency.p50_ms) if eq.latency.p50_ms is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f"|format(eq.latency.p95_ms) if eq.latency.p95_ms is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f"|format(eq.latency.max_ms) if eq.latency.max_ms is not none else "-" }}</td>
       </tr>
     </tbody>
   </table>
   {% else %}
-  <p class="muted">No latency data available.</p>
+  <p class="text-sm text-slate-500">No latency data available.</p>
   {% endif %}
 
   {# ── Broker Breakdown ── #}
   {% if eq.by_broker %}
-  <h3 style="margin-top: 0.85rem;">By Broker</h3>
-  <table>
+  <h3 class="text-slate-200 font-semibold mt-4 mb-2">By Broker</h3>
+  <table class="w-full text-sm text-left">
     <thead>
       <tr>
-        <th>Broker</th>
-        <th>Attempts</th>
-        <th>Fill Rate</th>
-        <th>Reject Rate</th>
-        <th>Avg Slippage</th>
-        <th>Avg Latency</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Broker</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Attempts</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Fill Rate</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Reject Rate</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Avg Slippage</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Avg Latency</th>
       </tr>
     </thead>
     <tbody>
       {% for b in eq.by_broker %}
       <tr>
-        <td>{{ b.broker }}</td>
-        <td>{{ b.total_attempts }}</td>
-        <td>{{ "%.1f%%"|format(b.fill_rate_pct) }}</td>
-        <td>{{ "%.1f%%"|format(b.reject_rate_pct) }}</td>
-        <td>{{ "%.1f bps"|format(b.mean_slippage_bps) if b.mean_slippage_bps is not none else "-" }}</td>
-        <td>{{ "%.0f ms"|format(b.mean_latency_ms) if b.mean_latency_ms is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ b.broker }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ b.total_attempts }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(b.fill_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(b.reject_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f bps"|format(b.mean_slippage_bps) if b.mean_slippage_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f ms"|format(b.mean_latency_ms) if b.mean_latency_ms is not none else "-" }}</td>
       </tr>
       {% endfor %}
     </tbody>
@@ -134,27 +134,27 @@
 
   {# ── Strategy Breakdown ── #}
   {% if eq.by_strategy %}
-  <h3 style="margin-top: 0.85rem;">By Strategy</h3>
-  <table>
+  <h3 class="text-slate-200 font-semibold mt-4 mb-2">By Strategy</h3>
+  <table class="w-full text-sm text-left">
     <thead>
       <tr>
-        <th>Strategy</th>
-        <th>Attempts</th>
-        <th>Fill Rate</th>
-        <th>Reject Rate</th>
-        <th>Avg Slippage</th>
-        <th>Notional Traded</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Strategy</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Attempts</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Fill Rate</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Reject Rate</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Avg Slippage</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Notional Traded</th>
       </tr>
     </thead>
     <tbody>
       {% for s in eq.by_strategy %}
       <tr>
-        <td>{{ s.strategy_id }}</td>
-        <td>{{ s.total_attempts }}</td>
-        <td>{{ "%.1f%%"|format(s.fill_rate_pct) }}</td>
-        <td>{{ "%.1f%%"|format(s.reject_rate_pct) }}</td>
-        <td>{{ "%.1f bps"|format(s.mean_slippage_bps) if s.mean_slippage_bps is not none else "-" }}</td>
-        <td>{{ "%.2f"|format(s.notional_traded) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ s.strategy_id }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ s.total_attempts }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(s.fill_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f%%"|format(s.reject_rate_pct) }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.1f bps"|format(s.mean_slippage_bps) if s.mean_slippage_bps is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(s.notional_traded) }}</td>
       </tr>
       {% endfor %}
     </tbody>

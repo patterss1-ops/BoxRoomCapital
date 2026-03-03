@@ -17,7 +17,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Optional
 
 from data.trade_db import (
@@ -30,6 +30,19 @@ from data.trade_db import (
 )
 
 logger = logging.getLogger(__name__)
+
+_REAL_DATETIME = datetime
+
+
+def _utcnow_naive() -> datetime:
+    """Return UTC now as naive datetime for backward-compatible ISO strings."""
+    # Tests patch module-level ``datetime`` and set ``utcnow``; support both.
+    current = datetime.now(timezone.utc)
+    if not isinstance(current, _REAL_DATETIME):
+        current = datetime.utcnow()
+    if current.tzinfo is not None:
+        return current.replace(tzinfo=None)
+    return current
 
 
 # ─── Schedule configuration ──────────────────────────────────────────────
@@ -127,12 +140,14 @@ class DailyWorkflowScheduler:
         db_path: str = DB_PATH,
         dry_run: bool = False,
         tick_interval: float = 30.0,
+        rebalance_check_fn: Optional[Callable[..., Any]] = None,
     ):
         self._dispatch_fn = dispatch_fn
         self._schedule = list(schedule if schedule is not None else DEFAULT_SCHEDULE)
         self._db_path = db_path
         self._dry_run = dry_run
         self._tick_interval = max(5.0, tick_interval)
+        self._rebalance_check_fn = rebalance_check_fn
 
         # Thread-safe state
         self._lock = threading.RLock()
@@ -161,7 +176,7 @@ class DailyWorkflowScheduler:
             self._stop_event.clear()
             self._running = True
             self._paused = False
-            self._started_at = datetime.utcnow().isoformat()
+            self._started_at = _utcnow_naive().isoformat()
 
             # Recover last-fired state from DB
             self._recover_state()
@@ -315,7 +330,7 @@ class DailyWorkflowScheduler:
 
     def _tick(self) -> None:
         """One tick: check time, reset daily state, fire due windows."""
-        now = datetime.utcnow()
+        now = _utcnow_naive()
         today = now.date()
 
         # Day rollover — clear fired set
@@ -359,7 +374,7 @@ class DailyWorkflowScheduler:
         thread — they are captured in the result and logged.
         """
         job_id = uuid.uuid4().hex[:12]
-        started_at = datetime.utcnow().isoformat()
+        started_at = _utcnow_naive().isoformat()
         result = SchedulerRunResult(
             window_name=window.name,
             job_id=job_id,
@@ -429,6 +444,7 @@ class DailyWorkflowScheduler:
                 window.name, result.signals_total, result.intents_created,
                 result.intents_rejected, result.errors_total,
             )
+            self._run_rebalance_check(window.name)
 
         except Exception as exc:
             result.error_message = str(exc)
@@ -455,7 +471,7 @@ class DailyWorkflowScheduler:
                 "Window '%s' dispatch failed: %s", window.name, exc, exc_info=True,
             )
 
-        result.finished_at = datetime.utcnow().isoformat()
+        result.finished_at = _utcnow_naive().isoformat()
 
         # Store in recent results ring buffer
         with self._lock:
@@ -494,7 +510,7 @@ class DailyWorkflowScheduler:
                 return
             state = json.loads(raw)
             saved_date = state.get("date")
-            utc_today = datetime.utcnow().date()
+            utc_today = _utcnow_naive().date()
             if saved_date == utc_today.isoformat():
                 self._fired_today = set(state.get("fired", []))
                 self._today = utc_today
@@ -518,3 +534,36 @@ class DailyWorkflowScheduler:
                 if w.name == name:
                     return w
         return None
+
+    def _run_rebalance_check(self, window_name: str) -> None:
+        """Best-effort hook for post-dispatch sleeve drift evaluation."""
+        if self._rebalance_check_fn is None:
+            return
+
+        try:
+            rebalance_result = self._rebalance_check_fn(
+                window_name=window_name,
+                db_path=self._db_path,
+            )
+
+            triggered = False
+            if isinstance(rebalance_result, dict):
+                triggered = bool(rebalance_result.get("requires_rebalance", False))
+
+            log_event(
+                category="SCHEDULE",
+                headline=f"Rebalance check: {window_name}",
+                detail=f"triggered={triggered}",
+                db_path=self._db_path,
+            )
+            logger.info(
+                "Rebalance check complete for '%s' (triggered=%s)",
+                window_name,
+                triggered,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Rebalance check failed for '%s': %s",
+                window_name,
+                exc,
+            )

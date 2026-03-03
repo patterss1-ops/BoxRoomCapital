@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 class DataProvider:
     """Fetches and caches daily OHLC data from yfinance."""
 
-    def __init__(self, lookback_days: int = 400):
+    def __init__(self, lookback_days: int = 400, market_monitor: Optional[object] = None, provider_name: str = "yfinance"):
         """
         Args:
             lookback_days: How many calendar days of history to fetch.
@@ -24,6 +24,8 @@ class DataProvider:
         """
         self.lookback_days = lookback_days
         self._cache: dict[str, pd.DataFrame] = {}
+        self.market_monitor = market_monitor
+        self.provider_name = provider_name
 
     def get_daily_bars(self, ticker: str, force_refresh: bool = False) -> pd.DataFrame:
         """
@@ -65,6 +67,7 @@ class DataProvider:
 
             if df.empty:
                 logger.warning(f"No data returned for {ticker}")
+                self._record_failure()
                 return pd.DataFrame()
 
             # Flatten multi-level columns if present (yfinance sometimes returns these)
@@ -77,10 +80,12 @@ class DataProvider:
 
             self._cache[ticker] = df
             logger.info(f"Got {len(df)} bars for {ticker}, latest: {df.index[-1].date()}")
+            self._record_success(ticker)
             return df
 
         except Exception as e:
             logger.error(f"Error fetching {ticker}: {e}")
+            self._record_failure()
             return pd.DataFrame()
 
     def get_vix(self) -> pd.DataFrame:
@@ -90,6 +95,22 @@ class DataProvider:
     def clear_cache(self):
         """Clear all cached data (call at start of each daily run)."""
         self._cache.clear()
+
+    def _record_success(self, ticker: str):
+        monitor = self.market_monitor
+        if monitor and hasattr(monitor, "record_success"):
+            try:
+                monitor.record_success(self.provider_name, ticker=ticker)
+            except Exception:
+                logger.warning("Failed to record market data success", exc_info=True)
+
+    def _record_failure(self):
+        monitor = self.market_monitor
+        if monitor and hasattr(monitor, "record_failure"):
+            try:
+                monitor.record_failure(self.provider_name)
+            except Exception:
+                logger.warning("Failed to record market data failure", exc_info=True)
 
 
 # ─── INDICATOR CALCULATIONS ──────────────────────────────────────────────────

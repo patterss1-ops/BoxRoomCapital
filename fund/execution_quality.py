@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from data.order_intent_store import get_execution_metrics
@@ -358,7 +358,7 @@ def build_execution_quality_report(
     fill rate, slippage, latency, and per-broker/strategy breakdowns.
     """
     window_label = label or f"{days}d"
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     window_start = (now - timedelta(days=days)).isoformat()
     window_end = now.isoformat()
 

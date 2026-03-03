@@ -8,6 +8,49 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_int(
+    name: str,
+    default: int,
+    min_value: int | None = None,
+    max_value: int | None = None,
+) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = default
+    if min_value is not None:
+        value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
+
+def _env_float(
+    name: str,
+    default: float,
+    min_value: float | None = None,
+    max_value: float | None = None,
+) -> float:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = default
+    if min_value is not None:
+        value = max(min_value, value)
+    if max_value is not None:
+        value = min(max_value, value)
+    return value
+
 # ─── BROKER CONFIG ───────────────────────────────────────────────────────────
 
 BROKER_MODE = os.getenv("BROKER_MODE", "paper")  # "paper", "demo", "live"
@@ -442,6 +485,20 @@ OPTIONS_SAFETY = {
 #   requirements    — Dict of StrategyRequirements fields (capability checks)
 #   enabled         — Boolean: False skips this slot entirely
 
+# Feature gate for IG-oriented slots in the orchestrator pipeline.
+ENABLE_IG_ORCHESTRATOR_STRATEGIES = _env_bool("ENABLE_IG_ORCHESTRATOR_STRATEGIES", True)
+
+# Orchestrator path currently doesn't inject VIX into strategy kwargs.
+# Disable VIX gating for these specific slots to keep deterministic signal flow.
+ORCHESTRATOR_IBS_PARAMS = {
+    **IBS_PARAMS,
+    "use_vix_filter": False,
+}
+ORCHESTRATOR_IBS_SHORT_PARAMS = {
+    **IBS_SHORT_PARAMS,
+    "use_vix_filter": False,
+}
+
 STRATEGY_SLOTS = [
     {
         "id": "gtaa_isa",
@@ -471,13 +528,71 @@ STRATEGY_SLOTS = [
         "requirements": {"requires_spot_etf": True},
         "enabled": True,
     },
+    {
+        "id": "ibs_spreadbet_long",
+        "strategy_class": "IBSMeanReversion",
+        "strategy_version": "1.0",
+        "params": ORCHESTRATOR_IBS_PARAMS,
+        "sleeve": "sleeve_1_ibs",
+        "account_type": "SPREADBET",
+        "broker_target": "ig",
+        "tickers": ["SPY", "QQQ"],
+        "base_qty": 1.0,
+        "risk_tags": ["mean_reversion", "ibs", "ig"],
+        "requirements": {"requires_spreadbet": True},
+        "enabled": ENABLE_IG_ORCHESTRATOR_STRATEGIES,
+    },
+    {
+        "id": "ibs_spreadbet_short",
+        "strategy_class": "IBSShort",
+        "strategy_version": "1.0",
+        "params": ORCHESTRATOR_IBS_SHORT_PARAMS,
+        "sleeve": "sleeve_2_ibs_short",
+        "account_type": "SPREADBET",
+        "broker_target": "ig",
+        "tickers": ["SPY", "QQQ"],
+        "base_qty": 1.0,
+        "risk_tags": ["mean_reversion", "ibs_short", "ig"],
+        "requirements": {"requires_spreadbet": True, "requires_short": True},
+        "enabled": ENABLE_IG_ORCHESTRATOR_STRATEGIES,
+    },
 ]
 
 # ─── TRADINGVIEW WEBHOOK INTAKE ────────────────────────────────────────────
 
 TRADINGVIEW_WEBHOOK_TOKEN = os.getenv("TRADINGVIEW_WEBHOOK_TOKEN", "")
-TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES = int(
-    os.getenv("TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES", "65536")
+TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES = _env_int(
+    "TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES",
+    65536,
+    min_value=1024,
+    max_value=1_048_576,
+)
+
+# ─── PORTFOLIO ANALYTICS API (O-005) ───────────────────────────────────────
+
+PORTFOLIO_ANALYTICS_DEFAULT_DAYS = _env_int(
+    "PORTFOLIO_ANALYTICS_DEFAULT_DAYS",
+    90,
+    min_value=7,
+    max_value=3650,
+)
+PORTFOLIO_ANALYTICS_MAX_DAYS = _env_int(
+    "PORTFOLIO_ANALYTICS_MAX_DAYS",
+    365,
+    min_value=30,
+    max_value=3650,
+)
+PORTFOLIO_ANALYTICS_ROLLING_WINDOW = _env_int(
+    "PORTFOLIO_ANALYTICS_ROLLING_WINDOW",
+    21,
+    min_value=5,
+    max_value=252,
+)
+PORTFOLIO_ANALYTICS_RISK_FREE_RATE = _env_float(
+    "PORTFOLIO_ANALYTICS_RISK_FREE_RATE",
+    0.0,
+    min_value=-0.05,
+    max_value=0.25,
 )
 
 # ─── NOTIFICATIONS ───────────────────────────────────────────────────────────

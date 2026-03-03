@@ -26,9 +26,12 @@ Key entry points:
 from __future__ import annotations
 
 import logging
+import os
 from datetime import datetime
 from typing import Any, Optional, Type
 
+from app.signal.ai_confidence import AIConfidenceGateConfig, ExecutionQualitySnapshot
+from app.signal.ai_contracts import PanelConsensus
 from data.trade_db import DB_PATH, get_conn
 from execution.policy.capability_policy import StrategyRequirements
 from execution.signal_adapter import StrategySlotConfig
@@ -74,9 +77,13 @@ def _ensure_default_registry() -> None:
     # Import here to avoid circular imports at module load time
     from strategies.dual_momentum import DualMomentumStrategy
     from strategies.gtaa import GTAAStrategy
+    from strategies.ibs_mean_reversion import IBSMeanReversion
+    from strategies.ibs_short import IBSShort
 
     register_strategy_class("GTAAStrategy", GTAAStrategy)
     register_strategy_class("DualMomentumStrategy", DualMomentumStrategy)
+    register_strategy_class("IBSMeanReversion", IBSMeanReversion)
+    register_strategy_class("IBSShort", IBSShort)
     logger.debug("Default strategy registry populated with %d classes",
                  len(_STRATEGY_CLASS_REGISTRY))
 
@@ -240,6 +247,74 @@ def _get_fund_equity(db_path: str) -> float:
     return 0.0
 
 
+def _build_execution_quality_snapshot(
+    db_path: str,
+    lookback_days: int = 14,
+) -> Optional[ExecutionQualitySnapshot]:
+    """Build an execution-quality snapshot for AI confidence calibration."""
+    try:
+        from fund.execution_quality import build_execution_quality_report
+
+        report = build_execution_quality_report(
+            window_days=max(1, int(lookback_days)),
+            db_path=db_path,
+        )
+        return ExecutionQualitySnapshot(
+            fill_rate_pct=float(report.fills.fill_rate_pct),
+            reject_rate_pct=float(report.fills.reject_rate_pct),
+            mean_slippage_bps=report.slippage.mean_bps,
+            sample_count=int(report.fills.total_attempts),
+        )
+    except Exception as exc:
+        logger.warning("Execution-quality snapshot unavailable: %s", exc)
+        return None
+
+
+def _collect_ai_panel_consensus(
+    slots: list[Any],
+    as_of: str,
+) -> dict[str, PanelConsensus]:
+    """Collect live AI panel consensus for all unique tickers in slots.
+
+    Only clients with configured API keys are registered. Failures are logged
+    and omitted so orchestration can continue with available data.
+    """
+    from intelligence.ai_panel import (
+        ChatGPTClient,
+        ClaudeClient,
+        GeminiClient,
+        GrokClient,
+        PanelCoordinator,
+    )
+
+    coordinator = PanelCoordinator()
+    registered = 0
+    if os.getenv("XAI_API_KEY", "").strip():
+        coordinator.register("grok", GrokClient().fetch_verdict)
+        registered += 1
+    if os.getenv("ANTHROPIC_API_KEY", "").strip():
+        coordinator.register("claude", ClaudeClient().fetch_verdict)
+        registered += 1
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        coordinator.register("chatgpt", ChatGPTClient().fetch_verdict)
+        registered += 1
+    if os.getenv("GOOGLE_AI_API_KEY", "").strip():
+        coordinator.register("gemini", GeminiClient().fetch_verdict)
+        registered += 1
+
+    if registered == 0:
+        return {}
+
+    tickers = sorted({str(t).upper() for slot in slots for t in slot.tickers})
+    out: dict[str, PanelConsensus] = {}
+    for ticker in tickers:
+        try:
+            out[ticker] = coordinator.query_panel(ticker=ticker, as_of=as_of)
+        except Exception as exc:
+            logger.warning("AI panel query failed for %s: %s", ticker, exc)
+    return out
+
+
 # ─── Dispatch callback for the scheduler ────────────────────────────────
 
 def dispatch_orchestration(
@@ -249,6 +324,11 @@ def dispatch_orchestration(
     slot_configs: Optional[list[dict[str, Any]]] = None,
     equity: Optional[float] = None,
     data_provider: Any = None,
+    ai_consensus_by_ticker: Optional[dict[str, PanelConsensus]] = None,
+    ai_execution_quality: Optional[ExecutionQualitySnapshot] = None,
+    ai_gate_config: AIConfidenceGateConfig = AIConfidenceGateConfig(),
+    ai_panel_enabled: bool = False,
+    ai_execution_quality_lookback_days: int = 14,
 ) -> Any:
     """Dispatch callback wiring the scheduler to the orchestrator.
 
@@ -273,6 +353,11 @@ def dispatch_orchestration(
         slot_configs: Override slot configs (for testing).
         equity: Override fund equity (for testing).  If None, reads from DB.
         data_provider: DataProvider instance (lazy-loaded if None).
+        ai_consensus_by_ticker: Optional explicit AI panel consensus map.
+        ai_execution_quality: Optional explicit execution-quality snapshot.
+        ai_gate_config: AI confidence gate behavior config.
+        ai_panel_enabled: If True, fetch live panel consensus for slot tickers.
+        ai_execution_quality_lookback_days: Rolling window for quality snapshot.
 
     Returns:
         OrchestrationResult with ``.summary()`` for the scheduler.
@@ -296,6 +381,20 @@ def dispatch_orchestration(
 
     # Resolve equity: explicit override > DB lookup > 0 (risk gate skipped)
     resolved_equity = equity if equity is not None else _get_fund_equity(db_path)
+    as_of = datetime.utcnow().isoformat()
+
+    resolved_ai_consensus = ai_consensus_by_ticker
+    if resolved_ai_consensus is None and ai_panel_enabled:
+        resolved_ai_consensus = _collect_ai_panel_consensus(slots=slots, as_of=as_of)
+
+    resolved_ai_quality = ai_execution_quality
+    if resolved_ai_quality is None and (
+        resolved_ai_consensus is not None or ai_panel_enabled
+    ):
+        resolved_ai_quality = _build_execution_quality_snapshot(
+            db_path=db_path,
+            lookback_days=ai_execution_quality_lookback_days,
+        )
 
     result = run_orchestration_cycle(
         slots=slots,
@@ -303,6 +402,9 @@ def dispatch_orchestration(
         dry_run=dry_run,
         data_provider=data_provider,
         equity=resolved_equity,
+        ai_consensus_by_ticker=resolved_ai_consensus,
+        ai_execution_quality=resolved_ai_quality,
+        ai_gate_config=ai_gate_config,
     )
 
     logger.info(
@@ -315,3 +417,43 @@ def dispatch_orchestration(
     )
 
     return result
+
+
+def dispatch_rebalance_check(
+    window_name: str,
+    db_path: str = DB_PATH,
+    target_weight_by_sleeve: Optional[dict[str, float]] = None,
+    drift_threshold_pct: float = 5.0,
+    min_trade_notional: float = 0.0,
+    report_date: Optional[str] = None,
+) -> dict[str, Any]:
+    """Scheduler callback for H-002 sleeve-drift rebalancing checks.
+
+    Designed for ``DailyWorkflowScheduler(rebalance_check_fn=...)``.
+    Returns a plain dict payload so scheduler hooks can log safely.
+    """
+    from portfolio.rebalance import run_rebalance_drift_check
+
+    try:
+        plan = run_rebalance_drift_check(
+            target_weight_by_sleeve=target_weight_by_sleeve,
+            drift_threshold_pct=drift_threshold_pct,
+            min_trade_notional=min_trade_notional,
+            report_date=report_date,
+            db_path=db_path,
+        )
+        payload = plan.to_dict() if hasattr(plan, "to_dict") else {}
+        if not isinstance(payload, dict):
+            payload = {}
+        payload["window_name"] = window_name
+        payload["requires_rebalance"] = bool(
+            getattr(plan, "requires_rebalance", payload.get("requires_rebalance", False))
+        )
+        return payload
+    except Exception as exc:
+        logger.warning("Rebalance check dispatch failed for %s: %s", window_name, exc)
+        return {
+            "window_name": window_name,
+            "requires_rebalance": False,
+            "error": str(exc),
+        }

@@ -1,6 +1,12 @@
-"""Deterministic promotion gate reporting for shadow/staged/live lanes."""
+"""Deterministic promotion gate reporting and enforcement for shadow/staged/live lanes.
+
+H-001: Adds enforcement functions that block live execution unless a strategy
+has completed the full promotion pipeline (shadow → staged → live) with a
+configurable soak period and stale-set detection.
+"""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -190,3 +196,152 @@ def build_promotion_gate_report(
             for row in promotions[:10]
         ],
     }
+
+
+# ─── Enforcement gate (H-001) ───────────────────────────────────────────
+
+
+@dataclass
+class PromotionGateConfig:
+    """Configuration for promotion enforcement gate."""
+
+    enabled: bool = True
+    min_soak_hours: int = 24
+    max_stale_hours: int = 168  # 7 days — live set older than this blocks new entries
+    require_live_set: bool = True
+    bypass_for_exits: bool = True
+
+
+@dataclass
+class PromotionGateDecision:
+    """Result of a promotion enforcement check."""
+
+    allowed: bool
+    reason_code: str
+    message: str
+    strategy_key: str
+    live_set_id: Optional[str] = None
+    live_version: Optional[int] = None
+    soak_remaining_hours: Optional[float] = None
+
+
+def evaluate_promotion_gate(
+    strategy_key: str,
+    is_exit: bool = False,
+    config: Optional[PromotionGateConfig] = None,
+    now_utc: Optional[datetime] = None,
+    db_path: str = DB_PATH,
+) -> PromotionGateDecision:
+    """Check whether a strategy is allowed to execute live trades.
+
+    Enforcement rules (entry-only; exits always pass if bypass_for_exits):
+    1. Strategy must have an active live-lane parameter set.
+    2. The live set must have completed its soak period (min_soak_hours since
+       last promotion to live).
+    3. The live set must not be stale (promoted more than max_stale_hours ago
+       without a refresh).
+
+    Returns a PromotionGateDecision with allowed=True/False and reason codes.
+    """
+    cfg = config or PromotionGateConfig()
+    clean_strategy = (strategy_key or "").strip().lower()
+    now = now_utc or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    else:
+        now = now.astimezone(timezone.utc)
+
+    # Exits always pass when bypass is enabled
+    if is_exit and cfg.bypass_for_exits:
+        return PromotionGateDecision(
+            allowed=True,
+            reason_code="EXIT_BYPASS",
+            message="Exits bypass promotion gate.",
+            strategy_key=clean_strategy,
+        )
+
+    # Gate disabled — pass through
+    if not cfg.enabled:
+        return PromotionGateDecision(
+            allowed=True,
+            reason_code="GATE_DISABLED",
+            message="Promotion gate is disabled.",
+            strategy_key=clean_strategy,
+        )
+
+    # Check for active live set
+    live = get_active_strategy_parameter_set(
+        clean_strategy, status="live", db_path=db_path,
+    )
+
+    if not live and cfg.require_live_set:
+        return PromotionGateDecision(
+            allowed=False,
+            reason_code="NO_LIVE_SET",
+            message=f"Strategy '{clean_strategy}' has no active live-lane parameter set. "
+                    "Complete the promotion pipeline (shadow → staged → live) first.",
+            strategy_key=clean_strategy,
+        )
+
+    if not live:
+        # require_live_set is False — allow through
+        return PromotionGateDecision(
+            allowed=True,
+            reason_code="LIVE_NOT_REQUIRED",
+            message="Live set not required by config.",
+            strategy_key=clean_strategy,
+        )
+
+    live_set_id = live.get("id")
+    live_version = int(live.get("version") or 0)
+
+    # Find the most recent promotion to live for this strategy
+    promotions = get_strategy_promotions(
+        limit=20, strategy_key=clean_strategy, db_path=db_path,
+    )
+    latest_live_promotion_at: Optional[datetime] = None
+    for promo in promotions:
+        if (promo.get("to_status") or "").strip().lower() == "live":
+            latest_live_promotion_at = _parse_iso(str(promo.get("timestamp") or ""))
+            break
+
+    # Soak period check
+    if latest_live_promotion_at and cfg.min_soak_hours > 0:
+        hours_since_promotion = (now - latest_live_promotion_at).total_seconds() / 3600.0
+        if hours_since_promotion < cfg.min_soak_hours:
+            remaining = cfg.min_soak_hours - hours_since_promotion
+            return PromotionGateDecision(
+                allowed=False,
+                reason_code="SOAK_PERIOD_ACTIVE",
+                message=f"Strategy '{clean_strategy}' live set is in soak period. "
+                        f"{remaining:.1f} hours remaining of {cfg.min_soak_hours}h requirement.",
+                strategy_key=clean_strategy,
+                live_set_id=live_set_id,
+                live_version=live_version,
+                soak_remaining_hours=round(remaining, 2),
+            )
+
+    # Stale set check
+    if latest_live_promotion_at and cfg.max_stale_hours > 0:
+        hours_since_promotion = (now - latest_live_promotion_at).total_seconds() / 3600.0
+        if hours_since_promotion > cfg.max_stale_hours:
+            return PromotionGateDecision(
+                allowed=False,
+                reason_code="STALE_LIVE_SET",
+                message=f"Strategy '{clean_strategy}' live set is stale "
+                        f"({hours_since_promotion:.0f}h since last promotion, "
+                        f"max {cfg.max_stale_hours}h). Re-promote from staged.",
+                strategy_key=clean_strategy,
+                live_set_id=live_set_id,
+                live_version=live_version,
+            )
+
+    # All checks passed
+    return PromotionGateDecision(
+        allowed=True,
+        reason_code="PROMOTION_GATE_PASSED",
+        message=f"Strategy '{clean_strategy}' has valid live set (v{live_version}).",
+        strategy_key=clean_strategy,
+        live_set_id=live_set_id,
+        live_version=live_version,
+    )

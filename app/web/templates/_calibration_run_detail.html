@@ -1,41 +1,41 @@
 {% if run_id %}
-  <div class="row"><span class="label">Run ID</span><span class="value code">{{ run_id[:8] }}</span></div>
-  <div class="row"><span class="label">Samples</span><span class="value">{{ summary.count }}</span></div>
-  <div class="row"><span class="label">Avg Ratio</span><span class="value">{{ "%.3f"|format(summary.avg_ratio) if summary.avg_ratio is not none else "-" }}</span></div>
-  <div class="row"><span class="label">Ratio Range</span><span class="value">{% if summary.min_ratio is not none %}{{ "%.3f"|format(summary.min_ratio) }} - {{ "%.3f"|format(summary.max_ratio) }}{% else %}-{% endif %}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Run ID</span><span class="font-mono text-slate-300 text-xs">{{ run_id[:8] }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Samples</span><span class="text-slate-300 text-sm">{{ summary.count }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Avg Ratio</span><span class="text-slate-300 text-sm">{{ "%.3f"|format(summary.avg_ratio) if summary.avg_ratio is not none else "-" }}</span></div>
+  <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-slate-500 text-sm">Ratio Range</span><span class="text-slate-300 text-sm">{% if summary.min_ratio is not none %}{{ "%.3f"|format(summary.min_ratio) }} - {{ "%.3f"|format(summary.max_ratio) }}{% else %}-{% endif %}</span></div>
 
   {% if points %}
-    <table>
+    <table class="w-full text-sm text-left mt-3">
       <thead>
         <tr>
-          <th>Index</th>
-          <th>Ticker</th>
-          <th>Expiry</th>
-          <th>Strike</th>
-          <th>IG Mid</th>
-          <th>BS Price</th>
-          <th>Ratio</th>
-          <th>Spread %</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Index</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ticker</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Expiry</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Strike</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">IG Mid</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">BS Price</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ratio</th>
+          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Spread %</th>
         </tr>
       </thead>
       <tbody>
       {% for p in points %}
         <tr>
-          <td>{{ p.index_name or "-" }}</td>
-          <td>{{ p.ticker or "-" }}</td>
-          <td>{{ p.expiry_type or "-" }}</td>
-          <td>{{ "%.0f"|format(p.strike) if p.strike is not none else "-" }}</td>
-          <td>{{ "%.2f"|format(p.ig_mid) if p.ig_mid is not none else "-" }}</td>
-          <td>{{ "%.2f"|format(p.bs_price) if p.bs_price is not none else "-" }}</td>
-          <td>{{ "%.3f"|format(p.ratio_ig_vs_bs) if p.ratio_ig_vs_bs is not none else "-" }}</td>
-          <td>{{ "%.2f"|format(p.ig_spread_pct) if p.ig_spread_pct is not none else "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ p.index_name or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ p.ticker or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ p.expiry_type or "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f"|format(p.strike) if p.strike is not none else "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(p.ig_mid) if p.ig_mid is not none else "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(p.bs_price) if p.bs_price is not none else "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.3f"|format(p.ratio_ig_vs_bs) if p.ratio_ig_vs_bs is not none else "-" }}</td>
+          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(p.ig_spread_pct) if p.ig_spread_pct is not none else "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="muted">No points for the selected filters.</p>
+    <p class="text-sm text-slate-500 mt-3">No points for the selected filters.</p>
   {% endif %}
 {% else %}
-  <p class="muted">No calibration runs available yet.</p>
+  <p class="text-sm text-slate-500">No calibration runs available yet.</p>
 {% endif %}

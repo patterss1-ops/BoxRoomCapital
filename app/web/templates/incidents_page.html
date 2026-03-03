@@ -1,24 +1,18 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="section-head">
-    <h2>Incidents & Jobs</h2>
-    <p>Single triage surface for failures, retries, event stream, and job diagnostics.</p>
-  </div>
-</section>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 
-<section class="grid-2">
-  <div id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-  <div id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Incidents + Events — 2 column -->
+  <div class="md:col-span-6" id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
 
-<section class="grid-2">
-  <div id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-  <div id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
-</section>
+  <!-- Jobs + Job Detail — 2 column -->
+  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
 
-<section class="grid-2">
-  <div id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div id="log-panel" hx-get="/fragments/log-tail" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Control Actions + Log Tail — 2 column -->
+  <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="log-panel" hx-get="/fragments/log-tail" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+
+</div>
 {% endblock %}

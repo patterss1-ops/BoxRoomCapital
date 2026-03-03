@@ -63,16 +63,70 @@ Defines file-scope locks for parallel execution.
 | G-000 | codex | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `ops/collab/mailbox/inbox/**`, `ops/collab/HANDOFFS/**` | none | n/a | released | 2026-03-02T17:42:23Z |
 | G-001 | codex | exclusive | `data/trade_db.py` (execution telemetry tables only), `execution/dispatcher.py`, `execution/reconciler.py`, `data/order_intent_store.py`, `tests/test_dispatcher.py`, `tests/test_reconciler.py`, `tests/test_order_intent_lifecycle.py` | G-002 | G-001 then G-002 | released | 2026-03-02T19:30:00Z |
 | G-002 | claude | shared | `fund/execution_quality.py`, `app/api/server.py` (execution quality endpoints only), `app/web/templates/_execution_quality.html`, `tests/test_execution_quality.py`, `tests/test_api_execution_quality.py` | G-001, G-004 | G-001 then G-002 then G-004 | released | 2026-03-02T19:30:00Z |
-| G-003 | claude | exclusive | `intelligence/ai_panel/**`, `app/signal/ai_contracts.py`, `tests/test_ai_panel_*.py` | G-004 | G-003 then G-004 | unclaimed | 2026-03-02T17:42:23Z |
-| G-004 | codex | shared | `app/signal/ai_confidence.py`, `execution/policy/**ai**`, `app/engine/orchestrator.py`, `tests/test_ai_confidence.py`, `tests/test_orchestrator.py` | G-002, G-003 | G-002/G-003 then G-004 | unclaimed | 2026-03-02T17:42:23Z |
+| G-003 | claude | exclusive | `intelligence/ai_panel/**`, `app/signal/ai_contracts.py`, `tests/test_ai_panel_*.py` | G-004 | G-003 then G-004 | claimed | 2026-03-02T23:00:00Z |
+| G-004 | codex | shared | `app/signal/ai_confidence.py`, `execution/policy/**ai**`, `app/engine/orchestrator.py`, `tests/test_ai_confidence.py`, `tests/test_orchestrator.py` | G-002, G-003 | G-002/G-003 then G-004 | released | 2026-03-03T11:03:31Z |
 | G-005 | claude | shared | `tests/test_phase_g_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | G-004 | G-004 then G-005 | unclaimed | 2026-03-02T17:42:23Z |
+| H-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `ops/collab/mailbox/inbox/**`, `ops/collab/HANDOFFS/**` | none | n/a | released | 2026-03-03T13:20:00Z |
+| H-001 | claude | exclusive | `fund/promotion_gate.py`, `execution/dispatcher.py`, `app/engine/orchestrator.py`, `tests/test_promotion_enforcement.py` | H-004 | H-001 before H-007 | claimed | 2026-03-03T13:25:00Z |
+| H-002 | codex | exclusive | `portfolio/rebalance.py`, `app/engine/scheduler.py` (rebalance hooks only), `tests/test_rebalance.py` | H-005 | H-002 before H-005 | claimed | 2026-03-03T11:52:54Z |
+| H-003 | codex | exclusive | `app/metrics.py`, `app/api/server.py` (metrics/health endpoints only), `tests/test_metrics.py` | H-006 | H-003 before H-006 | unclaimed | 2026-03-03T13:20:00Z |
+| H-004 | claude | exclusive | `Dockerfile`, `docker-compose.yml`, `.env.example`, `tests/test_docker_build.py` | H-001 | H-000 then H-004 | unclaimed | 2026-03-03T13:20:00Z |
+| H-005 | codex | exclusive | `fund/eod_reconciliation.py`, `fund/pnl_attribution.py`, `tests/test_eod_reconciliation.py` | H-002 | H-002 then H-005 | unclaimed | 2026-03-03T13:20:00Z |
+| H-006 | claude | exclusive | `broker/circuit_breaker.py`, `execution/dispatcher.py` (retry/circuit path only), `tests/test_circuit_breaker.py` | H-003 | H-003 then H-006 | unclaimed | 2026-03-03T13:20:00Z |
+| H-007 | claude | shared | `tests/test_phase_h_e2e.py`, `ops/collab/release-checks/signal_engine_checks.sh`, `ops/collab/HANDOFFS/**` | H-001, H-002, H-003, H-004, H-005, H-006 | H-001..H-006 then H-007 | unclaimed | 2026-03-03T13:20:00Z |
 | C-005 | tbd | emergency | `tbd` | none | n/a | unclaimed | 2026-02-28T20:36:00Z |
+| I-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md` | none | n/a | released | 2026-03-03T15:20:00Z |
+| I-001 | claude | exclusive | `app/notifications.py` (alert hooks only), `app/alert_router.py`, `tests/test_alert_router.py` | I-003 | I-001 before I-007 | claimed | 2026-03-03T15:20:00Z |
+| I-002 | codex | exclusive | `risk/position_sizer.py`, `risk/limits_engine.py`, `tests/test_position_sizer.py` | I-004 | I-002 before I-007 | claimed | 2026-03-03T13:20:09Z |
+| I-003 | claude | exclusive | `risk/drawdown_breaker.py`, `tests/test_drawdown_breaker.py` | I-001 | I-003 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-004 | codex | exclusive | `execution/oms.py`, `execution/order_lifecycle.py`, `tests/test_oms.py` | I-002 | I-004 before I-007 | claimed | 2026-03-03T13:28:00Z |
+| I-005 | codex | exclusive | `data/market_data_monitor.py`, `data/provider.py` (health hooks only), `tests/test_market_data_monitor.py` | I-004 | I-005 before I-007 | claimed | 2026-03-03T13:28:00Z |
+| I-006 | claude | exclusive | `analytics/decay_detector.py`, `tests/test_decay_detector.py` | I-003 | I-006 before I-007 | unclaimed | 2026-03-03T15:20:00Z |
+| I-007 | claude | shared | `tests/test_phase_i_e2e.py`, `ops/collab/HANDOFFS/**` | I-001..I-006 | I-001..I-006 then I-007 | unclaimed | 2026-03-03T15:20:00Z |
 
 ## Claim protocol
 1. Update queue row to `IN_PROGRESS`.
 2. Set lock row `claim_status=claimed` and `claimed_utc`.
 3. Create branch matching ticket naming convention.
 4. Start edits only within claimed scope.
+
+| L-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md` | none | n/a | released | 2026-03-03T17:05:00Z |
+| L-001 | claude | exclusive | `data/pipeline_orchestrator.py`, `tests/test_pipeline_orchestrator.py` | none | L-001 before L-007 | claimed | 2026-03-03T17:06:00Z |
+| L-002 | codex | exclusive | `data/market_calendar.py`, `tests/test_market_calendar.py` | none | L-002 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
+| L-003 | claude | exclusive | `data/signal_store.py`, `tests/test_signal_store.py` | none | L-003 before L-007 | claimed | 2026-03-03T17:10:00Z |
+| L-004 | codex | exclusive | `analytics/correlation_monitor.py`, `tests/test_correlation_monitor.py` | none | L-004 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
+| L-005 | claude | exclusive | `app/notification_templates.py`, `tests/test_notification_templates.py` | none | L-005 before L-007 | claimed | 2026-03-03T17:14:00Z |
+| L-006 | codex | exclusive | `ops/metrics_collector.py`, `tests/test_metrics_collector.py` | none | L-006 before L-007 | unclaimed | 2026-03-03T17:05:00Z |
+| L-007 | claude | shared | `tests/test_phase_l_e2e.py` | L-001..L-006 | L-001..L-006 then L-007 | unclaimed | 2026-03-03T17:05:00Z |
+
+| M-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md` | none | n/a | released | 2026-03-03T17:26:00Z |
+| M-001 | claude | exclusive | `execution/algo_orders.py`, `tests/test_algo_orders.py` | none | M-001 before M-007 | claimed | 2026-03-03T17:26:00Z |
+| M-002 | codex | exclusive | `intelligence/feature_store.py`, `tests/test_feature_store.py` | none | M-002 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-003 | claude | exclusive | `risk/adaptive_sizer.py`, `tests/test_adaptive_sizer.py` | none | M-003 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-004 | codex | exclusive | `execution/exchange_router.py`, `tests/test_exchange_router.py` | none | M-004 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-005 | claude | exclusive | `analytics/anomaly_detector.py`, `tests/test_anomaly_detector.py` | none | M-005 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-006 | codex | exclusive | `risk/compliance_engine.py`, `tests/test_compliance_engine.py` | none | M-006 before M-007 | unclaimed | 2026-03-03T17:26:00Z |
+| M-007 | claude | shared | `tests/test_phase_m_e2e.py` | M-001..M-006 | M-001..M-006 then M-007 | unclaimed | 2026-03-03T17:26:00Z |
+
+| N-000 | claude | exclusive | `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md`, `ops/collab/DECISIONS.md`, `app/web/DESIGN_TOKENS.md` | none | n/a | released | 2026-03-03T18:00:00Z |
+| N-001 | claude | exclusive | `app/web/templates/base.html`, `app/web/templates/overview.html`, `app/api/server.py` (equity-curve endpoint only) | N-006 | N-001 before N-002..N-005 | claimed | 2026-03-03T18:00:00Z |
+| N-002 | codex | exclusive | `app/web/templates/_top_strip.html`, `app/web/templates/_status.html`, `app/web/templates/_risk_briefing.html` | none | N-001 then N-002 | unclaimed | 2026-03-03T18:00:00Z |
+| N-003 | codex | exclusive | `app/web/templates/_events.html`, `app/web/templates/_incidents.html`, `app/web/templates/_order_actions.html`, `app/web/templates/_control_actions.html` | none | N-001 then N-003 | unclaimed | 2026-03-03T18:00:00Z |
+| N-004 | codex | exclusive | `app/web/templates/_jobs.html`, `app/web/templates/_job_detail.html`, `app/web/templates/_reconcile_report.html`, `app/web/templates/_log_tail.html` | none | N-001 then N-004 | unclaimed | 2026-03-03T18:00:00Z |
+| N-005 | codex | exclusive | `app/web/templates/_ledger_snapshot.html`, `app/web/templates/_broker_health.html`, `app/web/templates/_intent_audit.html`, `app/web/templates/_research.html`, `app/web/templates/_promotion_gate.html`, `app/web/templates/_calibration_run_detail.html`, `app/web/templates/_signal_engine.html`, `app/web/templates/_execution_quality.html` | none | N-001 then N-005 | unclaimed | 2026-03-03T18:00:00Z |
+| N-006 | claude | exclusive | `app/web/templates/trading.html`, `app/web/templates/research_page.html`, `app/web/templates/incidents_page.html`, `app/web/templates/settings_page.html` | N-001 | N-001 then N-006 | unclaimed | 2026-03-03T18:00:00Z |
+| N-007 | claude | shared | `tests/test_phase_n_ui.py`, `app/web/static/styles.css` | N-002..N-006 | N-002..N-006 then N-007 | unclaimed | 2026-03-03T18:00:00Z |
+
+| O-000 | claude | exclusive | `ops/collab/DECISIONS.md`, `ops/collab/TASK_QUEUE.md`, `ops/collab/OWNERSHIP_MAP.md` | none | n/a | released | 2026-03-03T21:00:00Z |
+| O-001 | claude | exclusive | `seed_demo_data.py` | none | O-001 before O-009 | claimed | 2026-03-03T21:00:00Z |
+| O-002 | claude | exclusive | `app/api/server.py` (webhook handler only) | O-004 | O-004 then O-002 | unclaimed | 2026-03-03T21:00:00Z |
+| O-003 | codex | exclusive | `app/engine/pipeline.py`, `config.py` (strategy slots only) | none | O-003 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-004 | claude | exclusive | `data/order_intent_store.py` (notional fallback only) | O-002 | O-004 before O-002 | unclaimed | 2026-03-03T21:00:00Z |
+| O-005 | codex | exclusive | `app/api/server.py` (analytics endpoints only), new fragment template | none | O-005 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-006 | claude | exclusive | `fund/nav.py` (sleeve P&L only) | none | O-006 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-007 | codex | exclusive | `config.py` (validation/hardening only), `.env.example` | none | O-007 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-008 | claude | exclusive | `app/api/server.py` (backtest endpoints only), `app/web/templates/_backtest.html`, `app/web/templates/research_page.html` | none | O-008 before O-009 | unclaimed | 2026-03-03T21:00:00Z |
+| O-009 | claude | shared | `tests/test_phase_o.py` | O-001..O-008 | O-001..O-008 then O-009 | unclaimed | 2026-03-03T21:00:00Z |
 
 ## Conflict protocol
 1. Stop editing immediately.

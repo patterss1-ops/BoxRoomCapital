@@ -1,8 +1,11 @@
-<section class="card">
-  <h2>Bot Log Tail</h2>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Bot Log Tail</h2>
+    <p class="text-slate-500 text-sm">Recent control-plane log lines.</p>
+  </div>
   {% if log_text %}
-    <pre class="log-tail">{{ log_text }}</pre>
+    <pre class="bg-slate-950 text-slate-400 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ log_text }}</pre>
   {% else %}
-    <p class="muted">No bot log output yet.</p>
+    <p class="text-sm text-slate-500">No bot log output yet.</p>
   {% endif %}
 </section>

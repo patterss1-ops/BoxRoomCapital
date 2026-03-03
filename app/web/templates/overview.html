@@ -1,82 +1,159 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="hero-grid">
-  <article class="kpi-card">
-    <p class="kpi-label">Engine</p>
-    <p class="kpi-value {% if status.running %}up{% else %}down{% endif %}">{{ "RUNNING" if status.running else "STOPPED" }}</p>
-    <p class="kpi-foot">Mode: {{ status.mode }}{% if status.paused %} (paused){% endif %}</p>
-  </article>
-  <article class="kpi-card">
-    <p class="kpi-label">Kill Switch</p>
-    <p class="kpi-value {% if status.kill_switch_active %}down{% else %}up{% endif %}">{{ "ON" if status.kill_switch_active else "OFF" }}</p>
-    <p class="kpi-foot">Throttle: {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</p>
-  </article>
-  <article class="kpi-card">
-    <p class="kpi-label">Open Spreads</p>
-    <p class="kpi-value">{{ status.open_spreads or 0 }}</p>
-    <p class="kpi-foot">Cooldowns: {{ status.cooldowns_count or 0 }}</p>
-  </article>
-  <article class="kpi-card">
-    <p class="kpi-label">Total P&L</p>
-    <p class="kpi-value">GBP {{ "%.2f"|format(summary.total_pnl or 0) }}</p>
-    <p class="kpi-foot">Today: GBP {{ "%.2f"|format(summary.today_pnl or 0) }}</p>
-  </article>
-</section>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 
-<section class="card">
-  <div class="section-head">
-    <h2>Quick Actions</h2>
-    <p>Core controls in one place. Advanced controls live on Trading.</p>
+  <!-- System Status & Health — col-span-4 -->
+  <div class="md:col-span-4 space-y-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <p class="text-slate-500 text-xs uppercase tracking-wide">Engine</p>
+      <p class="text-2xl font-bold mt-1 {% if status.running %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "RUNNING" if status.running else "STOPPED" }}</p>
+      <p class="text-slate-500 text-sm mt-1">Mode: {{ status.mode }}{% if status.paused %} (paused){% endif %}</p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <p class="text-slate-500 text-xs uppercase tracking-wide">Kill Switch</p>
+      <p class="text-2xl font-bold mt-1 {% if status.kill_switch_active %}text-red-500{% else %}text-emerald-400{% endif %}">{{ "ON" if status.kill_switch_active else "OFF" }}</p>
+      <p class="text-slate-500 text-sm mt-1">Throttle: {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <p class="text-slate-500 text-xs uppercase tracking-wide">Open Spreads</p>
+      <p class="text-2xl font-bold mt-1 text-white">{{ status.open_spreads or 0 }}</p>
+      <p class="text-slate-500 text-sm mt-1">Cooldowns: {{ status.cooldowns_count or 0 }}</p>
+    </div>
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <p class="text-slate-500 text-xs uppercase tracking-wide">Total P&L</p>
+      <p class="text-2xl font-bold mt-1 {% if (summary.total_pnl or 0) >= 0 %}text-emerald-400{% else %}text-red-500{% endif %}">GBP {{ "%.2f"|format(summary.total_pnl or 0) }}</p>
+      <p class="text-slate-500 text-sm mt-1">Today: GBP {{ "%.2f"|format(summary.today_pnl or 0) }}</p>
+    </div>
   </div>
-  <div class="action-row">
-    <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
-      <input type="hidden" name="mode" value="shadow" />
-      <button type="submit" class="btn">Start Shadow</button>
-    </form>
-    <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML">
-      <input type="hidden" name="mode" value="live" />
-      <button type="submit" class="btn">Start Live</button>
-    </form>
-    <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?">
-      <button type="submit" class="btn danger">Stop</button>
-    </form>
-    <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn secondary">Pause</button>
-    </form>
-    <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn secondary">Resume</button>
-    </form>
-    <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML">
-      <input type="hidden" name="mode" value="shadow" />
-      <button type="submit" class="btn ghost">Run Scan</button>
-    </form>
-    <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML">
-      <button type="submit" class="btn ghost">Reconcile</button>
-    </form>
+
+  <!-- Portfolio / Equity Chart — col-span-8 -->
+  <div class="md:col-span-8">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg h-full">
+      <div class="flex justify-between items-baseline mb-3">
+        <h2 class="text-lg font-semibold text-slate-200">Portfolio Equity</h2>
+        <p class="text-slate-500 text-sm">Auto-refreshes every 30s</p>
+      </div>
+      <div id="equity-chart" class="w-full" style="height: 340px;"></div>
+    </div>
   </div>
-</section>
 
-<section>
-  <div id="risk-briefing-panel" hx-get="/fragments/risk-briefing" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Risk Briefing — col-span-12 -->
+  <div class="md:col-span-12">
+    <div id="risk-briefing-panel" hx-get="/fragments/risk-briefing" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  </div>
 
-<section class="grid-3">
-  <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-  <div id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Portfolio Analytics — col-span-12 -->
+  <div class="md:col-span-12">
+    <div id="portfolio-analytics-panel" hx-get="/fragments/portfolio-analytics" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>
+  </div>
 
-<section class="grid-2">
-  <div id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-  <div id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
-</section>
+  <!-- Quick Actions — col-span-12 -->
+  <div class="md:col-span-12">
+    <details class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <summary class="font-semibold text-slate-200 cursor-pointer">Quick Actions</summary>
+      <p class="text-slate-500 text-sm mt-1 mb-3">Core controls in one place. Advanced controls live on Trading.</p>
+      <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 mt-3">
+        <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <input type="hidden" name="mode" value="shadow" />
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors w-full text-sm">Start Shadow</button>
+        </form>
+        <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <input type="hidden" name="mode" value="live" />
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors w-full text-sm">Start Live</button>
+        </form>
+        <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-red-500 transition-colors w-full text-sm">Stop</button>
+        </form>
+        <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors w-full text-sm">Pause</button>
+        </form>
+        <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors w-full text-sm">Resume</button>
+        </form>
+        <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <input type="hidden" name="mode" value="shadow" />
+          <button type="submit" class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-4 py-1.5 rounded-lg border border-slate-700 transition-colors w-full text-sm">Run Scan</button>
+        </form>
+        <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-wrap gap-2 items-end">
+          <button type="submit" class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-4 py-1.5 rounded-lg border border-slate-700 transition-colors w-full text-sm">Reconcile</button>
+        </form>
+      </div>
+    </details>
+  </div>
 
-<section class="grid-2">
-  <div id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Status + Incidents + Events — 3 column -->
+  <div class="md:col-span-4" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-4" id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-4" id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
 
-<section>
-  <div id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Jobs + Job Detail -->
+  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
+
+  <!-- Broker Health + Intent Audit -->
+  <div class="md:col-span-6" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+
+  <!-- Ledger — full width -->
+  <div class="md:col-span-12" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+
+</div>
+
+<!-- Equity Chart Initialization -->
+<script>
+(function() {
+  var container = document.getElementById('equity-chart');
+  if (!container || typeof LightweightCharts === 'undefined') return;
+
+  var chart = LightweightCharts.createChart(container, {
+    layout: {
+      background: { color: '#1A1D27' },
+      textColor: '#94a3b8',
+    },
+    grid: {
+      vertLines: { color: '#1e293b' },
+      horzLines: { color: '#1e293b' },
+    },
+    rightPriceScale: {
+      borderColor: '#334155',
+    },
+    timeScale: {
+      borderColor: '#334155',
+      timeVisible: false,
+    },
+    crosshair: {
+      horzLine: { color: '#475569', labelBackgroundColor: '#334155' },
+      vertLine: { color: '#475569', labelBackgroundColor: '#334155' },
+    },
+  });
+
+  var areaSeries = chart.addAreaSeries({
+    topColor: 'rgba(59, 130, 246, 0.4)',
+    bottomColor: 'rgba(59, 130, 246, 0.0)',
+    lineColor: '#3b82f6',
+    lineWidth: 2,
+  });
+
+  function fetchEquity() {
+    fetch('/api/charts/equity-curve?days=90')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        if (data && data.length > 0) {
+          areaSeries.setData(data);
+          chart.timeScale().fitContent();
+        }
+      })
+      .catch(function() { /* silently handle — chart stays empty */ });
+  }
+
+  fetchEquity();
+  setInterval(fetchEquity, 30000);
+
+  // Resize observer
+  var ro = new ResizeObserver(function() {
+    chart.applyOptions({ width: container.clientWidth });
+  });
+  ro.observe(container);
+})();
+</script>
 {% endblock %}

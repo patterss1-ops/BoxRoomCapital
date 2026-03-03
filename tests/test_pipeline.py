@@ -25,10 +25,13 @@ from app.engine.pipeline import (
     _REQUIRED_FIELDS,
     build_strategy_slots,
     clear_registry,
+    dispatch_rebalance_check,
     dispatch_orchestration,
     get_registered_strategies,
     register_strategy_class,
 )
+from app.signal.ai_confidence import AIConfidenceGateConfig, ExecutionQualitySnapshot
+from app.signal.ai_contracts import AIPanelOpinion, PanelConsensus
 from execution.policy.capability_policy import StrategyRequirements
 from execution.signal_adapter import StrategySlotConfig
 from strategies.base import BaseStrategy, Signal, SignalType
@@ -595,7 +598,105 @@ class TestDispatchOrchestration:
             assert hasattr(result, "summary")
             # Verify slots were built from real config
             call_args = mock_orch.call_args
-            assert len(call_args.kwargs["slots"]) == 2  # gtaa + dual_momentum
+            assert len(call_args.kwargs["slots"]) >= 2
+            slot_ids = {s.config.strategy_id for s in call_args.kwargs["slots"]}
+            assert "gtaa_isa" in slot_ids
+            assert "dual_momentum_isa" in slot_ids
+
+    def test_ai_overrides_passed_through(self, db):
+        """Explicit AI consensus/quality/config are forwarded to orchestrator."""
+        mock_dp = MagicMock()
+        mock_dp.get_daily_bars.return_value = None
+        consensus = PanelConsensus(
+            ticker="SPY",
+            as_of="2026-03-03T00:00:00Z",
+            consensus_opinion=AIPanelOpinion.BUY,
+            consensus_confidence=0.8,
+            consensus_score=0.6,
+            agreement_ratio=0.75,
+            opinion_distribution={"buy": 3},
+            models_responded=3,
+            models_failed=0,
+            verdicts=(),
+            failed_models=(),
+            provenance_hash="abc123",
+        )
+        quality = ExecutionQualitySnapshot(
+            fill_rate_pct=90.0,
+            reject_rate_pct=5.0,
+            mean_slippage_bps=12.0,
+            sample_count=100,
+        )
+        gate_cfg = AIConfidenceGateConfig(min_calibrated_confidence=0.6)
+
+        with patch("app.engine.orchestrator.run_orchestration_cycle") as mock_orch:
+            from app.engine.orchestrator import OrchestrationResult
+            mock_orch.return_value = OrchestrationResult(run_id="test", run_at="now")
+
+            dispatch_orchestration(
+                window_name="test",
+                db_path=db,
+                dry_run=True,
+                slot_configs=[_make_slot_config()],
+                data_provider=mock_dp,
+                ai_consensus_by_ticker={"SPY": consensus},
+                ai_execution_quality=quality,
+                ai_gate_config=gate_cfg,
+            )
+
+            _, kwargs = mock_orch.call_args
+            assert kwargs["ai_consensus_by_ticker"]["SPY"] == consensus
+            assert kwargs["ai_execution_quality"] == quality
+            assert kwargs["ai_gate_config"] == gate_cfg
+
+    def test_ai_panel_enabled_builds_consensus_and_quality(self, db):
+        """When enabled, dispatch builds AI consensus + quality snapshot."""
+        mock_dp = MagicMock()
+        mock_dp.get_daily_bars.return_value = None
+        consensus = PanelConsensus(
+            ticker="SPY",
+            as_of="2026-03-03T00:00:00Z",
+            consensus_opinion=AIPanelOpinion.BUY,
+            consensus_confidence=0.8,
+            consensus_score=0.6,
+            agreement_ratio=0.75,
+            opinion_distribution={"buy": 3},
+            models_responded=3,
+            models_failed=0,
+            verdicts=(),
+            failed_models=(),
+            provenance_hash="abc123",
+        )
+        quality = ExecutionQualitySnapshot(
+            fill_rate_pct=88.0,
+            reject_rate_pct=7.0,
+            mean_slippage_bps=15.0,
+            sample_count=80,
+        )
+
+        with patch("app.engine.pipeline._collect_ai_panel_consensus") as mock_collect:
+            with patch("app.engine.pipeline._build_execution_quality_snapshot") as mock_quality:
+                with patch("app.engine.orchestrator.run_orchestration_cycle") as mock_orch:
+                    from app.engine.orchestrator import OrchestrationResult
+
+                    mock_collect.return_value = {"SPY": consensus}
+                    mock_quality.return_value = quality
+                    mock_orch.return_value = OrchestrationResult(run_id="test", run_at="now")
+
+                    dispatch_orchestration(
+                        window_name="test",
+                        db_path=db,
+                        dry_run=True,
+                        slot_configs=[_make_slot_config()],
+                        data_provider=mock_dp,
+                        ai_panel_enabled=True,
+                    )
+
+                    mock_collect.assert_called_once()
+                    mock_quality.assert_called_once()
+                    _, kwargs = mock_orch.call_args
+                    assert kwargs["ai_consensus_by_ticker"]["SPY"] == consensus
+                    assert kwargs["ai_execution_quality"] == quality
 
 
 # ─── 4. _get_fund_equity ────────────────────────────────────────────────
@@ -709,8 +810,8 @@ class TestConfigIntegration:
 
         import config
         slots = build_strategy_slots(config.STRATEGY_SLOTS)
-        # Should have 2 slots: gtaa_isa and dual_momentum_isa
-        assert len(slots) == 2
+        # Should include baseline IBKR slots plus optional IG slots
+        assert len(slots) >= 2
         ids = {s.config.strategy_id for s in slots}
         assert "gtaa_isa" in ids
         assert "dual_momentum_isa" in ids
@@ -822,3 +923,41 @@ class TestSchedulerWiringContract:
         status = scheduler.status()
         assert status["running"] is False
         assert status["dry_run"] is True
+
+
+class TestDispatchRebalanceCheck:
+    def test_dispatch_rebalance_check_returns_plan_payload(self, db):
+        fake_plan = MagicMock()
+        fake_plan.requires_rebalance = True
+        fake_plan.to_dict.return_value = {
+            "report_date": "2026-03-03",
+            "actions": [{"sleeve": "core", "action": "SELL"}],
+        }
+
+        with patch("portfolio.rebalance.run_rebalance_drift_check", return_value=fake_plan) as mock_run:
+            payload = dispatch_rebalance_check(
+                window_name="us_close_orchestration",
+                db_path=db,
+                drift_threshold_pct=4.0,
+                min_trade_notional=100.0,
+            )
+
+        mock_run.assert_called_once()
+        assert payload["window_name"] == "us_close_orchestration"
+        assert payload["requires_rebalance"] is True
+        assert payload["report_date"] == "2026-03-03"
+        assert payload["actions"][0]["action"] == "SELL"
+
+    def test_dispatch_rebalance_check_handles_errors(self, db):
+        with patch(
+            "portfolio.rebalance.run_rebalance_drift_check",
+            side_effect=RuntimeError("db unavailable"),
+        ):
+            payload = dispatch_rebalance_check(
+                window_name="us_close_orchestration",
+                db_path=db,
+            )
+
+        assert payload["window_name"] == "us_close_orchestration"
+        assert payload["requires_rebalance"] is False
+        assert "db unavailable" in payload["error"]

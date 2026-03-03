@@ -1,52 +1,52 @@
-<section class="card">
-  <div class="section-head">
-    <h2>Risk Briefing</h2>
-    <p>Fund-level risk snapshot and actionable alerts.</p>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Risk Briefing</h2>
+    <p class="text-slate-500 text-sm">Fund-level risk snapshot and actionable alerts.</p>
   </div>
 
   {% set state = (risk_briefing.state or "unavailable")|lower %}
-  <div class="badge-wrap" style="margin-bottom: 0.7rem;">
-    <span class="badge {{ 'ok' if state == 'ok' else ('running' if state == 'attention' else 'failed') }}">{{ state|upper }}</span>
-    <span class="muted">Generated: {{ risk_briefing.generated_at or '-' }}</span>
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if state == 'ok' %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif state == 'attention' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">{{ state|upper }}</span>
+    <span class="font-mono text-xs text-slate-500">Generated: {{ risk_briefing.generated_at or '-' }}</span>
   </div>
 
-  <table>
+  <table class="w-full text-sm text-left">
     <thead>
       <tr>
-        <th>Fund NAV</th>
-        <th>Day P&L</th>
-        <th>Drawdown</th>
-        <th>Gross Exposure</th>
-        <th>Net Exposure</th>
-        <th>Cash Buffer</th>
-        <th>Open Risk</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Fund NAV</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Day P&amp;L</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Drawdown</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Gross Exposure</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Net Exposure</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Cash Buffer</th>
+        <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Open Risk</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td>{{ "%.2f"|format(risk_briefing.summary.fund_nav) if risk_briefing.summary.fund_nav is not none else "-" }}</td>
-        <td>{{ "%.2f"|format(risk_briefing.summary.day_pnl) if risk_briefing.summary.day_pnl is not none else "-" }}</td>
-        <td>{{ "%.2f%%"|format(risk_briefing.summary.drawdown_pct) if risk_briefing.summary.drawdown_pct is not none else "-" }}</td>
-        <td>{{ "%.2f%%"|format(risk_briefing.summary.gross_exposure_pct) if risk_briefing.summary.gross_exposure_pct is not none else "-" }}</td>
-        <td>{{ "%.2f%%"|format(risk_briefing.summary.net_exposure_pct) if risk_briefing.summary.net_exposure_pct is not none else "-" }}</td>
-        <td>{{ "%.2f%%"|format(risk_briefing.summary.cash_buffer_pct) if risk_briefing.summary.cash_buffer_pct is not none else "-" }}</td>
-        <td>{{ "%.2f%%"|format(risk_briefing.summary.open_risk_pct) if risk_briefing.summary.open_risk_pct is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(risk_briefing.summary.fund_nav) if risk_briefing.summary.fund_nav is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(risk_briefing.summary.day_pnl) if risk_briefing.summary.day_pnl is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f%%"|format(risk_briefing.summary.drawdown_pct) if risk_briefing.summary.drawdown_pct is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f%%"|format(risk_briefing.summary.gross_exposure_pct) if risk_briefing.summary.gross_exposure_pct is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f%%"|format(risk_briefing.summary.net_exposure_pct) if risk_briefing.summary.net_exposure_pct is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f%%"|format(risk_briefing.summary.cash_buffer_pct) if risk_briefing.summary.cash_buffer_pct is not none else "-" }}</td>
+        <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f%%"|format(risk_briefing.summary.open_risk_pct) if risk_briefing.summary.open_risk_pct is not none else "-" }}</td>
       </tr>
     </tbody>
   </table>
 
   {% if risk_briefing.alerts %}
-    <h3 style="margin-top: 0.85rem;">Alerts</h3>
-    <ul class="events" style="max-height: 200px;">
+    <h3 class="text-slate-200 font-semibold mt-4 mb-2">Alerts</h3>
+    <ul class="space-y-0 max-h-[460px] overflow-auto">
       {% for alert in risk_briefing.alerts[:3] %}
-        <li>
-          <span class="badge {{ 'failed' if alert.severity == 'critical' else ('running' if alert.severity == 'warn' else 'ok') }}">{{ alert.severity|upper }}</span>
-          <span class="headline">{{ alert.message }}</span>
-          {% if alert.action %}<div class="detail" style="margin-left: 0;">Action: {{ alert.action }}</div>{% endif %}
+        <li class="border-b border-slate-800 py-2">
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if alert.severity == 'critical' %}bg-red-500/15 text-red-400 border-red-500/30{% elif alert.severity == 'warn' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% else %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% endif %}">{{ alert.severity|upper }}</span>
+          <span class="font-semibold text-slate-200 ml-2">{{ alert.message }}</span>
+          {% if alert.action %}<p class="mt-0.5 text-slate-500 text-sm">Action: {{ alert.action }}</p>{% endif %}
         </li>
       {% endfor %}
     </ul>
   {% else %}
-    <p class="muted" style="margin-top: 0.7rem;">No active risk alerts.</p>
+    <p class="text-sm text-slate-500 mt-3">No active risk alerts.</p>
   {% endif %}
 </section>

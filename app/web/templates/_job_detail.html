@@ -1,28 +1,34 @@
-<section class="card">
-  <h2>Research Job Output</h2>
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Research Job Output</h2>
+    <p class="text-slate-500 text-sm">Selected job payload, result, and errors.</p>
+  </div>
   {% if job %}
-    <div class="row"><span class="label">Job ID</span><span class="value code">{{ job.id[:8] }}</span></div>
-    <div class="row"><span class="label">Type</span><span class="value">{{ job.job_type }}</span></div>
-    <div class="row"><span class="label">Status</span><span class="value"><span class="badge {{ job.status }}">{{ job.status }}</span></span></div>
-    <div class="row"><span class="label">Updated</span><span class="value">{{ job.updated_at }}</span></div>
-    <div class="row"><span class="label">Detail</span><span class="value">{{ job.detail or "-" }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Job ID</span><span class="font-mono text-slate-300 text-xs">{{ job.id[:8] }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Type</span><span class="text-slate-300 text-sm">{{ job.job_type }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+      <span class="text-slate-500 text-sm">Status</span>
+      <span class="text-slate-300 text-sm"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if job.status in ['completed', 'ok', 'live'] %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif job.status in ['running', 'retrying', 'staged_live'] %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif job.status in ['failed', 'error', 'rejection'] %}bg-red-500/15 text-red-400 border-red-500/30{% elif job.status in ['queued', 'shadow'] %}bg-blue-500/15 text-blue-400 border-blue-500/30{% else %}bg-slate-500/15 text-slate-400 border-slate-500/30{% endif %}">{{ job.status }}</span></span>
+    </div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Updated</span><span class="font-mono text-slate-300 text-xs">{{ job.updated_at }}</span></div>
+    <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-slate-500 text-sm">Detail</span><span class="text-slate-300 text-sm">{{ job.detail or "-" }}</span></div>
 
-    <h3>Result</h3>
+    <h3 class="text-slate-200 font-semibold mt-4 mb-2">Result</h3>
     {% if parsed_result is mapping or parsed_result is sequence and parsed_result is not string %}
-      <pre class="json-view">{{ parsed_result | tojson(indent=2) }}</pre>
+      <pre class="bg-slate-950 text-slate-400 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ parsed_result | tojson(indent=2) }}</pre>
     {% elif parsed_result %}
-      <pre class="json-view">{{ parsed_result }}</pre>
+      <pre class="bg-slate-950 text-slate-400 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ parsed_result }}</pre>
     {% else %}
-      <p class="muted">No result payload.</p>
+      <p class="text-sm text-slate-500">No result payload.</p>
     {% endif %}
 
-    <h3>Error</h3>
+    <h3 class="text-slate-200 font-semibold mt-4 mb-2">Error</h3>
     {% if job.error %}
-      <pre class="json-view">{{ job.error }}</pre>
+      <pre class="bg-slate-950 text-slate-400 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ job.error }}</pre>
     {% else %}
-      <p class="muted">No error payload.</p>
+      <p class="text-sm text-slate-500">No error payload.</p>
     {% endif %}
   {% else %}
-    <p class="muted">No research job selected yet.</p>
+    <p class="text-sm text-slate-500">No research job selected yet.</p>
   {% endif %}
 </section>

@@ -1,28 +1,60 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="card">
-  <div class="section-head">
-    <h2>Settings & Runbook</h2>
-    <p>Operational references for local runtime control and health checks.</p>
-  </div>
-  <div class="row"><span class="label">Health Endpoint</span><span class="value code">/health</span></div>
-  <div class="row"><span class="label">Status API</span><span class="value code">/api/status</span></div>
-  <div class="row"><span class="label">Log Tail API</span><span class="value code">/api/log-tail</span></div>
-  <div class="row"><span class="label">Process Log</span><span class="value code">.runtime/control_plane.log</span></div>
-  <div class="row"><span class="label">Process PID</span><span class="value code">.runtime/control_plane.pid</span></div>
-  <div class="row"><span class="label">DB Path</span><span class="value code">trades.db</span></div>
-</section>
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 
-<section class="card">
-  <h2>Local Commands</h2>
-  <pre class="json-view">./start_control_plane.sh
+  <!-- Runbook Reference — col-span-6 -->
+  <div class="md:col-span-6">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <div class="flex justify-between items-baseline gap-4 mb-3">
+        <h2 class="text-lg font-semibold text-slate-200">Operational Reference</h2>
+        <p class="text-slate-500 text-sm">Runtime endpoints and paths</p>
+      </div>
+      <div class="space-y-0">
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+          <span class="text-slate-500 text-sm">Health Endpoint</span>
+          <span class="font-mono text-slate-300 text-sm">/health</span>
+        </div>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+          <span class="text-slate-500 text-sm">Status API</span>
+          <span class="font-mono text-slate-300 text-sm">/api/status</span>
+        </div>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+          <span class="text-slate-500 text-sm">Log Tail API</span>
+          <span class="font-mono text-slate-300 text-sm">/api/log-tail</span>
+        </div>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+          <span class="text-slate-500 text-sm">Process Log</span>
+          <span class="font-mono text-slate-300 text-sm">.runtime/control_plane.log</span>
+        </div>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
+          <span class="text-slate-500 text-sm">Process PID</span>
+          <span class="font-mono text-slate-300 text-sm">.runtime/control_plane.pid</span>
+        </div>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5">
+          <span class="text-slate-500 text-sm">DB Path</span>
+          <span class="font-mono text-slate-300 text-sm">trades.db</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Local Commands — col-span-6 -->
+  <div class="md:col-span-6">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <div class="flex justify-between items-baseline gap-4 mb-3">
+        <h2 class="text-lg font-semibold text-slate-200">Local Commands</h2>
+        <p class="text-slate-500 text-sm">Shell reference</p>
+      </div>
+      <div class="bg-slate-950 text-slate-400 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">./start_control_plane.sh
 ./stop_control_plane.sh
 python3 -m pytest -q tests
-python3 run_console.py</pre>
-</section>
+python3 run_console.py</div>
+    </div>
+  </div>
 
-<section class="grid-2">
-  <div id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-  <div id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-</section>
+  <!-- Status + Control Actions — 2 column -->
+  <div class="md:col-span-6" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+
+</div>
 {% endblock %}
