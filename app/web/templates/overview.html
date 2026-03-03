@@ -39,12 +39,12 @@
 
   <!-- Risk Briefing — col-span-12 -->
   <div class="md:col-span-12">
-    <div id="risk-briefing-panel" hx-get="/fragments/risk-briefing" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+    <div id="risk-briefing-panel" hx-get="/fragments/risk-briefing" hx-trigger="load delay:300ms, every 15s" hx-swap="innerHTML"></div>
   </div>
 
   <!-- Portfolio Analytics — col-span-12 -->
   <div class="md:col-span-12">
-    <div id="portfolio-analytics-panel" hx-get="/fragments/portfolio-analytics" hx-trigger="load, every 30s" hx-swap="innerHTML"></div>
+    <div id="portfolio-analytics-panel" hx-get="/fragments/portfolio-analytics" hx-trigger="load delay:600ms, every 30s" hx-swap="innerHTML"></div>
   </div>
 
   <!-- Quick Actions — col-span-12 -->
@@ -83,19 +83,19 @@
 
   <!-- Status + Incidents + Events — 3 column -->
   <div class="md:col-span-4" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-4" id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-4" id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-4" id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load delay:200ms, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-4" id="events-panel" hx-get="/fragments/events" hx-trigger="load delay:200ms, every 8s" hx-swap="innerHTML"></div>
 
   <!-- Jobs + Job Detail -->
-  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load delay:500ms, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load delay:500ms" hx-swap="innerHTML"></div>
 
   <!-- Broker Health + Intent Audit -->
-  <div class="md:col-span-6" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
 
   <!-- Ledger — full width -->
-  <div class="md:col-span-12" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-12" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load delay:1s, every 15s" hx-swap="innerHTML"></div>
 
 </div>
 

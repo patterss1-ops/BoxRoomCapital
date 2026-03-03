@@ -25,7 +25,7 @@ from data.order_intent_store import ensure_order_intent_schema
 
 STRATEGIES = ["GTAA", "DualMomentum", "IBS_SPY", "IBS_QQQ"]
 BROKERS = ["IBKR_ISA", "IBKR_TRADING", "CITYINDEX"]
-TICKERS = ["SPY", "QQQ", "IWM", "DIA", "EWU", "EWG", "EWJ", "IEF"]
+TICKERS = ["SPY", "QQQ", "IWM", "DIA", "EWU", "EWG", "EWJ", "IEF", "GLD", "TLT", "VGK", "XLE"]
 NOW = datetime.now()
 TODAY = date.today()
 
@@ -213,20 +213,34 @@ def seed_fund_daily_reports(conn):
 
 
 def seed_system_events(conn):
-    """20 bot events across last 7 days."""
+    """60 bot events across last 7 days."""
     categories = [
-        ("STARTUP", "Bot started successfully", "System initialized"),
-        ("SCAN", "Signal scan completed", "Scanned 22 markets"),
-        ("SIGNAL", "Entry signal detected", "IBS < 0.15 on SPY"),
-        ("ORDER", "Order filled", "BUY 10 SPY @ 530.25"),
-        ("REJECTION", "Order rejected by broker", "Insufficient margin"),
-        ("HEARTBEAT", "System heartbeat", "All systems operational"),
-        ("MARKET", "Market opened", "US market session started"),
-        ("POSITION", "Position updated", "SPY unrealised +$150"),
-        ("ERROR", "Data feed timeout", "Yahoo Finance delayed >30s"),
-        ("SNAPSHOT", "Daily snapshot saved", "End-of-day snapshot persisted"),
+        ("STARTUP", "Bot started successfully", "System initialized in shadow mode"),
+        ("STARTUP", "Bot resumed after restart", "Recovered 3 open positions"),
+        ("SCAN", "Signal scan completed", "Scanned 22 markets, 3 candidates found"),
+        ("SCAN", "Full market sweep done", "14 sectors analysed, 5 signals above threshold"),
+        ("SIGNAL", "Entry signal detected", "IBS < 0.15 on SPY — strong mean-reversion setup"),
+        ("SIGNAL", "Exit signal triggered", "QQQ momentum reversal detected"),
+        ("SIGNAL", "Multi-factor alert", "DIA: IBS=0.08, RSI=22, MACD bearish crossover"),
+        ("ORDER", "Order filled", "BUY 10 SPY @ 530.25 via IBKR_ISA"),
+        ("ORDER", "Limit order placed", "SELL 5 QQQ @ 485.00 GTC"),
+        ("ORDER", "Spread opened", "Bull put spread SPY 520/510 @ $2.80 credit"),
+        ("REJECTION", "Order rejected by broker", "Insufficient margin for 15 IWM"),
+        ("REJECTION", "Risk check failed", "Position size exceeds 20% portfolio limit"),
+        ("HEARTBEAT", "System heartbeat", "All systems operational — latency 45ms"),
+        ("HEARTBEAT", "Broker connectivity OK", "IBKR: 32ms, CityIndex: 78ms"),
+        ("MARKET", "Market opened", "US equity session started 09:30 ET"),
+        ("MARKET", "Market closed", "US equity session ended 16:00 ET"),
+        ("POSITION", "Position updated", "SPY unrealised +$150.30 (+2.8%)"),
+        ("POSITION", "Stop adjusted", "IWM trailing stop moved to $208.50"),
+        ("ERROR", "Data feed timeout", "Yahoo Finance delayed >30s, retrying"),
+        ("ERROR", "API rate limited", "IG Markets: 429 Too Many Requests"),
+        ("SNAPSHOT", "Daily snapshot saved", "End-of-day snapshot — NAV $102,450"),
+        ("SNAPSHOT", "Risk snapshot taken", "VaR: 2.1%, heat: 35%, margin: 42%"),
+        ("RECONCILE", "Reconciliation clean", "All 8 positions matched across brokers"),
+        ("RECONCILE", "Mismatch detected", "SPY qty: expected 10, broker shows 9"),
     ]
-    for i in range(20):
+    for i in range(60):
         cat, headline, detail = random.choice(categories)
         ts = NOW - timedelta(days=random.randint(0, 6), hours=random.randint(0, 23),
                              minutes=random.randint(0, 59))
@@ -245,13 +259,20 @@ def seed_system_events(conn):
 
 
 def seed_incidents(conn):
-    """5 control_actions as incidents (2 open, 3 resolved)."""
+    """12 control_actions as incidents (4 open, 8 resolved)."""
     incidents = [
         ("kill_switch", "enabled", "Drawdown exceeded 5%", "system", NOW - timedelta(hours=2)),
-        ("risk_throttle", "50%", "High volatility detected", "operator", NOW - timedelta(hours=6)),
+        ("risk_throttle", "50%", "High volatility detected — VIX > 30", "operator", NOW - timedelta(hours=6)),
+        ("cooldown", "600", "SPY: Post-rejection cooldown", "system", NOW - timedelta(hours=8)),
+        ("risk_throttle", "75%", "Earnings week throttle", "operator", NOW - timedelta(hours=12)),
         ("kill_switch", "disabled", "Manual clear after review", "operator", NOW - timedelta(days=1)),
         ("cooldown", "1800", "Post-loss cooldown period", "system", NOW - timedelta(days=2)),
         ("recovery", "started", "Partial fill recovery initiated", "dispatcher", NOW - timedelta(days=3)),
+        ("kill_switch", "enabled", "Circuit breaker triggered", "system", NOW - timedelta(days=3, hours=6)),
+        ("kill_switch", "disabled", "All clear after market stabilised", "operator", NOW - timedelta(days=3, hours=2)),
+        ("risk_throttle", "100%", "Risk throttle restored to full", "operator", NOW - timedelta(days=4)),
+        ("cooldown", "3600", "QQQ: Gap down cooldown", "system", NOW - timedelta(days=5)),
+        ("recovery", "completed", "All partial fills reconciled", "dispatcher", NOW - timedelta(days=6)),
     ]
     for action, value, reason, actor, ts in incidents:
         conn.execute(
@@ -300,10 +321,10 @@ def seed_broker_health(conn):
 # ─── Tier 2: FK-dependent tables ─────────────────────────────────────────────
 
 def seed_trades(conn):
-    """30 trades across 4 strategies with realistic P&L."""
+    """80+ trades across 4 strategies with realistic P&L."""
     trade_count = 0
     for strat in STRATEGIES:
-        for _ in range(7 if strat.startswith("IBS") else 8):
+        for _ in range(18 if strat.startswith("IBS") else 22):
             ticker = random.choice(TICKERS[:4] if strat.startswith("IBS") else TICKERS[4:])
             direction = "BUY"
             is_win = random.random() < 0.58
@@ -360,7 +381,7 @@ def seed_daily_snapshots(conn):
 
 
 def seed_positions(conn):
-    """8 current open positions."""
+    """12 current open positions."""
     positions_data = [
         ("SPY", "GTAA", "long", 10.0, 525.50),
         ("QQQ", "IBS_QQQ", "long", 8.0, 478.20),
@@ -370,6 +391,10 @@ def seed_positions(conn):
         ("EWG", "DualMomentum", "short", 12.0, 28.50),
         ("EWJ", "GTAA", "long", 20.0, 67.40),
         ("IEF", "DualMomentum", "long", 30.0, 95.20),
+        ("GLD", "GTAA", "long", 15.0, 188.30),
+        ("TLT", "DualMomentum", "long", 10.0, 92.70),
+        ("VGK", "GTAA", "long", 18.0, 62.40),
+        ("XLE", "IBS_SPY", "short", 8.0, 85.10),
     ]
     for ticker, strat, direction, size, price in positions_data:
         deal_id = f"OPEN-{_uid()[:8]}"
@@ -386,8 +411,8 @@ def seed_positions(conn):
 
 
 def seed_order_intents(conn):
-    """15 order intents with fills + 20 audit entries."""
-    statuses = ["COMPLETED"] * 8 + ["FAILED"] * 3 + ["QUEUED"] * 2 + ["RUNNING"] * 2
+    """35 order intents with fills + audit entries."""
+    statuses = (["COMPLETED"] * 18 + ["FAILED"] * 7 + ["QUEUED"] * 5 + ["RUNNING"] * 5)
 
     for i, status in enumerate(statuses):
         intent_id = _uid()
@@ -466,9 +491,14 @@ def seed_order_intents(conn):
 
 
 def seed_research_results(conn):
-    """6 research event entries."""
-    event_types = ["option_discovery", "calibration", "signal_scan",
-                   "earnings_event", "insider_trade", "news_sentiment"]
+    """15 research event entries."""
+    event_types = [
+        "option_discovery", "calibration", "signal_scan",
+        "earnings_event", "insider_trade", "news_sentiment",
+        "option_discovery", "signal_scan", "calibration",
+        "vol_surface_update", "sector_rotation", "correlation_break",
+        "earnings_event", "macro_indicator", "option_discovery",
+    ]
     for i, etype in enumerate(event_types):
         eid = _uid()
         ts = NOW - timedelta(days=i)
@@ -489,8 +519,8 @@ def seed_research_results(conn):
 
 
 def seed_calibration_runs(conn):
-    """3 calibration runs with results."""
-    for i in range(3):
+    """6 calibration runs with results."""
+    for i in range(6):
         run_id = _uid()
         ts = NOW - timedelta(days=i * 3)
         status = "completed" if i < 2 else "running"
@@ -524,8 +554,8 @@ def seed_calibration_runs(conn):
 
 
 def seed_signal_engine_runs(conn):
-    """5 signal engine snapshots via strategy_state."""
-    for i in range(5):
+    """10 signal engine snapshots via strategy_state."""
+    for i in range(10):
         ts = NOW - timedelta(hours=i * 6)
         run_data = {
             "run_id": _uid(),
@@ -542,21 +572,44 @@ def seed_signal_engine_runs(conn):
 
 
 def seed_jobs(conn):
-    """8 jobs (3 running, 2 completed, 3 failed)."""
+    """20 jobs (4 running, 8 completed, 5 failed, 3 queued)."""
     job_configs = [
-        ("signal_scan", "running", "Scanning 22 markets"),
-        ("discovery", "running", "Discovering option contracts"),
-        ("calibration", "running", "Calibrating US 500"),
-        ("signal_scan", "completed", "Found 3 candidates"),
-        ("eod_reconcile", "completed", "All positions reconciled"),
-        ("signal_scan", "failed", "Yahoo Finance timeout"),
-        ("calibration", "failed", "IG API rate limited"),
-        ("discovery", "failed", "Network error"),
+        ("signal_scan", "running", "Scanning 22 markets for IBS signals"),
+        ("discovery", "running", "Discovering option contracts on US 500"),
+        ("calibration", "running", "Calibrating IG vs Black-Scholes pricing"),
+        ("backtest", "running", "Backtesting GTAA strategy 2024-2025"),
+        ("signal_scan", "completed", "Found 3 candidates: SPY, QQQ, IWM"),
+        ("eod_reconcile", "completed", "All 8 positions reconciled across 3 brokers"),
+        ("signal_scan", "completed", "Full sweep done — 14 sectors, 5 signals"),
+        ("discovery", "completed", "45 option contracts catalogued"),
+        ("calibration", "completed", "US 500: ratio 1.12, 28 points sampled"),
+        ("backtest", "completed", "IBS_SPY: Sharpe 1.4, Return 18.2%, MaxDD -8.1%"),
+        ("eod_reconcile", "completed", "Clean reconcile — no mismatches"),
+        ("snapshot", "completed", "Daily NAV snapshot saved — $102,450"),
+        ("signal_scan", "failed", "Yahoo Finance timeout after 30s"),
+        ("calibration", "failed", "IG API rate limited (429)"),
+        ("discovery", "failed", "Network error connecting to IG Markets"),
+        ("backtest", "failed", "Insufficient data for date range"),
+        ("signal_scan", "failed", "Data feed returned stale prices"),
+        ("signal_scan", "queued", "Pending scheduled scan"),
+        ("discovery", "queued", "Queued option chain refresh"),
+        ("calibration", "queued", "Queued EU 50 calibration"),
     ]
     for i, (jtype, status, detail) in enumerate(job_configs):
         jid = _uid()
         ts = NOW - timedelta(hours=i * 3)
-        result = json.dumps({"candidates": 3}) if status == "completed" else None
+        if status == "completed" and jtype == "backtest":
+            result = json.dumps({
+                "total_return_pct": round(random.gauss(12, 8), 1),
+                "sharpe_ratio": round(random.uniform(0.5, 2.0), 2),
+                "max_drawdown_pct": round(random.uniform(-15, -3), 1),
+                "total_trades": random.randint(40, 200),
+                "win_rate": round(random.uniform(48, 68), 1),
+            })
+        elif status == "completed":
+            result = json.dumps({"candidates": random.randint(2, 8)})
+        else:
+            result = None
         error = detail if status == "failed" else None
         conn.execute(
             """INSERT INTO jobs (id, created_at, updated_at, job_type, status, mode, detail, result, error)
@@ -585,12 +638,16 @@ def seed_ledger_entries(conn):
 
 
 def seed_promotion_log(conn):
-    """4 strategy promotion entries."""
+    """8 strategy promotion entries."""
     promotions = [
-        ("GTAA", "shadow", "staged_live", "operator", NOW - timedelta(days=10)),
-        ("GTAA", "staged_live", "live", "operator", NOW - timedelta(days=5)),
-        ("DualMomentum", "shadow", "staged_live", "operator", NOW - timedelta(days=7)),
-        ("IBS_SPY", "shadow", "staged_live", "system", NOW - timedelta(days=3)),
+        ("GTAA", "shadow", "staged_live", "operator", NOW - timedelta(days=30)),
+        ("GTAA", "staged_live", "live", "operator", NOW - timedelta(days=20)),
+        ("DualMomentum", "shadow", "staged_live", "operator", NOW - timedelta(days=25)),
+        ("DualMomentum", "staged_live", "live", "operator", NOW - timedelta(days=15)),
+        ("IBS_SPY", "shadow", "staged_live", "system", NOW - timedelta(days=12)),
+        ("IBS_SPY", "staged_live", "live", "operator", NOW - timedelta(days=5)),
+        ("IBS_QQQ", "shadow", "staged_live", "system", NOW - timedelta(days=7)),
+        ("IBS_QQQ", "staged_live", "live", "operator", NOW - timedelta(days=2)),
     ]
     for strat, from_s, to_s, actor, ts in promotions:
         conn.execute(
@@ -603,8 +660,8 @@ def seed_promotion_log(conn):
 
 
 def seed_execution_quality(conn):
-    """10 extra execution quality metric records."""
-    for i in range(10):
+    """25 extra execution quality metric records."""
+    for i in range(25):
         ts = NOW - timedelta(days=i)
         strat = random.choice(STRATEGIES)
         ticker = random.choice(TICKERS)
@@ -671,8 +728,8 @@ def seed_sleeve_reports(conn):
 
 
 def seed_order_actions(conn):
-    """8 order_actions entries."""
-    statuses = ["completed"] * 3 + ["failed"] * 2 + ["queued"] * 2 + ["running"] * 1
+    """18 order_actions entries."""
+    statuses = (["completed"] * 7 + ["failed"] * 4 + ["queued"] * 4 + ["running"] * 3)
     for i, status in enumerate(statuses):
         ts = NOW - timedelta(hours=i * 4)
         conn.execute(

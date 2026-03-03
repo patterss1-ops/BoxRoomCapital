@@ -401,7 +401,11 @@ def create_app() -> FastAPI:
     def start_bot(mode: str = Form(default=config.TRADING_MODE)):
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="start_bot", status="running", mode=mode)
-        result = control.start(mode=mode)
+        try:
+            result = control.start(mode=mode)
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Start failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -412,7 +416,11 @@ def create_app() -> FastAPI:
     def stop_bot():
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="stop_bot", status="running")
-        result = control.stop()
+        try:
+            result = control.stop()
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Stop failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -423,7 +431,11 @@ def create_app() -> FastAPI:
     def pause_bot():
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="pause_bot", status="running")
-        result = control.pause()
+        try:
+            result = control.pause()
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Pause failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -434,7 +446,11 @@ def create_app() -> FastAPI:
     def resume_bot():
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="resume_bot", status="running")
-        result = control.resume()
+        try:
+            result = control.resume()
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Resume failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -1492,7 +1508,11 @@ def _page_context(request: Request, page_key: str, title: str) -> dict[str, Any]
 
 def _run_scan_job(job_id: str, mode: str):
     update_job(job_id, status="running", detail=f"Running one-shot scan ({mode.upper()})")
-    result = control.scan_once(mode=mode)
+    try:
+        result = control.scan_once(mode=mode)
+    except Exception as exc:
+        update_job(job_id, status="failed", detail="Scan crashed", error=str(exc))
+        return
     if result["ok"]:
         update_job(
             job_id,
@@ -1513,7 +1533,11 @@ def _run_scan_job(job_id: str, mode: str):
 
 def _run_reconcile_job(job_id: str):
     update_job(job_id, status="running", detail="Running reconcile")
-    result = control.reconcile()
+    try:
+        result = control.reconcile()
+    except Exception as exc:
+        update_job(job_id, status="failed", detail="Reconcile crashed", error=str(exc))
+        return
     if result["ok"]:
         update_job(job_id, status="completed", detail=result["message"])
         return

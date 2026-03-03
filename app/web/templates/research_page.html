@@ -133,14 +133,14 @@
   </div>
 
   <!-- Research Fragment — full width -->
-  <div class="md:col-span-12" id="research-panel" hx-get="/fragments/research" hx-trigger="load, every 15s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-12" id="research-panel" hx-get="/fragments/research" hx-trigger="load delay:300ms, every 15s" hx-swap="innerHTML"></div>
 
   <!-- Backtest Runs — full width -->
-  <div class="md:col-span-12" id="backtest-panel" hx-get="/fragments/backtest" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-12" id="backtest-panel" hx-get="/fragments/backtest" hx-trigger="load delay:500ms, every 15s" hx-swap="innerHTML"></div>
 
   <!-- Jobs + Job Detail — 2 column -->
-  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load delay:800ms" hx-swap="innerHTML"></div>
 
 </div>
 {% endblock %}

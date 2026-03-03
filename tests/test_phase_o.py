@@ -114,7 +114,7 @@ class TestSeedDataGenerator:
         assert _get_row_count(self.db_path, "strategy_state") >= 10
 
     def test_strategy_promotions_populated(self):
-        assert _get_row_count(self.db_path, "strategy_promotions") == 4
+        assert _get_row_count(self.db_path, "strategy_promotions") == 8
 
     def test_broker_accounts_populated(self):
         assert _get_row_count(self.db_path, "broker_accounts") == 3
@@ -142,19 +142,19 @@ class TestSeedDataGenerator:
         assert count >= 15, f"Expected >= 15 daily snapshots, got {count}"
 
     def test_positions_populated(self):
-        assert _get_row_count(self.db_path, "positions") == 8
+        assert _get_row_count(self.db_path, "positions") == 12
 
     def test_bot_events_populated(self):
-        assert _get_row_count(self.db_path, "bot_events") == 20
+        assert _get_row_count(self.db_path, "bot_events") == 60
 
     def test_control_actions_populated(self):
-        assert _get_row_count(self.db_path, "control_actions") == 5
+        assert _get_row_count(self.db_path, "control_actions") == 12
 
     def test_reconciliation_reports_populated(self):
         assert _get_row_count(self.db_path, "reconciliation_reports") == 3
 
     def test_order_intents_populated(self):
-        assert _get_row_count(self.db_path, "order_intents") == 15
+        assert _get_row_count(self.db_path, "order_intents") == 35
 
     def test_order_intent_transitions_populated(self):
         count = _get_row_count(self.db_path, "order_intent_transitions")
@@ -165,17 +165,17 @@ class TestSeedDataGenerator:
         assert count >= 10, f"Expected >= 10 execution metrics, got {count}"
 
     def test_research_events_populated(self):
-        assert _get_row_count(self.db_path, "research_events") == 6
+        assert _get_row_count(self.db_path, "research_events") == 15
 
     def test_calibration_runs_populated(self):
-        assert _get_row_count(self.db_path, "calibration_runs") == 3
+        assert _get_row_count(self.db_path, "calibration_runs") == 6
 
     def test_calibration_points_populated(self):
         count = _get_row_count(self.db_path, "calibration_points")
         assert count >= 10, f"Expected >= 10 calibration points, got {count}"
 
     def test_jobs_populated(self):
-        assert _get_row_count(self.db_path, "jobs") == 8
+        assert _get_row_count(self.db_path, "jobs") == 20
 
     def test_nav_snapshots_populated(self):
         count = _get_row_count(self.db_path, "nav_snapshots")
@@ -186,7 +186,7 @@ class TestSeedDataGenerator:
         assert count >= 3, f"Expected >= 3 risk snapshots, got {count}"
 
     def test_order_actions_populated(self):
-        assert _get_row_count(self.db_path, "order_actions") == 8
+        assert _get_row_count(self.db_path, "order_actions") == 18
 
     def test_clear_only_empties_all(self):
         """--clear-only flag empties all tables."""
@@ -195,8 +195,8 @@ class TestSeedDataGenerator:
         for table in ["trades", "positions", "bot_events", "order_intents", "jobs"]:
             assert _get_row_count(self.db_path, table) == 0
 
-    def test_total_row_count_exceeds_300(self):
-        """Sanity check: total across all tables > 300."""
+    def test_total_row_count_exceeds_600(self):
+        """Sanity check: total across all tables > 600."""
         tables = [
             "strategy_parameter_sets", "strategy_state", "strategy_promotions",
             "broker_accounts", "broker_positions", "broker_cash_balances",
@@ -207,7 +207,7 @@ class TestSeedDataGenerator:
             "jobs", "nav_snapshots", "order_actions",
         ]
         total = sum(_get_row_count(self.db_path, t) for t in tables)
-        assert total >= 300, f"Total rows {total} < 300"
+        assert total >= 600, f"Total rows {total} < 600"
 
     def test_seed_demo_data_module_importable(self):
         """seed_demo_data.py can be imported."""
