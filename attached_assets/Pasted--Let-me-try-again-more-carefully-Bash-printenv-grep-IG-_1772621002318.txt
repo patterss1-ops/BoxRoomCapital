@@ -1,0 +1,25 @@
+● Let me try again more carefully:
+
+● Bash(printenv | grep IG)                                                                                                                                                                                           
+  ⎿  PKG_CONFIG_PATH=
+     XDG_CONFIG_HOME=/home/runner/workspace/.config                                                                                                                                                                  
+     PKG_CONFIG_PATH_FOR_TARGET=                                  
+     … +4 lines (ctrl+o to expand)                                                                                                                                                                                   
+                                                                                                                                                                                                                     
+● Bash(echo "IG_USERNAME=${IG_USERNAME:-EMPTY}" && echo "IG_API_KEY=${IG_API_KEY:-EMPTY}")
+  ⎿  IG_USERNAME=EMPTY                                                                                                                                                                                               
+     IG_API_KEY=EMPTY                                                                                                                                                                                                
+                           
+● They're genuinely not in this shell's environment. This might be a timing issue — secrets added after the shell session started won't appear until a new process spawns. Let me check if there's a .env file that  
+  Replit may have created:                                                                                                                                                                                           
+                                                                                                                                                                                                                     
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)                                                                                                                                                             
+                                                                                                                                                                                                                     
+● The secrets aren't visible to this session at all. This is likely because this Claude Code shell was started before you added the secrets, and Replit only injects them at process start time.                     
+                           
+  Could you try asking Replit Agent to restart the shell or run this test for you:                                                                                                                                   
+                                                                                                                                                                                                                     
+  echo $IG_USERNAME                                                                                                                                                                                                  
+                                                                                                                                                                                                                     
+  If that works in Replit's shell but not here, the fix is simple — I just need you to paste the values (or have Replit Agent write a .env file) so this session can access them. The .env file is already gitignored
+   and config.py reads it via load_dotenv().
