@@ -1038,11 +1038,12 @@ def create_app() -> FastAPI:
 
     @app.get("/trading", response_class=HTMLResponse)
     def trading_page(request: Request):
-        return TEMPLATES.TemplateResponse(
-            request,
-            "trading.html",
-            _page_context(request=request, page_key="trading", title="Trading | Trading Bot"),
-        )
+        ctx = _page_context(request=request, page_key="trading", title="Trading | Trading Bot")
+        ctx["market_map"] = config.MARKET_MAP
+        # Default chart EPIC — SPY (US 500)
+        spy_info = config.MARKET_MAP.get("SPY", {})
+        ctx["default_epic"] = spy_info.get("epic", "IX.D.SPTRD.DAILY.IP")
+        return TEMPLATES.TemplateResponse(request, "trading.html", ctx)
 
     @app.get("/research", response_class=HTMLResponse)
     def research_page(request: Request):
@@ -1229,6 +1230,158 @@ def create_app() -> FastAPI:
             ctx["currency"] = info.currency
             ctx["open_positions"] = len(positions)
         return TEMPLATES.TemplateResponse(request, "_broker_panel.html", ctx)
+
+    @app.get("/fragments/market-browser", response_class=HTMLResponse)
+    def market_browser_fragment(request: Request):
+        connected = _broker is not None and _broker.is_connected()
+        markets = []
+        for ticker, info in config.MARKET_MAP.items():
+            entry = {
+                "ticker": ticker,
+                "epic": info["epic"],
+                "ig_name": info.get("ig_name", ticker),
+                "status": None,
+                "bid": None,
+                "offer": None,
+            }
+            if connected:
+                mkt = _broker.get_market_info(info["epic"])
+                if mkt:
+                    snap = mkt.get("snapshot", {})
+                    entry["status"] = snap.get("marketStatus")
+                    entry["bid"] = snap.get("bid")
+                    entry["offer"] = snap.get("offer")
+            markets.append(entry)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_market_browser.html",
+            {"request": request, "connected": connected, "markets": markets},
+        )
+
+    @app.get("/fragments/open-positions", response_class=HTMLResponse)
+    def open_positions_fragment(request: Request):
+        connected = _broker is not None and _broker.is_connected()
+        positions = []
+        if connected:
+            for p in _broker.get_positions():
+                positions.append({
+                    "deal_id": p.deal_id,
+                    "ticker": p.ticker,
+                    "direction": p.direction,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealised_pnl": p.unrealised_pnl,
+                })
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_open_positions.html",
+            {"request": request, "connected": connected, "positions": positions},
+        )
+
+    @app.post("/api/actions/manual-trade", response_class=HTMLResponse)
+    def manual_trade_action(
+        epic: str = Form(default=""),
+        direction: str = Form(default="BUY"),
+        size: float = Form(default=0.5),
+    ):
+        if not epic:
+            return action_message("EPIC is required.", ok=False)
+        if direction not in ("BUY", "SELL"):
+            return action_message("Direction must be BUY or SELL.", ok=False)
+        if size <= 0:
+            return action_message("Size must be positive.", ok=False)
+
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return action_message(f"Broker not available: {err}", ok=False)
+
+        # Reverse-lookup ticker from EPIC
+        ticker = epic
+        for t, info in config.MARKET_MAP.items():
+            if info["epic"] == epic:
+                ticker = t
+                break
+
+        if direction == "BUY":
+            result = broker.place_long(ticker, size, "manual_trade")
+        else:
+            result = broker.place_short(ticker, size, "manual_trade")
+
+        if result.success:
+            return action_message(
+                f"{direction} {ticker} @ {result.fill_price} — deal {result.order_id or 'confirmed'}",
+                ok=True,
+            )
+        return action_message(f"Trade failed: {result.message}", ok=False)
+
+    @app.post("/api/actions/close-deal", response_class=HTMLResponse)
+    def close_deal_action(deal_id: str = Form(default="")):
+        if not deal_id:
+            return action_message("deal_id is required.", ok=False)
+
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return action_message(f"Broker not available: {err}", ok=False)
+
+        positions = broker.get_positions()
+        target = None
+        for p in positions:
+            if p.deal_id == deal_id:
+                target = p
+                break
+        if not target:
+            return action_message(f"No open position with deal_id={deal_id}", ok=False)
+
+        close_direction = "SELL" if target.direction == "long" else "BUY"
+        result = broker._close_option_leg(deal_id, close_direction, target.size)
+        if result.success:
+            return action_message(
+                f"Closed {target.ticker} {target.direction} @ {result.fill_price}",
+                ok=True,
+            )
+        return action_message(f"Close failed: {result.message}", ok=False)
+
+    @app.get("/api/charts/market-prices")
+    def api_market_prices(epic: str = "", resolution: str = "HOUR", points: int = 48):
+        """Fetch price history from IG for lightweight-charts."""
+        _VALID_RESOLUTIONS = {"MINUTE", "MINUTE_5", "MINUTE_15", "MINUTE_30", "HOUR", "HOUR_4", "DAY", "WEEK"}
+        if not epic or resolution not in _VALID_RESOLUTIONS:
+            return []
+        points = max(1, min(points, 200))
+
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return []
+
+        try:
+            r = broker.session.get(
+                f"{broker.base_url}/prices/{epic}",
+                params={"resolution": resolution, "max": points, "pageSize": points},
+                headers=broker._headers("3"),
+                timeout=broker._TIMEOUT,
+            )
+            if r.status_code != 200:
+                return []
+
+            data = r.json()
+            result = []
+            for candle in data.get("prices", []):
+                snap_time = candle.get("snapshotTime", "")
+                close_price = candle.get("closePrice", {})
+                mid = close_price.get("bid")
+                if mid is None:
+                    continue
+                # IG returns snapshotTime as "2026/03/04 14:00:00"
+                # lightweight-charts needs UTC epoch seconds
+                try:
+                    dt = datetime.strptime(snap_time, "%Y/%m/%d %H:%M:%S")
+                    epoch = int(dt.replace(tzinfo=timezone.utc).timestamp())
+                except (ValueError, TypeError):
+                    continue
+                result.append({"time": epoch, "value": float(mid)})
+            return result
+        except Exception:
+            return []
 
     @app.get("/fragments/ledger", response_class=HTMLResponse)
     def ledger_fragment(request: Request):

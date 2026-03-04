@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 class IGBroker(BaseBroker):
     """IG Markets spread betting broker via REST API."""
 
+    _TIMEOUT = 15  # seconds for all HTTP calls
+
     capabilities = BrokerCapabilities(
         supports_spreadbet=True,
         supports_cfd=True,
@@ -64,6 +66,7 @@ class IGBroker(BaseBroker):
                 f"{self.base_url}/session",
                 json={"identifier": config.IG_USERNAME, "password": config.IG_PASSWORD},
                 headers={**self.session.headers, "Version": "2"},
+                timeout=self._TIMEOUT,
             )
 
             if r.status_code != 200:
@@ -84,6 +87,7 @@ class IGBroker(BaseBroker):
                     f"{self.base_url}/session",
                     json={"accountId": config.IG_ACC_NUMBER, "defaultAccount": "false"},
                     headers={**self.session.headers, "Version": "1"},
+                    timeout=self._TIMEOUT,
                 )
                 if sw.status_code == 200:
                     logger.info(f"Switched to account {config.IG_ACC_NUMBER}")
@@ -125,7 +129,7 @@ class IGBroker(BaseBroker):
             return AccountInfo(balance=0, equity=0, unrealised_pnl=0, open_positions=0)
 
         try:
-            r = self.session.get(f"{self.base_url}/accounts", headers=self._headers("1"))
+            r = self.session.get(f"{self.base_url}/accounts", headers=self._headers("1"), timeout=self._TIMEOUT)
             if r.status_code != 200:
                 logger.error(f"Account fetch failed: {r.status_code}")
                 return AccountInfo(balance=0, equity=0, unrealised_pnl=0, open_positions=0)
@@ -156,7 +160,7 @@ class IGBroker(BaseBroker):
             return []
 
         try:
-            r = self.session.get(f"{self.base_url}/positions", headers=self._headers("2"))
+            r = self.session.get(f"{self.base_url}/positions", headers=self._headers("2"), timeout=self._TIMEOUT)
             if r.status_code != 200:
                 logger.error(f"Positions fetch failed: {r.status_code}")
                 return []
@@ -172,14 +176,26 @@ class IGBroker(BaseBroker):
                 # Look up ticker and strategy from our deal map
                 ticker, strategy = self._deal_map.get(deal_id, (epic, "unknown"))
 
+                size = float(pos.get("size", pos.get("dealSize", 0)))
+                entry_price = float(pos.get("openLevel", pos.get("level", 0)))
+
+                # Compute P&L from market snapshot bid/offer vs entry
+                pnl = 0.0
+                bid = float(mkt.get("bid", 0) or 0)
+                offer = float(mkt.get("offer", 0) or 0)
+                if direction == "long" and bid > 0 and entry_price > 0:
+                    pnl = (bid - entry_price) * size
+                elif direction == "short" and offer > 0 and entry_price > 0:
+                    pnl = (entry_price - offer) * size
+
                 positions.append(Position(
                     ticker=ticker,
                     direction=direction,
-                    size=float(pos.get("size", pos.get("dealSize", 0))),
-                    entry_price=float(pos.get("openLevel", pos.get("level", 0))),
+                    size=size,
+                    entry_price=entry_price,
                     entry_time=datetime.now(),
                     strategy=strategy,
-                    unrealised_pnl=float(pos.get("profit", 0) or 0),
+                    unrealised_pnl=round(pnl, 2),
                     deal_id=deal_id,
                 ))
             return positions
@@ -204,7 +220,7 @@ class IGBroker(BaseBroker):
         if epic in self._blocked_epics:
             return None
         try:
-            r = self.session.get(f"{self.base_url}/markets/{epic}", headers=self._headers("3"))
+            r = self.session.get(f"{self.base_url}/markets/{epic}", headers=self._headers("3"), timeout=self._TIMEOUT)
             if r.status_code == 200:
                 return r.json()
             elif r.status_code == 403:
@@ -340,6 +356,7 @@ class IGBroker(BaseBroker):
                 f"{self.base_url}/positions/otc",
                 json=order,
                 headers=self._headers("2"),
+                timeout=self._TIMEOUT,
             )
 
             if r.status_code == 403:
@@ -368,6 +385,7 @@ class IGBroker(BaseBroker):
             r = self.session.get(
                 f"{self.base_url}/confirms/{deal_ref}",
                 headers=self._headers("1"),
+                timeout=self._TIMEOUT,
             )
 
             if r.status_code == 200:
@@ -427,6 +445,7 @@ class IGBroker(BaseBroker):
                 f"{self.base_url}/markets",
                 params={"searchTerm": search_term},
                 headers=self._headers("1"),
+                timeout=self._TIMEOUT,
             )
             if r.status_code != 200:
                 logger.error(f"Option search failed: {r.status_code}")
@@ -714,6 +733,7 @@ class IGBroker(BaseBroker):
                 f"{self.base_url}/positions/otc",
                 json=order,
                 headers=self._headers("2"),
+                timeout=self._TIMEOUT,
             )
 
             if r.status_code == 403:
@@ -750,6 +770,7 @@ class IGBroker(BaseBroker):
                 f"{self.base_url}/positions/otc",
                 json=close_payload,
                 headers={**self._headers("1"), "_method": "DELETE"},
+                timeout=self._TIMEOUT,
             )
 
             if r.status_code != 200:
@@ -793,7 +814,7 @@ class IGBroker(BaseBroker):
         if not deal_id:
             epic = self.get_epic(ticker)
             try:
-                r = self.session.get(f"{self.base_url}/positions", headers=self._headers("2"))
+                r = self.session.get(f"{self.base_url}/positions", headers=self._headers("2"), timeout=self._TIMEOUT)
                 if r.status_code == 200:
                     for p in r.json().get("positions", []):
                         mkt = p.get("market", {})
@@ -830,6 +851,7 @@ class IGBroker(BaseBroker):
                 f"{self.base_url}/positions/otc",
                 json=close_payload,
                 headers={**self._headers("1"), "_method": "DELETE"},
+                timeout=self._TIMEOUT,
             )
 
             if r.status_code != 200:

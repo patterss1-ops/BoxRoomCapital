@@ -1,32 +1,31 @@
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
-  <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-slate-200">Control Acknowledgements</h2>
-    <p class="text-slate-500 text-sm">Operator override and control audit trail.</p>
+<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
+  <div class="flex justify-between items-baseline gap-2 mb-1.5">
+    <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Control Log</h3>
   </div>
   {% if control_actions %}
-    <table class="w-full text-sm text-left">
+    <table class="w-full text-[11px] text-left font-mono">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Time</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Action</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Value</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Reason</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Actor</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Time</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Action</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Value</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Reason</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Actor</th>
         </tr>
       </thead>
       <tbody>
       {% for item in control_actions %}
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ item.timestamp }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.action }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.value or "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.reason or "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ item.actor }}</td>
+          <td class="text-slate-500 px-1.5 py-1 border-b border-slate-800/50">{{ item.timestamp }}</td>
+          <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ item.action }}</td>
+          <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ item.value or "-" }}</td>
+          <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50 truncate max-w-[150px]">{{ item.reason or "-" }}</td>
+          <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ item.actor }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="text-sm text-slate-500">No control acknowledgements yet.</p>
+    <p class="text-[11px] text-slate-500">No control actions yet.</p>
   {% endif %}
 </section>

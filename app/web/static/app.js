@@ -1,3 +1,5 @@
+// switchTab and createTerminalChart are defined in base.html <head> for early availability
+
 (function () {
   const actionTarget = document.getElementById('action-result');
 
@@ -104,7 +106,7 @@
     paletteList.innerHTML = '';
     if (!visible.length) {
       const empty = document.createElement('li');
-      empty.className = 'px-3 py-2 rounded-lg text-sm text-slate-500';
+      empty.className = 'px-2 py-1.5 rounded text-xs text-slate-500';
       empty.textContent = 'No matching commands';
       paletteList.appendChild(empty);
       return;
@@ -112,7 +114,7 @@
     visible.forEach((command, index) => {
       const li = document.createElement('li');
       const isActive = index === activeIndex;
-      li.className = 'px-3 py-2 rounded-lg cursor-pointer text-sm ' +
+      li.className = 'px-2 py-1.5 rounded cursor-pointer text-xs ' +
         (isActive ? 'bg-slate-800 text-white' : 'text-slate-300 hover:bg-slate-800/50');
       li.textContent = command.label;
       li.addEventListener('mouseenter', () => {
@@ -167,6 +169,13 @@
 
   if (openButton) {
     openButton.addEventListener('click', function () {
+      openPalette();
+    });
+  }
+
+  var openButtonSidebar = document.getElementById('command-open-sidebar');
+  if (openButtonSidebar) {
+    openButtonSidebar.addEventListener('click', function () {
       openPalette();
     });
   }

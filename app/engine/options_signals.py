@@ -31,6 +31,8 @@ class OptionsSignalsMixin:
         vix_df = self.data.get_vix()
         vix = float(vix_df["Close"].iloc[-1]) if not vix_df.empty else 20.0
 
+        scan_results = []
+
         for ticker in tickers:
             if ticker not in config.LIVE_TRADING_TICKERS:
                 continue
@@ -39,6 +41,7 @@ class OptionsSignalsMixin:
                 df = self.data.get_daily_bars(ticker)
                 if df.empty or len(df) < 210:
                     logger.warning(f"  {ticker}: insufficient data")
+                    scan_results.append(f"{ticker}: insufficient data")
                     continue
 
                 bar = {
@@ -66,12 +69,30 @@ class OptionsSignalsMixin:
                     ema200=ema200,
                 )
 
+                # Compute IBS for logging
+                bar_range = bar["high"] - bar["low"]
+                ibs = (bar["close"] - bar["low"]) / bar_range if bar_range > 0 else 0.5
+
+                scan_results.append(
+                    f"{ticker}: {sig.action} (IBS={ibs:.2f}, close={bar['close']:.1f}, "
+                    f"EMA200={ema200:.1f}, VIX={vix:.1f}) — {sig.reason}"
+                )
+
                 self._handle_signal(ticker, sig, bar["close"], vix)
 
             except Exception as e:
                 logger.error(f"  {ticker} error: {e}", exc_info=True)
+                scan_results.append(f"{ticker}: ERROR — {e}")
                 log_event("ERROR", f"{ticker} — Signal error: {e}",
                           ticker=ticker, strategy="IBS Credit Spreads")
+
+        # Always log scan summary as a visible event
+        summary = "; ".join(scan_results) if scan_results else "No tickers scanned"
+        log_event(
+            "SCAN",
+            f"Signal scan: {len(tickers)} tickers, VIX={vix:.1f}",
+            detail=summary,
+        )
 
     def _handle_signal(self, ticker: str, sig: CreditSpreadSignal,
                        current_price: float, vix: float):

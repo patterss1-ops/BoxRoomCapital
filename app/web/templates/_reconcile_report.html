@@ -1,35 +1,29 @@
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
-  <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-slate-200">Reconcile Report</h2>
-    <p class="text-slate-500 text-sm">DB, in-memory, and broker consistency checks.</p>
+<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
+  <div class="flex justify-between items-baseline gap-2 mb-1.5">
+    <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Reconcile</h3>
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border {% if not report.has_mismatch %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">{{ "OK" if not report.has_mismatch else "MISMATCH" }}</span>
   </div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">DB Open Spreads</span><span class="text-slate-300 text-sm">{{ report.db_open_spreads or 0 }}</span></div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Memory Open Spreads</span><span class="text-slate-300 text-sm">{{ report.memory_open_spreads or 0 }}</span></div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Broker Open Deals</span><span class="text-slate-300 text-sm">{{ report.broker_open_deals or 0 }}</span></div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5">
-    <span class="text-slate-500 text-sm">Mismatch</span>
-    <span class="text-slate-300 text-sm">
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if report.has_mismatch %}bg-red-500/15 text-red-400 border-red-500/30{% else %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% endif %}">
-        {{ "YES" if report.has_mismatch else "NO" }}
-      </span>
-    </span>
+  <div class="grid grid-cols-[110px_1fr] gap-1 text-[11px] font-mono">
+    <span class="text-slate-500">DB Spreads</span><span class="text-slate-300">{{ report.db_open_spreads or 0 }}</span>
+    <span class="text-slate-500">Mem Spreads</span><span class="text-slate-300">{{ report.memory_open_spreads or 0 }}</span>
+    <span class="text-slate-500">Broker Deals</span><span class="text-slate-300">{{ report.broker_open_deals or 0 }}</span>
   </div>
   {% if report.broker_error %}
-    <p class="text-sm text-slate-500 mt-2">Broker fetch error: {{ report.broker_error }}</p>
+    <p class="text-[11px] text-red-400 mt-1">{{ report.broker_error }}</p>
   {% endif %}
-  <h3 class="text-slate-200 font-semibold mt-4 mb-2">Differences</h3>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">DB-only Spread IDs</span><span class="font-mono text-slate-300 text-xs">{{ (report.db_only_spread_ids or [])|join(", ") or "-" }}</span></div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">Memory-only Spread IDs</span><span class="font-mono text-slate-300 text-xs">{{ (report.memory_only_spread_ids or [])|join(", ") or "-" }}</span></div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5"><span class="text-slate-500 text-sm">DB-only Deal IDs</span><span class="font-mono text-slate-300 text-xs">{{ (report.db_only_deal_ids or [])|join(", ") or "-" }}</span></div>
-  <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-slate-500 text-sm">Broker-only Deal IDs</span><span class="font-mono text-slate-300 text-xs">{{ (report.broker_only_deal_ids or [])|join(", ") or "-" }}</span></div>
-  <h3 class="text-slate-200 font-semibold mt-4 mb-2">Corrective Suggestions</h3>
+  {% if report.has_mismatch %}
+    <div class="grid grid-cols-[110px_1fr] gap-1 text-[11px] font-mono mt-1.5">
+      <span class="text-slate-500">DB-only</span><span class="text-slate-300">{{ (report.db_only_spread_ids or [])|join(", ") or "-" }}</span>
+      <span class="text-slate-500">Mem-only</span><span class="text-slate-300">{{ (report.memory_only_spread_ids or [])|join(", ") or "-" }}</span>
+      <span class="text-slate-500">DB deals</span><span class="text-slate-300">{{ (report.db_only_deal_ids or [])|join(", ") or "-" }}</span>
+      <span class="text-slate-500">Broker deals</span><span class="text-slate-300">{{ (report.broker_only_deal_ids or [])|join(", ") or "-" }}</span>
+    </div>
+  {% endif %}
   {% if report.suggestions %}
-    <ul class="space-y-1">
+    <ul class="mt-1.5 space-y-0.5">
     {% for item in report.suggestions %}
-      <li class="text-sm text-slate-300">{{ item }}</li>
+      <li class="text-[11px] text-slate-400">{{ item }}</li>
     {% endfor %}
     </ul>
-  {% else %}
-    <p class="text-sm text-slate-500">No suggestions available.</p>
   {% endif %}
 </section>
