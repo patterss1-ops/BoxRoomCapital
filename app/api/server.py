@@ -267,8 +267,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/analytics/portfolio")
     def api_portfolio_analytics(days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS):
-        bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
-        return build_portfolio_analytics_payload(days=bounded_days)
+        return build_portfolio_analytics_payload(days=days)
 
     @app.get("/api/charts/equity-curve")
     def api_equity_curve(days: int = 90):
@@ -1095,13 +1094,12 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/portfolio-analytics", response_class=HTMLResponse)
     def portfolio_analytics_fragment(request: Request, days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS):
-        bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
         return TEMPLATES.TemplateResponse(
             request,
             "_portfolio_analytics.html",
             {
                 "request": request,
-                "analytics": build_portfolio_analytics_payload(days=bounded_days),
+                "analytics": build_portfolio_analytics_payload(days=days),
             },
         )
 

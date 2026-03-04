@@ -54,7 +54,6 @@ class OptionsBot(
 
     def __init__(self, mode: str = "shadow"):
         self.mode = mode
-        self.is_shadow = (mode == "shadow")
         self.running = False
         self.paused = False
 
@@ -83,6 +82,10 @@ class OptionsBot(
         self.strategy_params: dict = dict(config.IBS_CREDIT_SPREAD_PARAMS)
         self.active_param_set_id: Optional[str] = None
         self.active_param_set_status: str = "default"
+
+    @property
+    def is_shadow(self) -> bool:
+        return self.mode == "shadow"
 
     def start(self, once: bool = False, install_signal_handlers: bool = True) -> bool:
         self._load_strategy_parameters()

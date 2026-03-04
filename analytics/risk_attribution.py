@@ -6,6 +6,7 @@ into market, strategy-specific, and idiosyncratic components.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
@@ -152,7 +153,6 @@ def attribute_returns(
     sys_ret = float(np.sum(y_hat - alpha)) * 100.0  # Factor-explained return
     idio_ret = total_ret - sys_ret
 
-    import math
     total_vol = float(np.std(y, ddof=1)) * math.sqrt(252) * 100.0 if n > 1 else 0.0
     sys_vol = float(np.std(y_hat - alpha, ddof=1)) * math.sqrt(252) * 100.0 if n > 1 else 0.0
     idio_vol = float(np.std(residuals, ddof=1)) * math.sqrt(252) * 100.0 if n > 1 else 0.0

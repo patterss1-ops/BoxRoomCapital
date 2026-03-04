@@ -7,10 +7,10 @@ with a persistent cache layer.
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sqlite3
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -66,11 +66,14 @@ class HistoricalCache:
         self._staleness_days = staleness_days
         os.makedirs(self._cache_dir, exist_ok=True)
         self._db_path = os.path.join(self._cache_dir, CACHE_DB_NAME)
+        self._lock = threading.Lock()
+        self._db = sqlite3.connect(self._db_path, check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        self._db.execute("PRAGMA journal_mode=WAL")
         self._init_db()
 
     def _init_db(self) -> None:
-        conn = sqlite3.connect(self._db_path)
-        conn.execute("""
+        self._db.execute("""
             CREATE TABLE IF NOT EXISTS price_bars (
                 ticker TEXT NOT NULL,
                 bar_date TEXT NOT NULL,
@@ -84,7 +87,7 @@ class HistoricalCache:
                 PRIMARY KEY (ticker, bar_date)
             )
         """)
-        conn.execute("""
+        self._db.execute("""
             CREATE TABLE IF NOT EXISTS cache_meta (
                 ticker TEXT PRIMARY KEY,
                 first_date TEXT,
@@ -94,11 +97,7 @@ class HistoricalCache:
                 cached_at TEXT NOT NULL
             )
         """)
-        conn.commit()
-        conn.close()
-
-    def _conn(self) -> sqlite3.Connection:
-        return sqlite3.connect(self._db_path)
+        self._db.commit()
 
     def store_bars(
         self,
@@ -114,43 +113,40 @@ class HistoricalCache:
             return 0
 
         now = datetime.now(timezone.utc).isoformat()
-        conn = self._conn()
-        count = 0
-        for bar in bars:
-            try:
-                conn.execute(
-                    """INSERT OR REPLACE INTO price_bars
-                       (ticker, bar_date, open, high, low, close, volume, source, cached_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        ticker,
-                        bar["date"],
-                        bar.get("open", 0),
-                        bar.get("high", 0),
-                        bar.get("low", 0),
-                        bar.get("close", 0),
-                        bar.get("volume", 0),
-                        source,
-                        now,
-                    ),
-                )
-                count += 1
-            except (KeyError, sqlite3.Error):
-                continue
+        valid = [
+            (
+                ticker,
+                b["date"],
+                b.get("open", 0),
+                b.get("high", 0),
+                b.get("low", 0),
+                b.get("close", 0),
+                b.get("volume", 0),
+                source,
+                now,
+            )
+            for b in bars
+            if "date" in b
+        ]
+        if not valid:
+            return 0
 
-        # Update meta
-        if count > 0:
+        with self._lock:
+            self._db.executemany(
+                """INSERT OR REPLACE INTO price_bars
+                   (ticker, bar_date, open, high, low, close, volume, source, cached_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                valid,
+            )
             dates = sorted(b["date"] for b in bars if "date" in b)
-            conn.execute(
+            self._db.execute(
                 """INSERT OR REPLACE INTO cache_meta
                    (ticker, first_date, last_date, bar_count, source, cached_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (ticker, dates[0], dates[-1], count, source, now),
+                (ticker, dates[0], dates[-1], len(valid), source, now),
             )
-
-        conn.commit()
-        conn.close()
-        return count
+            self._db.commit()
+        return len(valid)
 
     def get_bars(
         self,
@@ -159,7 +155,6 @@ class HistoricalCache:
         end_date: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Retrieve cached bars for a ticker. Returns list of dicts with OHLCV."""
-        conn = self._conn()
         query = "SELECT bar_date, open, high, low, close, volume FROM price_bars WHERE ticker = ?"
         params: list[Any] = [ticker]
 
@@ -171,8 +166,8 @@ class HistoricalCache:
             params.append(end_date)
 
         query += " ORDER BY bar_date"
-        rows = conn.execute(query, params).fetchall()
-        conn.close()
+        with self._lock:
+            rows = self._db.execute(query, params).fetchall()
 
         return [
             {
@@ -188,12 +183,11 @@ class HistoricalCache:
 
     def get_entry(self, ticker: str) -> Optional[CacheEntry]:
         """Get cache metadata for a ticker."""
-        conn = self._conn()
-        row = conn.execute(
-            "SELECT ticker, first_date, last_date, bar_count, cached_at, source FROM cache_meta WHERE ticker = ?",
-            (ticker,),
-        ).fetchone()
-        conn.close()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT ticker, first_date, last_date, bar_count, cached_at, source FROM cache_meta WHERE ticker = ?",
+                (ticker,),
+            ).fetchone()
 
         if row is None:
             return None
@@ -249,22 +243,19 @@ class HistoricalCache:
 
     def invalidate(self, ticker: str) -> bool:
         """Remove cached data for a ticker."""
-        conn = self._conn()
-        conn.execute("DELETE FROM price_bars WHERE ticker = ?", (ticker,))
-        conn.execute("DELETE FROM cache_meta WHERE ticker = ?", (ticker,))
-        conn.commit()
-        conn.close()
+        with self._lock:
+            self._db.execute("DELETE FROM price_bars WHERE ticker = ?", (ticker,))
+            self._db.execute("DELETE FROM cache_meta WHERE ticker = ?", (ticker,))
+            self._db.commit()
         return True
 
     def get_stats(self) -> CacheStats:
         """Get overall cache statistics."""
-        conn = self._conn()
-        total_tickers = conn.execute("SELECT COUNT(*) FROM cache_meta").fetchone()[0]
-        total_bars = conn.execute("SELECT COALESCE(SUM(bar_count), 0) FROM cache_meta").fetchone()[0]
-
-        oldest = conn.execute("SELECT MIN(cached_at) FROM cache_meta").fetchone()[0]
-        newest = conn.execute("SELECT MAX(cached_at) FROM cache_meta").fetchone()[0]
-        conn.close()
+        with self._lock:
+            total_tickers = self._db.execute("SELECT COUNT(*) FROM cache_meta").fetchone()[0]
+            total_bars = self._db.execute("SELECT COALESCE(SUM(bar_count), 0) FROM cache_meta").fetchone()[0]
+            oldest = self._db.execute("SELECT MIN(cached_at) FROM cache_meta").fetchone()[0]
+            newest = self._db.execute("SELECT MAX(cached_at) FROM cache_meta").fetchone()[0]
 
         cache_size = os.path.getsize(self._db_path) if os.path.exists(self._db_path) else 0
 
@@ -278,7 +269,6 @@ class HistoricalCache:
 
     def list_tickers(self) -> list[str]:
         """List all cached tickers."""
-        conn = self._conn()
-        rows = conn.execute("SELECT ticker FROM cache_meta ORDER BY ticker").fetchall()
-        conn.close()
+        with self._lock:
+            rows = self._db.execute("SELECT ticker FROM cache_meta ORDER BY ticker").fetchall()
         return [r[0] for r in rows]

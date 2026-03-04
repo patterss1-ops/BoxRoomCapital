@@ -13,8 +13,8 @@ from app.signal.ai_contracts import AIModelVerdict
 from intelligence.ai_panel._base import (
     AIPanelClientError,
     BaseAIPanelConfig,
-    _parse_json_from_response,
-    build_verdict_from_parsed,
+    execute_with_retry,
+    parse_response_to_verdict,
 )
 from intelligence.ai_panel.prompts import get_analysis_prompt
 
@@ -80,76 +80,32 @@ class GrokClient:
             "temperature": 0.1,
         }
 
-        retries = max(0, int(self._config.max_retries))
         start_ms = time.monotonic() * 1000
 
-        for attempt in range(retries + 1):
-            try:
-                resp = self._session.post(
-                    self._config.endpoint,
-                    headers={
-                        "Authorization": f"Bearer {self._config.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    json=body,
-                    timeout=float(self._config.timeout_seconds),
-                )
-            except requests.RequestException as exc:
-                if attempt >= retries:
-                    raise AIPanelClientError(
-                        f"Grok request failed for {ticker}: {exc}",
-                        model_name=MODEL_NAME,
-                        retryable=True,
-                    ) from exc
-                self._sleep(self._config.backoff_seconds * (2 ** attempt))
-                continue
-
-            status = int(resp.status_code)
-            if status == 429 or 500 <= status <= 599:
-                if attempt >= retries:
-                    raise AIPanelClientError(
-                        f"Grok transient HTTP {status} for {ticker}.",
-                        model_name=MODEL_NAME,
-                        status_code=status,
-                        retryable=True,
-                    )
-                self._sleep(self._config.backoff_seconds * (2 ** attempt))
-                continue
-
-            if status >= 400:
-                raise AIPanelClientError(
-                    f"Grok HTTP {status} for {ticker}.",
-                    model_name=MODEL_NAME,
-                    status_code=status,
-                    retryable=False,
-                )
-
-            latency_ms = time.monotonic() * 1000 - start_ms
-
-            try:
-                payload = resp.json()
-            except ValueError as exc:
-                raise AIPanelClientError(
-                    f"Grok returned invalid JSON for {ticker}.",
-                    model_name=MODEL_NAME,
-                    retryable=False,
-                ) from exc
-
-            raw_text = payload["choices"][0]["message"]["content"]
-            parsed = _parse_json_from_response(raw_text)
-
-            return build_verdict_from_parsed(
-                model_name=MODEL_NAME,
-                ticker=ticker,
-                as_of=as_of,
-                parsed=parsed,
-                raw_text=raw_text,
-                prompt_version=self._config.prompt_version,
-                latency_ms=latency_ms,
-            )
-
-        raise AIPanelClientError(
-            f"Grok request exhausted retries for {ticker}.",
+        resp = execute_with_retry(
+            session=self._session,
+            request_fn=lambda: self._session.post(
+                self._config.endpoint,
+                headers={
+                    "Authorization": f"Bearer {self._config.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=float(self._config.timeout_seconds),
+            ),
             model_name=MODEL_NAME,
-            retryable=True,
+            ticker=ticker,
+            retries=max(0, int(self._config.max_retries)),
+            backoff_seconds=self._config.backoff_seconds,
+            sleep_fn=self._sleep,
+        )
+
+        return parse_response_to_verdict(
+            resp=resp,
+            extract_text=lambda p: p["choices"][0]["message"]["content"],
+            model_name=MODEL_NAME,
+            ticker=ticker,
+            as_of=as_of,
+            prompt_version=self._config.prompt_version,
+            start_ms=start_ms,
         )

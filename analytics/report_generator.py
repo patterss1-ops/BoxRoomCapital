@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
+import numpy as np
+
 from analytics.portfolio_analytics import (
     PerformanceMetrics,
     compute_drawdowns,
@@ -105,7 +107,6 @@ def generate_performance_report(
     ))
 
     # Section 2: Equity curve highlights
-    import numpy as np
     arr = np.array(returns, dtype=float)
     cum = np.cumprod(1.0 + arr)
     equity = [round(equity_start * float(c), 2) for c in cum]

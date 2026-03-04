@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 from data.trade_db import DB_PATH, create_order_action, get_conn, update_order_action
 from execution.order_intent import OrderIntent, OrderIntentStatus, normalize_actor, normalize_status
+from utils.datetime_utils import parse_iso_utc
 
 
 _TRANSITION_RULES: dict[OrderIntentStatus, set[OrderIntentStatus]] = {
@@ -78,17 +79,7 @@ def _safe_float(value: Any) -> Optional[float]:
 
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
-    if not value:
-        return None
-    text = str(value).strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = f"{text[:-1]}+00:00"
-    try:
-        return datetime.fromisoformat(text)
-    except ValueError:
-        return None
+    return parse_iso_utc(value)
 
 
 def _extract_reference_price(

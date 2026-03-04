@@ -15,6 +15,7 @@ from data.trade_db import (
     get_active_strategy_parameter_set,
     get_strategy_promotions,
 )
+from utils.datetime_utils import parse_iso_utc
 
 
 REASON_TEXT = {
@@ -31,20 +32,7 @@ REASON_TEXT = {
 
 
 def _parse_iso(raw: str) -> Optional[datetime]:
-    if not raw:
-        return None
-    text = raw.strip()
-    if not text:
-        return None
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        parsed = datetime.fromisoformat(text)
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc)
+    return parse_iso_utc(raw)
 
 
 def _format_ts(value: Optional[datetime]) -> Optional[str]:
@@ -305,9 +293,13 @@ def evaluate_promotion_gate(
             latest_live_promotion_at = _parse_iso(str(promo.get("timestamp") or ""))
             break
 
-    # Soak period check
-    if latest_live_promotion_at and cfg.min_soak_hours > 0:
+    # Compute hours since last promotion once for both checks
+    hours_since_promotion: Optional[float] = None
+    if latest_live_promotion_at:
         hours_since_promotion = (now - latest_live_promotion_at).total_seconds() / 3600.0
+
+    # Soak period check
+    if hours_since_promotion is not None and cfg.min_soak_hours > 0:
         if hours_since_promotion < cfg.min_soak_hours:
             remaining = cfg.min_soak_hours - hours_since_promotion
             return PromotionGateDecision(
@@ -322,8 +314,7 @@ def evaluate_promotion_gate(
             )
 
     # Stale set check
-    if latest_live_promotion_at and cfg.max_stale_hours > 0:
-        hours_since_promotion = (now - latest_live_promotion_at).total_seconds() / 3600.0
+    if hours_since_promotion is not None and cfg.max_stale_hours > 0:
         if hours_since_promotion > cfg.max_stale_hours:
             return PromotionGateDecision(
                 allowed=False,

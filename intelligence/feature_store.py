@@ -15,6 +15,13 @@ from datetime import datetime, timezone
 from typing import Any
 
 
+_INSERT_FEATURE_SQL = """\
+INSERT OR REPLACE INTO feature_records
+   (record_id, entity_id, event_ts, feature_set, feature_version,
+    features_json, metadata_json, created_at)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?)"""
+
+
 @dataclass
 class FeatureRecord:
     """Single feature vector snapshot for an entity at an event time."""
@@ -82,54 +89,35 @@ class FeatureStore:
             created_at=row["created_at"],
         )
 
+    @staticmethod
+    def _record_to_row(record: FeatureRecord) -> tuple:
+        return (
+            record.record_id,
+            record.entity_id,
+            record.event_ts,
+            record.feature_set,
+            record.feature_version,
+            json.dumps(record.features, sort_keys=True),
+            json.dumps(record.metadata, sort_keys=True),
+            record.created_at,
+        )
+
     def save(self, record: FeatureRecord) -> str:
         with self._lock:
-            self._conn.execute(
-                """INSERT OR REPLACE INTO feature_records
-                   (record_id, entity_id, event_ts, feature_set, feature_version,
-                    features_json, metadata_json, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    record.record_id,
-                    record.entity_id,
-                    record.event_ts,
-                    record.feature_set,
-                    record.feature_version,
-                    json.dumps(record.features, sort_keys=True),
-                    json.dumps(record.metadata, sort_keys=True),
-                    record.created_at,
-                ),
-            )
+            self._conn.execute(_INSERT_FEATURE_SQL, self._record_to_row(record))
             self._conn.commit()
         return record.record_id
 
     def save_batch(self, records: list[FeatureRecord]) -> list[str]:
-        ids: list[str] = []
+        rows = [self._record_to_row(r) for r in records]
         with self._lock:
             try:
-                for record in records:
-                    self._conn.execute(
-                        """INSERT OR REPLACE INTO feature_records
-                           (record_id, entity_id, event_ts, feature_set, feature_version,
-                            features_json, metadata_json, created_at)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            record.record_id,
-                            record.entity_id,
-                            record.event_ts,
-                            record.feature_set,
-                            record.feature_version,
-                            json.dumps(record.features, sort_keys=True),
-                            json.dumps(record.metadata, sort_keys=True),
-                            record.created_at,
-                        ),
-                    )
-                    ids.append(record.record_id)
+                self._conn.executemany(_INSERT_FEATURE_SQL, rows)
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
                 raise
-        return ids
+        return [r.record_id for r in records]
 
     def get(self, record_id: str) -> FeatureRecord | None:
         with self._lock:

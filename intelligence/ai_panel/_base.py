@@ -121,6 +121,99 @@ def _coerce_time_horizon(raw: str) -> TimeHorizon:
         return TimeHorizon.SHORT_TERM
 
 
+def execute_with_retry(
+    session: "requests.Session",
+    request_fn: Callable[[], "requests.Response"],
+    model_name: str,
+    ticker: str,
+    retries: int,
+    backoff_seconds: float,
+    sleep_fn: Callable[[float], Any],
+) -> "requests.Response":
+    """Shared HTTP retry loop for AI panel clients.
+
+    Handles transient failures (429, 5xx) with exponential backoff.
+    Raises AIPanelClientError on exhaustion or non-retryable status.
+    """
+    for attempt in range(max(0, retries) + 1):
+        try:
+            resp = request_fn()
+        except Exception as exc:
+            if attempt >= retries:
+                raise AIPanelClientError(
+                    f"{model_name} request failed for {ticker}: {exc}",
+                    model_name=model_name,
+                    retryable=True,
+                ) from exc
+            sleep_fn(backoff_seconds * (2 ** attempt))
+            continue
+
+        status = int(resp.status_code)
+        if status == 429 or 500 <= status <= 599:
+            if attempt >= retries:
+                raise AIPanelClientError(
+                    f"{model_name} transient HTTP {status} for {ticker}.",
+                    model_name=model_name,
+                    status_code=status,
+                    retryable=True,
+                )
+            sleep_fn(backoff_seconds * (2 ** attempt))
+            continue
+
+        if status >= 400:
+            raise AIPanelClientError(
+                f"{model_name} HTTP {status} for {ticker}.",
+                model_name=model_name,
+                status_code=status,
+                retryable=False,
+            )
+
+        return resp
+
+    raise AIPanelClientError(
+        f"{model_name} request exhausted retries for {ticker}.",
+        model_name=model_name,
+        retryable=True,
+    )
+
+
+def parse_response_to_verdict(
+    resp: "requests.Response",
+    extract_text: Callable[[Dict[str, Any]], str],
+    model_name: str,
+    ticker: str,
+    as_of: str,
+    prompt_version: str,
+    start_ms: float,
+) -> "AIModelVerdict":
+    """Parse an HTTP response into an AIModelVerdict.
+
+    ``extract_text`` pulls the raw text from the provider-specific JSON shape.
+    """
+    latency_ms = time.monotonic() * 1000 - start_ms
+    try:
+        payload = resp.json()
+    except ValueError as exc:
+        raise AIPanelClientError(
+            f"{model_name} returned invalid JSON for {ticker}.",
+            model_name=model_name,
+            retryable=False,
+        ) from exc
+
+    raw_text = extract_text(payload)
+    parsed = _parse_json_from_response(raw_text)
+
+    return build_verdict_from_parsed(
+        model_name=model_name,
+        ticker=ticker,
+        as_of=as_of,
+        parsed=parsed,
+        raw_text=raw_text,
+        prompt_version=prompt_version,
+        latency_ms=latency_ms,
+    )
+
+
 def build_verdict_from_parsed(
     model_name: str,
     ticker: str,
