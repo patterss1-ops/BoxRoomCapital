@@ -1,0 +1,48 @@
+<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-slate-200">Broker</h2>
+    <span class="text-xs font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border
+      {% if connected %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">
+      {{ "Connected" if connected else "Disconnected" }}
+    </span>
+  </div>
+
+  {% if connected %}
+    <div class="grid grid-cols-[120px_1fr] gap-2 text-sm">
+      <span class="text-slate-500">Account</span>
+      <span class="font-mono text-slate-300">{{ account or "-" }}</span>
+      <span class="text-slate-500">Mode</span>
+      <span class="text-slate-300">{{ mode or "-" }}</span>
+      <span class="text-slate-500">Balance</span>
+      <span class="text-slate-300">{{ currency }} {{ "%.2f"|format(balance) }}</span>
+      <span class="text-slate-500">Equity</span>
+      <span class="text-slate-300">{{ currency }} {{ "%.2f"|format(equity) }}</span>
+      <span class="text-slate-500">Unrealised P&L</span>
+      <span class="{% if unrealised_pnl >= 0 %}text-emerald-400{% else %}text-red-400{% endif %}">{{ currency }} {{ "%.2f"|format(unrealised_pnl) }}</span>
+      <span class="text-slate-500">Open Positions</span>
+      <span class="text-slate-300">{{ open_positions }}</span>
+    </div>
+    <div class="flex gap-2 mt-4">
+      <button hx-post="/api/broker/connect" hx-swap="none"
+        hx-on::after-request="htmx.trigger('#broker-panel', 'refreshPanel')"
+        class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">
+        Reconnect
+      </button>
+      <a href="/api/broker/positions" target="_blank"
+        class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition-colors text-sm">
+        View Positions
+      </a>
+      <a href="/api/broker/markets" target="_blank"
+        class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-3 py-1.5 rounded-lg border border-slate-700 transition-colors text-sm">
+        View Markets
+      </a>
+    </div>
+  {% else %}
+    <p class="text-slate-500 text-sm mb-4">Not connected to IG. Click Connect to authenticate.</p>
+    <button hx-post="/api/broker/connect" hx-swap="none"
+      hx-on::after-request="htmx.trigger('#broker-panel', 'refreshPanel')"
+      class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">
+      Connect
+    </button>
+  {% endif %}
+</section>

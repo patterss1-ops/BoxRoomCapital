@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import logging
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
@@ -75,6 +76,7 @@ from execution.order_intent import OrderIntent, OrderSide
 from data.order_intent_store import create_order_intent_envelope
 from fund.execution_quality import get_execution_quality_payload
 from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
+from broker.ig import IGBroker
 from risk.portfolio_risk import get_risk_briefing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -82,10 +84,36 @@ TEMPLATES = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "web" / "templa
 control = BotControlService(PROJECT_ROOT)
 research = ResearchService(PROJECT_ROOT)
 
+# ─── Shared broker session (independent of engine) ─────────────────────────
+_broker: Optional[IGBroker] = None
+
+
+def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
+    """Return (broker, error_message). Creates and connects on first call."""
+    global _broker
+    if _broker is not None and _broker.is_connected():
+        return _broker, ""
+
+    if not (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY):
+        return None, "IG credentials not configured (IG_USERNAME, IG_PASSWORD, IG_API_KEY)"
+
+    _broker = IGBroker(is_demo=(config.IG_ACC_TYPE == "DEMO"))
+    if _broker.connect():
+        return _broker, ""
+
+    _broker = None
+    return None, "IG authentication failed — check credentials and API key"
+
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
     init_db()
+    # Check IG credentials on startup
+    if not (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY):
+        logging.getLogger(__name__).warning(
+            "IG credentials not configured. Set IG_USERNAME, IG_PASSWORD, IG_API_KEY in .env "
+            "to enable broker connection from the control plane."
+        )
     yield
 
 
@@ -155,6 +183,206 @@ def create_app() -> FastAPI:
     @app.get("/api/broker-health")
     def api_broker_health():
         return build_broker_health_payload()
+
+    # ─── Shared broker endpoints (work without engine running) ──────────
+
+    @app.post("/api/broker/connect")
+    def api_broker_connect():
+        global _broker
+        # Force reconnect
+        _broker = None
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return JSONResponse({"ok": False, "error": err}, status_code=400)
+        info = broker.get_account_info()
+        return {
+            "ok": True,
+            "account": config.IG_ACC_NUMBER,
+            "mode": "DEMO" if broker.is_demo else "LIVE",
+            "balance": info.balance,
+            "equity": info.equity,
+            "unrealised_pnl": info.unrealised_pnl,
+            "currency": info.currency,
+        }
+
+    @app.get("/api/broker/status")
+    def api_broker_status():
+        if not _broker or not _broker.is_connected():
+            return {"connected": False, "message": "Not connected. POST /api/broker/connect first."}
+        info = _broker.get_account_info()
+        positions = _broker.get_positions()
+        return {
+            "connected": True,
+            "account": config.IG_ACC_NUMBER,
+            "mode": "DEMO" if _broker.is_demo else "LIVE",
+            "balance": info.balance,
+            "equity": info.equity,
+            "unrealised_pnl": info.unrealised_pnl,
+            "currency": info.currency,
+            "open_positions": len(positions),
+        }
+
+    @app.get("/api/broker/positions")
+    def api_broker_positions():
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+        positions = _broker.get_positions()
+        return {
+            "count": len(positions),
+            "positions": [
+                {
+                    "deal_id": p.deal_id,
+                    "ticker": p.ticker,
+                    "direction": p.direction,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealised_pnl": p.unrealised_pnl,
+                    "strategy": p.strategy,
+                }
+                for p in positions
+            ],
+        }
+
+    @app.get("/api/broker/market/{epic:path}")
+    def api_broker_market(epic: str):
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+        info = _broker.get_market_info(epic)
+        if not info:
+            return JSONResponse({"error": f"Market {epic} not found or blocked"}, status_code=404)
+        snap = info.get("snapshot", {})
+        inst = info.get("instrument", {})
+        rules = info.get("dealingRules", {})
+        return {
+            "epic": epic,
+            "name": inst.get("name"),
+            "status": snap.get("marketStatus"),
+            "bid": snap.get("bid"),
+            "offer": snap.get("offer"),
+            "high": snap.get("high"),
+            "low": snap.get("low"),
+            "min_deal_size": rules.get("minDealSize", {}).get("value"),
+            "min_stop_distance": rules.get("minNormalStopOrLimitDistance", {}).get("value"),
+            "expiry": inst.get("expiry"),
+        }
+
+    @app.get("/api/broker/markets")
+    def api_broker_markets():
+        connected = _broker is not None and _broker.is_connected()
+        markets = []
+        for ticker, info in config.MARKET_MAP.items():
+            entry = {
+                "ticker": ticker,
+                "epic": info["epic"],
+                "ig_name": info.get("ig_name", ""),
+                "strategy": info.get("strategy", ""),
+                "verified": info.get("verified", False),
+            }
+            if connected:
+                mkt = _broker.get_market_info(info["epic"])
+                if mkt:
+                    snap = mkt.get("snapshot", {})
+                    entry["status"] = snap.get("marketStatus")
+                    entry["bid"] = snap.get("bid")
+                    entry["offer"] = snap.get("offer")
+                    entry["live"] = True
+                else:
+                    entry["live"] = False
+            markets.append(entry)
+        return {"connected": connected, "markets": markets}
+
+    @app.post("/api/broker/open-position")
+    async def api_broker_open_position(request: Request):
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+
+        body = await request.json()
+        epic = body.get("epic", "")
+        direction = body.get("direction", "BUY").upper()
+        size = float(body.get("size", 0))
+
+        if not epic or size <= 0:
+            return JSONResponse({"error": "epic, direction, size required"}, status_code=400)
+        if direction not in ("BUY", "SELL"):
+            return JSONResponse({"error": "direction must be BUY or SELL"}, status_code=400)
+
+        # Resolve ticker from epic (reverse lookup), or use epic as ticker
+        ticker = epic
+        for t, info in config.MARKET_MAP.items():
+            if info["epic"] == epic:
+                ticker = t
+                break
+
+        if ticker != epic:
+            # Use place_long/place_short which handle stop distances etc.
+            if direction == "BUY":
+                result = _broker.place_long(ticker, size, "api_manual")
+            else:
+                result = _broker.place_short(ticker, size, "api_manual")
+        else:
+            # Direct epic — use _place_option_leg for raw epic placement
+            result = _broker._place_option_leg(epic, direction, size, epic, "api_manual")
+
+        return {
+            "ok": result.success,
+            "deal_id": result.order_id,
+            "fill_price": result.fill_price,
+            "fill_qty": result.fill_qty,
+            "message": result.message,
+        }
+
+    @app.post("/api/broker/close-position")
+    async def api_broker_close_position(request: Request):
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+
+        body = await request.json()
+        deal_id = body.get("deal_id", "")
+
+        if not deal_id:
+            return JSONResponse({"error": "deal_id required"}, status_code=400)
+
+        # Find the position to get direction and size
+        positions = _broker.get_positions()
+        target = None
+        for p in positions:
+            if p.deal_id == deal_id:
+                target = p
+                break
+
+        if not target:
+            return JSONResponse({"error": f"No open position with deal_id={deal_id}"}, status_code=404)
+
+        close_direction = "SELL" if target.direction == "long" else "BUY"
+        close_payload = {
+            "dealId": deal_id,
+            "direction": close_direction,
+            "size": str(target.size),
+            "orderType": "MARKET",
+        }
+
+        r = _broker.session.post(
+            f"{_broker.base_url}/positions/otc",
+            json=close_payload,
+            headers={**_broker._headers("1"), "_method": "DELETE"},
+        )
+
+        if r.status_code != 200:
+            return JSONResponse({"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}, status_code=502)
+
+        import time
+        close_ref = r.json().get("dealReference", "")
+        if not close_ref:
+            return JSONResponse({"ok": False, "error": "No deal reference returned"}, status_code=502)
+
+        time.sleep(1)
+        result = _broker._confirm_deal(close_ref, target.ticker, target.strategy, target.size)
+        return {
+            "ok": result.success,
+            "deal_id": result.order_id,
+            "fill_price": result.fill_price,
+            "message": result.message,
+        }
 
     @app.get("/api/incidents")
     def api_incidents(limit: int = 50):
@@ -985,6 +1213,22 @@ def create_app() -> FastAPI:
                 "broker_health": build_broker_health_payload(),
             },
         )
+
+    @app.get("/fragments/broker-panel", response_class=HTMLResponse)
+    def broker_panel_fragment(request: Request):
+        connected = _broker is not None and _broker.is_connected()
+        ctx: dict[str, Any] = {"request": request, "connected": connected}
+        if connected:
+            info = _broker.get_account_info()
+            positions = _broker.get_positions()
+            ctx["account"] = config.IG_ACC_NUMBER
+            ctx["mode"] = "DEMO" if _broker.is_demo else "LIVE"
+            ctx["balance"] = info.balance
+            ctx["equity"] = info.equity
+            ctx["unrealised_pnl"] = info.unrealised_pnl
+            ctx["currency"] = info.currency
+            ctx["open_positions"] = len(positions)
+        return TEMPLATES.TemplateResponse(request, "_broker_panel.html", ctx)
 
     @app.get("/fragments/ledger", response_class=HTMLResponse)
     def ledger_fragment(request: Request):
@@ -1891,8 +2135,12 @@ def build_broker_health_payload() -> dict[str, Any]:
     bot = getattr(engine, "_bot", None) if engine else None
     broker = getattr(bot, "broker", None) if bot else None
 
+    # Fall back to shared broker session if engine broker not available
+    if not broker and _broker is not None and _broker.is_connected():
+        broker = _broker
+
     if not broker:
-        payload["message"] = "No active broker session (engine not running)."
+        payload["message"] = "No active broker session. POST /api/broker/connect to connect."
         return payload
 
     broker_class = broker.__class__.__name__
@@ -1934,13 +2182,17 @@ def build_broker_health_payload() -> dict[str, Any]:
             payload["connected"] = bool(engine_status.get("running"))
 
     payload["ready"] = bool(
-        payload["engine_running"]
-        and payload["connected"]
+        payload["connected"]
         and not payload["kill_switch_active"]
         and not payload["error"]
     )
     if not payload["message"]:
-        payload["message"] = "Broker lane ready." if payload["ready"] else "Broker lane degraded."
+        if payload["ready"] and payload["engine_running"]:
+            payload["message"] = "Broker lane ready."
+        elif payload["ready"]:
+            payload["message"] = "Broker connected (engine not running)."
+        else:
+            payload["message"] = "Broker lane degraded."
 
     return payload
 

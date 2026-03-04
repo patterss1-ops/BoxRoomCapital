@@ -81,6 +81,9 @@
     </details>
   </div>
 
+  <!-- Broker Panel — col-span-4 -->
+  <div class="md:col-span-4" id="broker-panel" hx-get="/fragments/broker-panel" hx-trigger="load delay:400ms, every 15s, refreshPanel" hx-swap="innerHTML"></div>
+
   <!-- Status + Incidents + Events — 3 column -->
   <div class="md:col-span-4" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
   <div class="md:col-span-4" id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load delay:200ms, every 8s" hx-swap="innerHTML"></div>

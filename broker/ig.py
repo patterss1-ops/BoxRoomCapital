@@ -98,6 +98,13 @@ class IGBroker(BaseBroker):
             logger.error(f"IG login error: {e}")
             return False
 
+    def is_connected(self) -> bool:
+        """Return True if session tokens are set (authenticated)."""
+        if not self.session:
+            return False
+        headers = self.session.headers
+        return bool(headers.get("CST") and headers.get("X-SECURITY-TOKEN"))
+
     def disconnect(self):
         """Let IG session expire naturally — explicit logout kills the web session."""
         if self.session:
