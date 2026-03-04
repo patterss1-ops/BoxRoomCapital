@@ -1,14 +1,18 @@
 """In-process runtime engine for OptionsBot lifecycle and control actions."""
 from __future__ import annotations
 
+import json
+import logging
 import threading
 import time
 from datetime import datetime
 from typing import Any
 
-from data.trade_db import log_event
-from options_runner import OptionsBot
+from data.trade_db import get_conn, log_event
+from app.engine.options_bot import OptionsBot
 from utils.logger import setup_logging
+
+logger = logging.getLogger(__name__)
 
 
 class OptionsEngine:
@@ -54,7 +58,13 @@ class OptionsEngine:
             self._mode = mode
             self._last_error = None
             self._started_at = datetime.now().isoformat()
-            self._bot = OptionsBot(mode=mode)
+            try:
+                self._bot = OptionsBot(mode=mode)
+            except Exception as exc:
+                self._last_error = str(exc)
+                self._started_at = None
+                logger.warning("OptionsBot constructor failed: %s", exc)
+                return {"ok": False, "message": f"Bot failed to initialise: {exc}"}
             self._thread = threading.Thread(
                 target=self._run_bot_thread,
                 name="options-engine",
@@ -117,8 +127,12 @@ class OptionsEngine:
             return running_bot.run_manual_scan()
 
         setup_logging()
-        temp = OptionsBot(mode=mode)
-        ok = temp.start(once=True, install_signal_handlers=False)
+        try:
+            temp = OptionsBot(mode=mode)
+            ok = temp.start(once=True, install_signal_handlers=False)
+        except Exception as exc:
+            logger.warning("One-shot scan failed: %s", exc)
+            return {"ok": False, "message": f"Scan failed: {exc}"}
         if ok:
             return {"ok": True, "message": f"One-shot scan complete ({mode.upper()})."}
         return {"ok": False, "message": "One-shot scan failed. Check logs."}
@@ -156,34 +170,63 @@ class OptionsEngine:
                 return {"ok": False, "message": "Bot is not running."}
             return self._bot.close_spread_manual(spread_id=spread_id, ticker=ticker, reason=reason)
 
+    def _persist_state(self, key: str, value: Any) -> None:
+        """Write a control state value to strategy_state for persistence."""
+        try:
+            conn = get_conn()
+            conn.execute(
+                "INSERT OR REPLACE INTO strategy_state (key, value, updated) VALUES (?,?,?)",
+                (key, json.dumps(value) if not isinstance(value, str) else value,
+                 datetime.now().isoformat()),
+            )
+            conn.commit()
+            conn.close()
+        except Exception as exc:
+            logger.warning("Failed to persist state %s: %s", key, exc)
+
     def set_kill_switch(self, active: bool, reason: str = "", actor: str = "operator") -> dict[str, Any]:
         with self._lock:
-            if not self._bot or not (self._thread and self._thread.is_alive()):
-                return {"ok": False, "message": "Bot is not running."}
-            message = self._bot.set_kill_switch(active=active, reason=reason, actor=actor)
-            return {"ok": True, "message": message}
+            if self._bot and self._thread and self._thread.is_alive():
+                message = self._bot.set_kill_switch(active=active, reason=reason, actor=actor)
+                return {"ok": True, "message": message}
+
+        # Persist to strategy_state when bot is not running
+        self._persist_state("kill_switch_active", "true" if active else "false")
+        self._persist_state("kill_switch_reason", reason)
+        action = "enabled" if active else "disabled"
+        log_event("KILL_SWITCH", f"Kill switch {action} by {actor}: {reason}")
+        return {"ok": True, "message": f"Kill switch {action} (persisted). {reason}"}
 
     def set_risk_throttle(self, pct: float, reason: str = "", actor: str = "operator") -> dict[str, Any]:
         with self._lock:
-            if not self._bot or not (self._thread and self._thread.is_alive()):
-                return {"ok": False, "message": "Bot is not running."}
-            message = self._bot.set_risk_throttle(pct=pct, reason=reason, actor=actor)
-            return {"ok": True, "message": message}
+            if self._bot and self._thread and self._thread.is_alive():
+                message = self._bot.set_risk_throttle(pct=pct, reason=reason, actor=actor)
+                return {"ok": True, "message": message}
+
+        self._persist_state("risk_throttle_pct", pct)
+        log_event("RISK_THROTTLE", f"Risk throttle set to {pct*100:.0f}% by {actor}: {reason}")
+        return {"ok": True, "message": f"Risk throttle set to {pct*100:.0f}% (persisted). {reason}"}
 
     def set_market_cooldown(self, ticker: str, minutes: int,
                             reason: str = "", actor: str = "operator") -> dict[str, Any]:
         with self._lock:
-            if not self._bot or not (self._thread and self._thread.is_alive()):
-                return {"ok": False, "message": "Bot is not running."}
-            message = self._bot.set_market_cooldown(ticker=ticker, minutes=minutes, reason=reason, actor=actor)
-            return {"ok": True, "message": message}
+            if self._bot and self._thread and self._thread.is_alive():
+                message = self._bot.set_market_cooldown(ticker=ticker, minutes=minutes, reason=reason, actor=actor)
+                return {"ok": True, "message": message}
+
+        self._persist_state(f"cooldown_{ticker}", {"minutes": minutes, "reason": reason, "actor": actor})
+        log_event("COOLDOWN", f"Cooldown set on {ticker} for {minutes}m by {actor}: {reason}")
+        return {"ok": True, "message": f"Cooldown set on {ticker} for {minutes}m (persisted). {reason}"}
 
     def clear_market_cooldown(self, ticker: str, reason: str = "", actor: str = "operator") -> dict[str, Any]:
         with self._lock:
-            if not self._bot or not (self._thread and self._thread.is_alive()):
-                return {"ok": False, "message": "Bot is not running."}
-            message = self._bot.clear_market_cooldown(ticker=ticker, reason=reason, actor=actor)
-            return {"ok": True, "message": message}
+            if self._bot and self._thread and self._thread.is_alive():
+                message = self._bot.clear_market_cooldown(ticker=ticker, reason=reason, actor=actor)
+                return {"ok": True, "message": message}
+
+        self._persist_state(f"cooldown_{ticker}", None)
+        log_event("COOLDOWN", f"Cooldown cleared on {ticker} by {actor}: {reason}")
+        return {"ok": True, "message": f"Cooldown cleared on {ticker} (persisted). {reason}"}
 
     def _run_bot_thread(self):
         bot = None

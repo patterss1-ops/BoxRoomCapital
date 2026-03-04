@@ -267,8 +267,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/analytics/portfolio")
     def api_portfolio_analytics(days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS):
-        bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
-        return build_portfolio_analytics_payload(days=bounded_days)
+        return build_portfolio_analytics_payload(days=days)
 
     @app.get("/api/charts/equity-curve")
     def api_equity_curve(days: int = 90):
@@ -401,7 +400,11 @@ def create_app() -> FastAPI:
     def start_bot(mode: str = Form(default=config.TRADING_MODE)):
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="start_bot", status="running", mode=mode)
-        result = control.start(mode=mode)
+        try:
+            result = control.start(mode=mode)
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Start failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -412,7 +415,11 @@ def create_app() -> FastAPI:
     def stop_bot():
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="stop_bot", status="running")
-        result = control.stop()
+        try:
+            result = control.stop()
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Stop failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -423,7 +430,11 @@ def create_app() -> FastAPI:
     def pause_bot():
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="pause_bot", status="running")
-        result = control.pause()
+        try:
+            result = control.pause()
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Pause failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -434,7 +445,11 @@ def create_app() -> FastAPI:
     def resume_bot():
         job_id = str(uuid.uuid4())
         create_job(job_id=job_id, job_type="resume_bot", status="running")
-        result = control.resume()
+        try:
+            result = control.resume()
+        except Exception as exc:
+            update_job(job_id, status="failed", error=str(exc))
+            return action_message(f"Resume failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
@@ -825,6 +840,26 @@ def create_app() -> FastAPI:
             _page_context(request=request, page_key="settings", title="Settings | Trading Bot"),
         )
 
+    @app.get("/api/settings")
+    def api_get_settings():
+        return _get_editable_settings()
+
+    @app.post("/api/settings", response_class=HTMLResponse)
+    def api_save_settings(request_body: dict[str, Any] | None = None):
+        if request_body is None:
+            return HTMLResponse(
+                '<div class="text-red-400 text-sm py-2">No settings provided.</div>',
+                status_code=422,
+            )
+        errors = _validate_settings(request_body)
+        if errors:
+            error_html = '<div class="text-red-400 text-sm py-2">' + "<br>".join(errors) + "</div>"
+            return HTMLResponse(error_html, status_code=422)
+        _save_settings_overrides(request_body)
+        return HTMLResponse(
+            '<div class="text-emerald-400 text-sm py-2">Settings saved. Restart the bot for changes to take effect.</div>'
+        )
+
     @app.get("/legacy", response_class=HTMLResponse)
     def legacy_single_page(request: Request):
         payload = build_status_payload()
@@ -1059,13 +1094,12 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/portfolio-analytics", response_class=HTMLResponse)
     def portfolio_analytics_fragment(request: Request, days: int = config.PORTFOLIO_ANALYTICS_DEFAULT_DAYS):
-        bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
         return TEMPLATES.TemplateResponse(
             request,
             "_portfolio_analytics.html",
             {
                 "request": request,
-                "analytics": build_portfolio_analytics_payload(days=bounded_days),
+                "analytics": build_portfolio_analytics_payload(days=days),
             },
         )
 
@@ -1492,7 +1526,11 @@ def _page_context(request: Request, page_key: str, title: str) -> dict[str, Any]
 
 def _run_scan_job(job_id: str, mode: str):
     update_job(job_id, status="running", detail=f"Running one-shot scan ({mode.upper()})")
-    result = control.scan_once(mode=mode)
+    try:
+        result = control.scan_once(mode=mode)
+    except Exception as exc:
+        update_job(job_id, status="failed", detail="Scan crashed", error=str(exc))
+        return
     if result["ok"]:
         update_job(
             job_id,
@@ -1513,7 +1551,11 @@ def _run_scan_job(job_id: str, mode: str):
 
 def _run_reconcile_job(job_id: str):
     update_job(job_id, status="running", detail="Running reconcile")
-    result = control.reconcile()
+    try:
+        result = control.reconcile()
+    except Exception as exc:
+        update_job(job_id, status="failed", detail="Reconcile crashed", error=str(exc))
+        return
     if result["ok"]:
         update_job(job_id, status="completed", detail=result["message"])
         return
@@ -1901,6 +1943,100 @@ def build_broker_health_payload() -> dict[str, Any]:
         payload["message"] = "Broker lane ready." if payload["ready"] else "Broker lane degraded."
 
     return payload
+
+
+def _get_editable_settings() -> dict[str, Any]:
+    overrides = config._load_runtime_overrides()
+    return {
+        "broker": {
+            "broker_mode": overrides.get("broker_mode", config.BROKER_MODE),
+            "trading_mode": overrides.get("trading_mode", config.TRADING_MODE),
+        },
+        "risk_limits": {
+            "portfolio_initial_capital": overrides.get("portfolio_initial_capital", config.PORTFOLIO["initial_capital"]),
+            "portfolio_default_stake": overrides.get("portfolio_default_stake", config.PORTFOLIO["default_stake_per_point"]),
+            "portfolio_max_positions": overrides.get("portfolio_max_positions", config.PORTFOLIO["max_open_positions"]),
+            "portfolio_max_exposure_pct": overrides.get("portfolio_max_exposure_pct", config.PORTFOLIO["max_exposure_pct"]),
+        },
+        "ibs_parameters": {
+            "ibs_entry_thresh": overrides.get("ibs_entry_thresh", config.IBS_PARAMS["ibs_entry_thresh"]),
+            "ibs_exit_thresh": overrides.get("ibs_exit_thresh", config.IBS_PARAMS["ibs_exit_thresh"]),
+            "ibs_use_rsi_filter": overrides.get("ibs_use_rsi_filter", config.IBS_PARAMS["use_rsi_filter"]),
+            "ibs_rsi_period": overrides.get("ibs_rsi_period", config.IBS_PARAMS["rsi_period"]),
+            "ibs_rsi_entry_thresh": overrides.get("ibs_rsi_entry_thresh", config.IBS_PARAMS["rsi_entry_thresh"]),
+            "ibs_rsi_exit_thresh": overrides.get("ibs_rsi_exit_thresh", config.IBS_PARAMS["rsi_exit_thresh"]),
+            "ibs_ema_period": overrides.get("ibs_ema_period", config.IBS_PARAMS["ema_period"]),
+        },
+        "notifications": {
+            "notifications_enabled": overrides.get("notifications_enabled", config.NOTIFICATIONS["enabled"]),
+            "notifications_email_to": overrides.get("notifications_email_to", config.NOTIFICATIONS["email_to"]),
+            "notifications_telegram_chat_id": overrides.get("notifications_telegram_chat_id", config.NOTIFICATIONS["telegram_chat_id"]),
+        },
+    }
+
+
+def _validate_settings(data: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if "broker_mode" in data and data["broker_mode"] not in ("paper", "demo", "live"):
+        errors.append("broker_mode must be paper, demo, or live.")
+    if "trading_mode" in data and data["trading_mode"] not in ("shadow", "live"):
+        errors.append("trading_mode must be shadow or live.")
+    float_fields = {
+        "portfolio_initial_capital": (100, 10_000_000),
+        "portfolio_default_stake": (0.01, 1000),
+        "portfolio_max_exposure_pct": (1, 100),
+        "ibs_entry_thresh": (0.01, 0.99),
+        "ibs_exit_thresh": (0.01, 0.99),
+        "ibs_rsi_entry_thresh": (1, 99),
+        "ibs_rsi_exit_thresh": (1, 99),
+    }
+    for field, (lo, hi) in float_fields.items():
+        if field in data:
+            try:
+                val = float(data[field])
+                if val < lo or val > hi:
+                    errors.append(f"{field} must be between {lo} and {hi}.")
+            except (ValueError, TypeError):
+                errors.append(f"{field} must be a number.")
+    int_fields = {
+        "portfolio_max_positions": (1, 100),
+        "ibs_rsi_period": (1, 50),
+        "ibs_ema_period": (10, 500),
+    }
+    for field, (lo, hi) in int_fields.items():
+        if field in data:
+            try:
+                val = int(data[field])
+                if val < lo or val > hi:
+                    errors.append(f"{field} must be between {lo} and {hi}.")
+            except (ValueError, TypeError):
+                errors.append(f"{field} must be an integer.")
+    return errors
+
+
+def _save_settings_overrides(data: dict[str, Any]) -> None:
+    existing = config._load_runtime_overrides()
+    type_casts = {
+        "portfolio_initial_capital": float,
+        "portfolio_default_stake": float,
+        "portfolio_max_positions": int,
+        "portfolio_max_exposure_pct": float,
+        "ibs_entry_thresh": float,
+        "ibs_exit_thresh": float,
+        "ibs_use_rsi_filter": lambda v: v if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes", "on"),
+        "ibs_rsi_period": int,
+        "ibs_rsi_entry_thresh": float,
+        "ibs_rsi_exit_thresh": float,
+        "ibs_ema_period": int,
+        "notifications_enabled": lambda v: v if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes", "on"),
+    }
+    for key, value in data.items():
+        if key in type_casts:
+            existing[key] = type_casts[key](value)
+        else:
+            existing[key] = value
+    config._RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    config._SETTINGS_OVERRIDE_PATH.write_text(json.dumps(existing, indent=2))
 
 
 app = create_app()

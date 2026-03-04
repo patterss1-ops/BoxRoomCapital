@@ -6,6 +6,7 @@ relative ranking, and statistical significance testing.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from typing import Any, Optional, Sequence
 
@@ -178,5 +179,4 @@ def check_significance(
 
 def _normal_cdf(x: float) -> float:
     """Approximate standard normal CDF using Abramowitz & Stegun."""
-    import math
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))

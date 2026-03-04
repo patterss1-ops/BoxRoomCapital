@@ -137,18 +137,18 @@
 
   <!-- Status + Order Actions — 2 column -->
   <div class="md:col-span-6" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="order-actions-panel" hx-get="/fragments/order-actions" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="order-actions-panel" hx-get="/fragments/order-actions" hx-trigger="load delay:200ms, every 8s" hx-swap="innerHTML"></div>
 
   <!-- Reconcile + Control Actions — 2 column -->
-  <div class="md:col-span-6" id="reconcile-panel" hx-get="/fragments/reconcile-report" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="reconcile-panel" hx-get="/fragments/reconcile-report" hx-trigger="load delay:500ms, every 15s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>
 
   <!-- Broker Health + Intent Audit — 2 column -->
-  <div class="md:col-span-6" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
 
   <!-- Ledger — full width -->
-  <div class="md:col-span-12" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-12" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load delay:1s, every 15s" hx-swap="innerHTML"></div>
 
 </div>
 {% endblock %}

@@ -2,7 +2,20 @@
 {% block content %}
 <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 
-  <!-- Runbook Reference — col-span-6 -->
+  <div class="md:col-span-12">
+    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+      <div class="flex justify-between items-baseline gap-4 mb-4">
+        <h2 class="text-lg font-semibold text-slate-200">Runtime Settings</h2>
+        <p class="text-slate-500 text-sm">Edit and save configuration overrides</p>
+      </div>
+      <div id="settings-feedback" class="mb-3"></div>
+      <div id="settings-form-container" hx-get="/api/settings" hx-trigger="load" hx-swap="innerHTML"
+           hx-on::after-request="if(event.detail.successful) window.__renderSettingsForm(event.detail.xhr.responseText)">
+        <p class="text-slate-500 text-sm">Loading settings...</p>
+      </div>
+    </div>
+  </div>
+
   <div class="md:col-span-6">
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
       <div class="flex justify-between items-baseline gap-4 mb-3">
@@ -38,7 +51,6 @@
     </div>
   </div>
 
-  <!-- Local Commands — col-span-6 -->
   <div class="md:col-span-6">
     <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
       <div class="flex justify-between items-baseline gap-4 mb-3">
@@ -52,9 +64,119 @@ python3 run_console.py</div>
     </div>
   </div>
 
-  <!-- Status + Control Actions — 2 column -->
   <div class="md:col-span-6" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
   <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 10s" hx-swap="innerHTML"></div>
 
 </div>
+
+<script>
+window.__renderSettingsForm = function(responseText) {
+  var data;
+  try { data = JSON.parse(responseText); } catch(e) { return; }
+  var container = document.getElementById('settings-form-container');
+  if (!container) return;
+
+  function inp(id, val, type, label, helpText) {
+    var inputType = type || 'text';
+    var step = (inputType === 'number' && String(val).indexOf('.') !== -1) ? ' step="0.01"' : '';
+    return '<div class="space-y-1">' +
+      '<label class="text-slate-400 text-xs" for="sf-' + id + '">' + label + '</label>' +
+      '<input id="sf-' + id + '" name="' + id + '" type="' + inputType + '" value="' + val + '"' + step +
+      ' class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none" />' +
+      (helpText ? '<p class="text-slate-600 text-xs">' + helpText + '</p>' : '') +
+      '</div>';
+  }
+
+  function sel(id, val, options, label) {
+    var opts = options.map(function(o) {
+      return '<option value="' + o + '"' + (o === val ? ' selected' : '') + '>' + o + '</option>';
+    }).join('');
+    return '<div class="space-y-1">' +
+      '<label class="text-slate-400 text-xs" for="sf-' + id + '">' + label + '</label>' +
+      '<select id="sf-' + id + '" name="' + id + '" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none">' + opts + '</select>' +
+      '</div>';
+  }
+
+  function chk(id, val, label) {
+    var checked = val ? ' checked' : '';
+    return '<div class="flex items-center gap-2 py-1">' +
+      '<input id="sf-' + id + '" name="' + id + '" type="checkbox"' + checked +
+      ' class="w-4 h-4 bg-slate-800 border-slate-600 rounded text-blue-500 focus:ring-blue-500/50" />' +
+      '<label class="text-slate-400 text-sm" for="sf-' + id + '">' + label + '</label>' +
+      '</div>';
+  }
+
+  function section(title, content) {
+    return '<div class="border border-slate-800 rounded-lg p-4 space-y-3">' +
+      '<h3 class="text-sm font-semibold text-slate-300 mb-2">' + title + '</h3>' +
+      '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' + content + '</div></div>';
+  }
+
+  var b = data.broker || {};
+  var r = data.risk_limits || {};
+  var ibs = data.ibs_parameters || {};
+  var n = data.notifications || {};
+
+  var html = '<form id="settings-form" class="space-y-4">' +
+    section('Broker', 
+      sel('broker_mode', b.broker_mode || 'paper', ['paper','demo','live'], 'Broker Mode') +
+      sel('trading_mode', b.trading_mode || 'shadow', ['shadow','live'], 'Trading Mode')
+    ) +
+    section('Risk Limits',
+      inp('portfolio_initial_capital', r.portfolio_initial_capital || 10000, 'number', 'Initial Capital', '100 - 10,000,000') +
+      inp('portfolio_default_stake', r.portfolio_default_stake || 0.5, 'number', 'Default Stake/Point', '0.01 - 1000') +
+      inp('portfolio_max_positions', r.portfolio_max_positions || 8, 'number', 'Max Open Positions', '1 - 100') +
+      inp('portfolio_max_exposure_pct', r.portfolio_max_exposure_pct || 50, 'number', 'Max Exposure %', '1 - 100')
+    ) +
+    section('IBS Strategy Parameters',
+      inp('ibs_entry_thresh', ibs.ibs_entry_thresh || 0.3, 'number', 'IBS Entry Threshold', '0.01 - 0.99') +
+      inp('ibs_exit_thresh', ibs.ibs_exit_thresh || 0.7, 'number', 'IBS Exit Threshold', '0.01 - 0.99') +
+      chk('ibs_use_rsi_filter', ibs.ibs_use_rsi_filter, 'Use RSI Filter') +
+      inp('ibs_rsi_period', ibs.ibs_rsi_period || 2, 'number', 'RSI Period', '1 - 50') +
+      inp('ibs_rsi_entry_thresh', ibs.ibs_rsi_entry_thresh || 25, 'number', 'RSI Entry Threshold', '1 - 99') +
+      inp('ibs_rsi_exit_thresh', ibs.ibs_rsi_exit_thresh || 65, 'number', 'RSI Exit Threshold', '1 - 99') +
+      inp('ibs_ema_period', ibs.ibs_ema_period || 200, 'number', 'EMA Period', '10 - 500')
+    ) +
+    section('Notifications',
+      chk('notifications_enabled', n.notifications_enabled, 'Notifications Enabled') +
+      inp('notifications_email_to', n.notifications_email_to || '', 'email', 'Email To', '') +
+      inp('notifications_telegram_chat_id', n.notifications_telegram_chat_id || '', 'text', 'Telegram Chat ID', '')
+    ) +
+    '<div class="flex items-center gap-3">' +
+      '<button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">Save Settings</button>' +
+      '<span id="settings-save-status"></span>' +
+    '</div>' +
+  '</form>';
+
+  container.innerHTML = html;
+
+  document.getElementById('settings-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+    var form = e.target;
+    var payload = {};
+    var inputs = form.querySelectorAll('input, select');
+    for (var i = 0; i < inputs.length; i++) {
+      var el = inputs[i];
+      var name = el.name;
+      if (!name) continue;
+      if (el.type === 'checkbox') {
+        payload[name] = el.checked;
+      } else if (el.type === 'number') {
+        payload[name] = parseFloat(el.value);
+      } else {
+        payload[name] = el.value;
+      }
+    }
+    var fb = document.getElementById('settings-feedback');
+    fb.innerHTML = '<p class="text-slate-400 text-sm">Saving...</p>';
+    fetch('/api/settings', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    }).then(function(resp) { return resp.text(); })
+      .then(function(html) { fb.innerHTML = html; })
+      .catch(function(err) { fb.innerHTML = '<div class="text-red-400 text-sm py-2">Save failed: ' + err + '</div>'; });
+  });
+};
+</script>
 {% endblock %}

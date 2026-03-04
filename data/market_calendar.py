@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
+from functools import lru_cache
 from zoneinfo import ZoneInfo
 
 ET = ZoneInfo("America/New_York")
@@ -93,6 +94,7 @@ class MarketCalendar:
         return current
 
 
+@lru_cache(maxsize=10)
 def _us_market_holidays(year: int) -> dict[date, str]:
     """US market holidays for a given year with weekend-observed dates."""
     holidays: dict[date, str] = {}
@@ -109,24 +111,26 @@ def _us_market_holidays(year: int) -> dict[date, str]:
     return holidays
 
 
-def _us_market_early_closes(year: int) -> set[date]:
+@lru_cache(maxsize=10)
+def _us_market_early_closes(year: int) -> frozenset[date]:
     """Common US market early-close days."""
+    holidays = _us_market_holidays(year)
     early: set[date] = set()
     thanksgiving = _nth_weekday(year, 11, 3, 4)
     black_friday = thanksgiving + timedelta(days=1)
-    if black_friday.weekday() < 5 and black_friday not in _us_market_holidays(year):
+    if black_friday.weekday() < 5 and black_friday not in holidays:
         early.add(black_friday)
 
     christmas_eve = date(year, 12, 24)
-    if christmas_eve.weekday() < 5 and christmas_eve not in _us_market_holidays(year):
+    if christmas_eve.weekday() < 5 and christmas_eve not in holidays:
         early.add(christmas_eve)
 
     july3 = date(year, 7, 3)
     july4 = date(year, 7, 4)
-    if july4.weekday() < 5 and july3.weekday() < 5 and july3 not in _us_market_holidays(year):
+    if july4.weekday() < 5 and july3.weekday() < 5 and july3 not in holidays:
         early.add(july3)
 
-    return early
+    return frozenset(early)
 
 
 def _observed(day: date) -> date:

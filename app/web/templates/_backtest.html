@@ -41,21 +41,21 @@
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700/50 text-slate-400 border border-slate-600">{{ job.status }}</span>
             {% endif %}
           </td>
-          {% if job.result_parsed and job.result_parsed is mapping %}
-            <td class="py-1.5 pr-3 text-right font-mono text-xs {% if job.result_parsed.total_return_pct and job.result_parsed.total_return_pct > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
-              {{ "%.1f"|format(job.result_parsed.total_return_pct) if job.result_parsed.total_return_pct is not none else '-' }}%
+          {% if job.result_parsed and job.result_parsed is mapping and job.result_parsed.get('total_return_pct') is not none %}
+            <td class="py-1.5 pr-3 text-right font-mono text-xs {% if job.result_parsed.total_return_pct > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
+              {{ "%.1f"|format(job.result_parsed.total_return_pct) }}%
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
-              {{ "%.2f"|format(job.result_parsed.sharpe_ratio) if job.result_parsed.sharpe_ratio is not none else '-' }}
+              {{ "%.2f"|format(job.result_parsed.get('sharpe_ratio', 0)) }}
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-red-400">
-              {{ "%.1f"|format(job.result_parsed.max_drawdown_pct) if job.result_parsed.max_drawdown_pct is not none else '-' }}%
+              {{ "%.1f"|format(job.result_parsed.get('max_drawdown_pct', 0)) }}%
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
-              {{ job.result_parsed.total_trades if job.result_parsed.total_trades is not none else '-' }}
+              {{ job.result_parsed.get('total_trades', '-') }}
             </td>
             <td class="py-1.5 text-right font-mono text-xs text-slate-300">
-              {{ "%.1f"|format(job.result_parsed.win_rate) if job.result_parsed.win_rate is not none else '-' }}%
+              {{ "%.1f"|format(job.result_parsed.get('win_rate', 0)) }}%
             </td>
           {% else %}
             <td class="py-1.5 pr-3 text-right text-slate-500 text-xs" colspan="5">

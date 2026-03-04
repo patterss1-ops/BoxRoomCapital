@@ -4,9 +4,26 @@ All strategy parameters match Pine Script defaults exactly.
 Broker: IG (spread betting via REST API)
 """
 import os
+import json
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+_RUNTIME_DIR = Path(__file__).resolve().parent / ".runtime"
+_SETTINGS_OVERRIDE_PATH = _RUNTIME_DIR / "settings_override.json"
+
+
+def _load_runtime_overrides() -> dict:
+    try:
+        if _SETTINGS_OVERRIDE_PATH.exists():
+            return json.loads(_SETTINGS_OVERRIDE_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+_runtime_overrides = _load_runtime_overrides()
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -53,7 +70,7 @@ def _env_float(
 
 # ─── BROKER CONFIG ───────────────────────────────────────────────────────────
 
-BROKER_MODE = os.getenv("BROKER_MODE", "paper")  # "paper", "demo", "live"
+BROKER_MODE = _runtime_overrides.get("broker_mode", os.getenv("BROKER_MODE", "paper"))
 
 # IG API credentials — get your API key from https://labs.ig.com/
 IG_USERNAME = os.getenv("IG_USERNAME", "")
@@ -121,17 +138,17 @@ ROTATION_TICKERS = {"primary": "SPY", "partner": "TLT"}
 # Match Pine Script: IBS_Plus_Plus_v3.pine defaults
 
 IBS_PARAMS = {
-    "ibs_entry_thresh": 0.3,
-    "ibs_exit_thresh": 0.7,
-    "use_rsi_filter": True,
-    "rsi_period": 2,
-    "rsi_entry_thresh": 25.0,
-    "rsi_exit_thresh": 65.0,
+    "ibs_entry_thresh": _runtime_overrides.get("ibs_entry_thresh", 0.3),
+    "ibs_exit_thresh": _runtime_overrides.get("ibs_exit_thresh", 0.7),
+    "use_rsi_filter": _runtime_overrides.get("ibs_use_rsi_filter", True),
+    "rsi_period": _runtime_overrides.get("ibs_rsi_period", 2),
+    "rsi_entry_thresh": _runtime_overrides.get("ibs_rsi_entry_thresh", 25.0),
+    "rsi_exit_thresh": _runtime_overrides.get("ibs_rsi_exit_thresh", 65.0),
     "filter_mode": "Both",        # "Both" = IBS AND RSI (best PF)
     "use_down_days": False,
     "min_down_days": 2,
     "use_trend_filter": True,
-    "ema_period": 200,
+    "ema_period": _runtime_overrides.get("ibs_ema_period", 200),
     # VIX regime filter (new in v3)
     # RATIONALE (post-review): Low VIX = calm trending market above EMA = ideal
     # for mean reversion (orderly pullbacks snap back). High VIX = volatile
@@ -421,16 +438,16 @@ IBS_CREDIT_SPREAD_PARAMS = {
 # ─── PORTFOLIO SETTINGS ─────────────────────────────────────────────────────
 
 PORTFOLIO = {
-    "initial_capital": 10000,
-    "default_stake_per_point": 0.50,   # IG minimum for most markets
-    "max_open_positions": 8,           # With £10k we can hold more
-    "max_exposure_pct": 50,            # Conservative: max 50% of equity in margin
+    "initial_capital": _runtime_overrides.get("portfolio_initial_capital", 10000),
+    "default_stake_per_point": _runtime_overrides.get("portfolio_default_stake", 0.50),
+    "max_open_positions": _runtime_overrides.get("portfolio_max_positions", 8),
+    "max_exposure_pct": _runtime_overrides.get("portfolio_max_exposure_pct", 50),
 }
 
 # ─── LIVE OPTIONS TRADING ──────────────────────────────────────────────────
 
 # Trading mode: "shadow" = log signals but don't execute, "live" = real orders
-TRADING_MODE = os.getenv("TRADING_MODE", "shadow")
+TRADING_MODE = _runtime_overrides.get("trading_mode", os.getenv("TRADING_MODE", "shadow"))
 
 # Markets selected for live trading (run: python3 run_options_backtest.py --portfolio --top 6 --calibrate)
 # Update after running market selection with calibration applied
@@ -598,10 +615,10 @@ PORTFOLIO_ANALYTICS_RISK_FREE_RATE = _env_float(
 # ─── NOTIFICATIONS ───────────────────────────────────────────────────────────
 
 NOTIFICATIONS = {
-    "enabled": os.getenv("NOTIFICATIONS_ENABLED", "false").lower() == "true",
-    "email_to": os.getenv("NOTIFY_EMAIL", ""),
+    "enabled": _runtime_overrides.get("notifications_enabled", os.getenv("NOTIFICATIONS_ENABLED", "false").lower() == "true"),
+    "email_to": _runtime_overrides.get("notifications_email_to", os.getenv("NOTIFY_EMAIL", "")),
     "telegram_token": os.getenv("TELEGRAM_TOKEN", ""),
-    "telegram_chat_id": os.getenv("TELEGRAM_CHAT_ID", ""),
+    "telegram_chat_id": _runtime_overrides.get("notifications_telegram_chat_id", os.getenv("TELEGRAM_CHAT_ID", "")),
 }
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────

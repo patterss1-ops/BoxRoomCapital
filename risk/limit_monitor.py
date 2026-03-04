@@ -7,6 +7,7 @@ and emits alerts before hard limits are hit.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -80,9 +81,13 @@ class LimitMonitorReport:
 class LimitMonitor:
     """Monitors risk limits and emits pre-breach warnings."""
 
-    def __init__(self, alert_fn: Optional[Callable[[str, LimitCheckResult], None]] = None) -> None:
+    def __init__(
+        self,
+        alert_fn: Optional[Callable[[str, LimitCheckResult], None]] = None,
+        max_history: int = 1000,
+    ) -> None:
         self._limits: dict[str, LimitConfig] = {}
-        self._history: list[LimitCheckResult] = []
+        self._history: deque[LimitCheckResult] = deque(maxlen=max_history)
         self._alert_fn = alert_fn
 
     def add_limit(self, config: LimitConfig) -> None:

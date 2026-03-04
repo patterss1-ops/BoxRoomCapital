@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 
 PROMPT_V1 = """\
@@ -59,7 +59,3 @@ def get_analysis_prompt(
     )
 
     return template.format(ticker=ticker, context_block=context_block)
-
-
-# re-export Optional for type hints used in signature above
-from typing import Optional  # noqa: E402
