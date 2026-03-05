@@ -14,6 +14,8 @@ from typing import Callable, Optional, Sequence
 
 from data.trade_db import DB_PATH, create_job, log_event, update_job
 from intelligence.event_store import EventRecord, EventStore
+import os
+
 from intelligence.sa_quant_client import SAQuantClient
 from intelligence.sa_factor_grades import normalize_factor_grades, store_factor_grades
 
@@ -42,11 +44,19 @@ class SAQuantJobRunner:
         config: SAQuantJobConfig = SAQuantJobConfig(),
         now_fn: Callable[[], str] = _utc_now_iso,
     ):
-        self.client = client or SAQuantClient()
+        self.client = client or self._default_client()
         self.db_path = db_path
         self.event_store = event_store or EventStore(db_path=db_path)
         self.config = config
         self._now_fn = now_fn
+
+    @staticmethod
+    def _default_client():
+        """Use scraper adapter when RapidAPI key is absent, else original client."""
+        if os.getenv("SA_RAPIDAPI_KEY", "").strip():
+            return SAQuantClient()
+        from intelligence.scrapers.sa_adapter import SAScraperAdapter
+        return SAScraperAdapter()
 
     def run(self, tickers: Sequence[str], as_of: str = "", job_id: str = "") -> dict:
         """Run SA Quant ingestion for a ticker batch.
