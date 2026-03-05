@@ -24,3 +24,4 @@ schedule
 trading-ig
 uvicorn[standard]
 yfinance
+playwright

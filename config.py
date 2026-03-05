@@ -575,6 +575,22 @@ STRATEGY_SLOTS = [
     },
 ]
 
+# ─── KRAKEN CRYPTO BROKER ─────────────────────────────────────────────────
+KRAKEN_API_KEY = os.getenv("KRAKEN_API_KEY", "")
+KRAKEN_API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
+
+# Crypto market mapping for the orchestrator
+CRYPTO_MARKETS = {
+    "BTC": {"pair": "XXBTZUSD", "strategy": "momentum", "direction": "both"},
+    "ETH": {"pair": "XETHZUSD", "strategy": "momentum", "direction": "both"},
+    "SOL": {"pair": "SOLUSD", "strategy": "momentum", "direction": "both"},
+}
+
+# ─── INTRADAY EVENT LOOP ─────────────────────────────────────────────────
+INTRADAY_ENABLED = _env_bool("INTRADAY_ENABLED", False)
+INTRADAY_POLL_SECONDS = _env_int("INTRADAY_POLL_SECONDS", 300, min_value=60, max_value=3600)
+INTRADAY_TICKERS = [t.strip() for t in os.getenv("INTRADAY_TICKERS", "SPY,QQQ").split(",") if t.strip()]
+
 # ─── TRADINGVIEW WEBHOOK INTAKE ────────────────────────────────────────────
 
 TRADINGVIEW_WEBHOOK_TOKEN = os.getenv("TRADINGVIEW_WEBHOOK_TOKEN", "")
@@ -610,6 +626,16 @@ PORTFOLIO_ANALYTICS_RISK_FREE_RATE = _env_float(
     0.0,
     min_value=-0.05,
     max_value=0.25,
+)
+
+# ─── PIPELINE & ORCHESTRATOR ─────────────────────────────────────────────────
+
+ORCHESTRATOR_ENABLED = _env_bool("ORCHESTRATOR_ENABLED", False)
+ORCHESTRATOR_DRY_RUN = _env_bool("ORCHESTRATOR_DRY_RUN", True)
+AI_PANEL_ENABLED = _env_bool("AI_PANEL_ENABLED", False)
+DISPATCHER_ENABLED = _env_bool("DISPATCHER_ENABLED", False)
+DISPATCHER_INTERVAL_SECONDS = _env_int(
+    "DISPATCHER_INTERVAL_SECONDS", 60, min_value=10, max_value=600
 )
 
 # ─── NOTIFICATIONS ───────────────────────────────────────────────────────────

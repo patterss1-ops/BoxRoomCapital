@@ -22,6 +22,10 @@ from app.signal.types import LayerId
 DEFAULT_SOURCE = "sa-quant-rapidapi"
 DEFAULT_HOST = "seeking-alpha.p.rapidapi.com"
 DEFAULT_ENDPOINT = f"https://{DEFAULT_HOST}/symbols/get-ratings"
+FACTOR_GRADES_ENDPOINT = f"https://{DEFAULT_HOST}/symbols/get-metrics-grades"
+NEWS_ENDPOINT = f"https://{DEFAULT_HOST}/news/get-news"
+ANALYST_RECS_ENDPOINT = f"https://{DEFAULT_HOST}/symbols/get-analyst-recommendation"
+MARKET_OUTLOOK_ENDPOINT = f"https://{DEFAULT_HOST}/market-outlook/get-outlook"
 
 _RATING_KEYS: Sequence[str] = (
     "quant_rating",
@@ -410,3 +414,135 @@ class SAQuantClient:
         """Fetch SA Quant and return L8 LayerScore payload."""
         snapshot = self.fetch_snapshot(ticker)
         return score_sa_quant_snapshot(snapshot=snapshot, as_of=as_of, source=self.config.source)
+
+    def fetch_factor_grades(self, ticker: str) -> Dict[str, Any]:
+        """Fetch SA factor grades (value/growth/momentum/profitability/revisions).
+
+        Returns raw grade data dict with keys like 'value_grade', 'growth_grade', etc.
+        Uses the /symbols/get-metrics-grades endpoint.
+        """
+        symbol = ticker.strip().upper()
+        if not symbol:
+            return {}
+
+        try:
+            response = self._session.get(
+                FACTOR_GRADES_ENDPOINT,
+                headers=self._headers(),
+                params={"symbols": symbol},
+                timeout=float(self.config.timeout_seconds),
+            )
+            if response.status_code != 200:
+                return {}
+
+            payload = response.json()
+            if not isinstance(payload, Mapping):
+                return {}
+
+            # Navigate to the grade data
+            grades: Dict[str, Any] = {}
+            for node in _iter_payload_nodes(payload):
+                attrs = node.get("attributes", node) if isinstance(node, Mapping) else node
+                if not isinstance(attrs, Mapping):
+                    continue
+                for key in ("value_grade", "growth_grade", "momentum_grade",
+                            "profitability_grade", "revisions_grade",
+                            "valueGrade", "growthGrade", "momentumGrade",
+                            "profitabilityGrade", "revisionsGrade"):
+                    val = attrs.get(key)
+                    if val is not None:
+                        normalized_key = key.replace("Grade", "_grade")
+                        if not normalized_key.endswith("_grade"):
+                            normalized_key = key
+                        grades[normalized_key] = val
+                if grades:
+                    break
+            return grades
+        except Exception:
+            return {}
+
+    def fetch_news(self, ticker: str, count: int = 20) -> list[Dict[str, Any]]:
+        """Fetch SA news articles for a ticker.
+
+        Returns list of dicts with headline, published_at, source, url.
+        Uses the /news/get-news endpoint.
+        """
+        symbol = ticker.strip().upper()
+        if not symbol:
+            return []
+
+        try:
+            response = self._session.get(
+                NEWS_ENDPOINT,
+                headers=self._headers(),
+                params={"symbol": symbol, "count": str(count)},
+                timeout=float(self.config.timeout_seconds),
+            )
+            if response.status_code != 200:
+                return []
+
+            payload = response.json()
+            articles = []
+            items = payload.get("data", []) if isinstance(payload, Mapping) else payload
+            if not isinstance(items, list):
+                return []
+
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                attrs = item.get("attributes", item) if isinstance(item, Mapping) else item
+                if not isinstance(attrs, Mapping):
+                    continue
+                headline = attrs.get("title") or attrs.get("headline") or ""
+                if headline:
+                    articles.append({
+                        "headline": str(headline),
+                        "published_at": str(attrs.get("publishOn") or attrs.get("published_at") or ""),
+                        "source": "seeking_alpha",
+                        "url": str(attrs.get("url") or attrs.get("link") or ""),
+                    })
+            return articles
+        except Exception:
+            return []
+
+    def fetch_analyst_recs(self, ticker: str) -> list[Dict[str, Any]]:
+        """Fetch SA analyst recommendations (Wall Street consensus).
+
+        Returns list of dicts with analyst, rating, target_price, date.
+        Uses the /symbols/get-analyst-recommendation endpoint.
+        """
+        symbol = ticker.strip().upper()
+        if not symbol:
+            return []
+
+        try:
+            response = self._session.get(
+                ANALYST_RECS_ENDPOINT,
+                headers=self._headers(),
+                params={"symbols": symbol},
+                timeout=float(self.config.timeout_seconds),
+            )
+            if response.status_code != 200:
+                return []
+
+            payload = response.json()
+            recs = []
+            items = payload.get("data", []) if isinstance(payload, Mapping) else payload
+            if not isinstance(items, list):
+                items = [payload]
+
+            for item in items:
+                if not isinstance(item, Mapping):
+                    continue
+                attrs = item.get("attributes", item)
+                if not isinstance(attrs, Mapping):
+                    continue
+                recs.append({
+                    "analyst": str(attrs.get("analyst") or attrs.get("firm") or ""),
+                    "rating": str(attrs.get("rating") or attrs.get("recommendation") or ""),
+                    "target_price": _coerce_float(attrs.get("target_price") or attrs.get("priceTarget")),
+                    "date": str(attrs.get("date") or attrs.get("publishedAt") or ""),
+                })
+            return recs
+        except Exception:
+            return []

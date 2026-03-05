@@ -96,10 +96,16 @@
     </div>
   </div>
 
-  <!-- RIGHT COL: Broker / Analytics / Audit -->
+  <!-- RIGHT COL: Intelligence / Pipeline / Broker -->
   <div class="flex flex-col gap-2 overflow-y-auto">
+    <!-- Intelligence Feed -->
+    <div id="intelligence-feed-panel" hx-get="/fragments/intelligence-feed" hx-trigger="load delay:300ms, every 15s" hx-swap="innerHTML"></div>
+
+    <!-- Pipeline Status -->
+    <div id="pipeline-status-panel" hx-get="/fragments/pipeline-status" hx-trigger="load delay:400ms, every 10s" hx-swap="innerHTML"></div>
+
     <!-- Broker Panel -->
-    <div id="broker-panel" hx-get="/fragments/broker-panel" hx-trigger="load delay:400ms, every 15s, refreshPanel" hx-swap="innerHTML">
+    <div id="broker-panel" hx-get="/fragments/broker-panel" hx-trigger="load delay:500ms, every 15s, refreshPanel" hx-swap="innerHTML">
       <svg class="htmx-indicator animate-spin h-3 w-3 text-slate-500 mx-auto mt-4" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/><path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/></svg>
     </div>
 

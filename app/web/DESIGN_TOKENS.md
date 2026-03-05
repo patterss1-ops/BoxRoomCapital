@@ -208,6 +208,29 @@ Inline spinner SVG (insert inside htmx containers):
 </svg>
 ```
 
+## Intelligence Feed
+
+```
+Panel: bg-slate-900 border border-slate-800 rounded-md p-1.5
+Regime badge: inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase
+Layer dot (fresh): w-1.5 h-1.5 rounded-full bg-emerald-400
+Layer dot (stale): w-1.5 h-1.5 rounded-full bg-red-400
+Layer dot (none):  w-1.5 h-1.5 rounded-full bg-slate-600
+Layer grid: grid grid-cols-4 gap-0.5
+Candidate score (high): text-emerald-400
+Candidate score (mid):  text-amber-400
+Candidate score (low):  text-red-400
+```
+
+## Pipeline Status
+
+```
+State badge (running): bg-emerald-500/15 text-emerald-400 border-emerald-500/30
+State badge (off):     bg-slate-500/15 text-slate-400 border-slate-500/30
+Inline button:         bg-transparent hover:bg-slate-800 text-slate-400 px-1 py-0.5 rounded text-[9px] border border-slate-700
+DAG node result:       text-[10px] font-mono, color by status
+```
+
 ## Sidebar Nav
 
 ```

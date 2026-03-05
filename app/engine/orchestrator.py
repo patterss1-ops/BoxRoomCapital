@@ -63,6 +63,7 @@ class OrchestrationResult:
     intents_created: list[dict] = field(default_factory=list)
     intents_rejected: list[dict] = field(default_factory=list)
     errors: list[dict] = field(default_factory=list)
+    macro_regime: str = ""
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -72,6 +73,7 @@ class OrchestrationResult:
             "intents_created": len(self.intents_created),
             "intents_rejected": len(self.intents_rejected),
             "errors": len(self.errors),
+            "macro_regime": self.macro_regime,
         }
 
 
@@ -131,6 +133,26 @@ def _get_bars_in_trade(ticker: str, strategy_id: str, db_path: str) -> int:
         return max(0, delta.days)
     except (ValueError, TypeError):
         return 0
+
+
+def _get_macro_regime():
+    """Attempt to classify current macro regime from FeatureStore data.
+
+    Returns MacroRegimeResult or None if data is unavailable.
+    """
+    try:
+        from intelligence.feature_store import FeatureStore
+        from intelligence.macro_regime import MacroRegimeClassifier
+
+        fs = FeatureStore()
+        try:
+            classifier = MacroRegimeClassifier(feature_store=fs)
+            return classifier.classify()
+        finally:
+            fs.close()
+    except Exception as exc:
+        logger.debug("Macro regime classification unavailable: %s", exc)
+        return None
 
 
 def _build_risk_context(equity: float, db_path: str) -> dict:
@@ -282,6 +304,21 @@ def run_orchestration_cycle(
     risk_ctx_dict: Optional[dict] = None
     if equity > 0:
         risk_ctx_dict = _build_risk_context(equity, db_path)
+
+    # Consult macro regime — adjust risk context when risk_off
+    macro_regime_result = _get_macro_regime()
+    if risk_ctx_dict and macro_regime_result:
+        result.macro_regime = macro_regime_result.regime.value
+        if macro_regime_result.regime.value == "risk_off":
+            logger.info(
+                "Macro regime is RISK_OFF (%s) — reducing position sizes 50%%",
+                macro_regime_result.reason,
+            )
+            risk_ctx_dict["macro_size_factor"] = 0.5
+        elif macro_regime_result.regime.value == "transition":
+            risk_ctx_dict["macro_size_factor"] = 0.75
+        else:
+            risk_ctx_dict["macro_size_factor"] = 1.0
 
     # Pre-fetch all universe data so cross-asset strategies get what they need
     universe_data = _prefetch_universe_data(slots, data_provider)

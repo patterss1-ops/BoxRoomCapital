@@ -1,0 +1,75 @@
+<div class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
+  <div class="flex justify-between items-baseline mb-1.5">
+    <h3 class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide">Intelligence</h3>
+    <span class="text-[10px] text-slate-500 font-mono">{{ as_of[:16] if as_of else "" }}</span>
+  </div>
+
+  <!-- Macro Regime Badge -->
+  <div class="mb-1.5">
+    <span class="text-[10px] text-slate-500">Macro Regime</span>
+    {% if macro_regime == "risk_on" %}
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30 ml-1">RISK ON</span>
+    {% elif macro_regime == "risk_off" %}
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-red-500/15 text-red-400 border-red-500/30 ml-1">RISK OFF</span>
+    {% elif macro_regime == "transition" %}
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30 ml-1">TRANSITION</span>
+    {% else %}
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-slate-500/15 text-slate-400 border-slate-500/30 ml-1">N/A</span>
+    {% endif %}
+  </div>
+
+  <!-- Signal Layer Freshness -->
+  <div class="mb-1.5">
+    <span class="text-[10px] text-slate-500 block mb-0.5">Signal Layers</span>
+    <div class="grid grid-cols-4 gap-0.5">
+      {% for layer in layers %}
+      <div class="flex items-center gap-1 px-1 py-0.5 rounded {% if layer.fresh %}bg-emerald-500/10{% elif layer.stale %}bg-red-500/10{% else %}bg-slate-800/50{% endif %}">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {% if layer.fresh %}bg-emerald-400{% elif layer.stale %}bg-red-400{% else %}bg-slate-600{% endif %}"></span>
+        <span class="text-[9px] font-mono text-slate-400 truncate">{{ layer.id }}</span>
+      </div>
+      {% endfor %}
+      {% if not layers %}
+      <span class="text-[10px] text-slate-600 col-span-4">No layer data</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Top Candidates -->
+  {% if candidates %}
+  <div class="mb-1.5">
+    <span class="text-[10px] text-slate-500 block mb-0.5">Top Candidates</span>
+    <table class="w-full text-[11px] text-left font-mono">
+      <thead>
+        <tr>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1 py-0.5">Ticker</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1 py-0.5 text-right">Score</th>
+          <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1 py-0.5 text-right">Conf</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in candidates[:8] %}
+        <tr class="border-b border-slate-800/50">
+          <td class="px-1 py-0.5 text-slate-300">{{ c.ticker }}</td>
+          <td class="px-1 py-0.5 text-right {% if c.score >= 70 %}text-emerald-400{% elif c.score >= 40 %}text-amber-400{% else %}text-red-400{% endif %}">{{ "%.0f"|format(c.score) }}</td>
+          <td class="px-1 py-0.5 text-right text-slate-400">{{ "%.0f"|format(c.confidence * 100) }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- AI Panel Verdicts -->
+  {% if ai_verdicts %}
+  <div>
+    <span class="text-[10px] text-slate-500 block mb-0.5">AI Panel</span>
+    {% for ticker, verdict in ai_verdicts.items() %}
+    <div class="flex items-center justify-between px-1 py-0.5 border-b border-slate-800/50">
+      <span class="text-[11px] font-mono text-slate-300">{{ ticker }}</span>
+      <span class="text-[10px] font-bold {% if verdict.action == 'BUY' %}text-emerald-400{% elif verdict.action == 'SELL' %}text-red-400{% else %}text-slate-400{% endif %}">{{ verdict.action }}</span>
+      <span class="text-[10px] text-slate-500">{{ "%.0f"|format(verdict.confidence * 100) }}%</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>

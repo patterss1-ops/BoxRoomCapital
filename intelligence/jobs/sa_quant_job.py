@@ -15,6 +15,7 @@ from typing import Callable, Optional, Sequence
 from data.trade_db import DB_PATH, create_job, log_event, update_job
 from intelligence.event_store import EventRecord, EventStore
 from intelligence.sa_quant_client import SAQuantClient
+from intelligence.sa_factor_grades import normalize_factor_grades, store_factor_grades
 
 
 def _utc_now_iso() -> str:
@@ -106,6 +107,20 @@ class SAQuantJobRunner:
                 )
                 scores[ticker] = layer_score.to_dict()
                 successes += 1
+
+                # Also fetch factor grades (best-effort, non-blocking)
+                try:
+                    raw_grades = self.client.fetch_factor_grades(ticker)
+                    if raw_grades:
+                        features = normalize_factor_grades(ticker, raw_grades)
+                        if features:
+                            from intelligence.feature_store import FeatureStore
+                            fs = FeatureStore()
+                            store_factor_grades(ticker, features, fs, as_of=run_as_of)
+                            fs.close()
+                except Exception:
+                    pass  # Factor grades are supplementary — don't fail the main job
+
             except Exception as exc:  # noqa: BLE001 - aggregate batch errors
                 failures[ticker] = str(exc)
                 log_event(

@@ -136,12 +136,14 @@
     <div class="bg-slate-900 border border-slate-800 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
       <div class="flex gap-0 border-b border-slate-800 mb-1.5 flex-shrink-0" id="right2-tabs">
         <button onclick="switchTab('right2','tab-ctrl')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-white" data-tab="tab-ctrl">Actions</button>
+        <button onclick="switchTab('right2','tab-pipeline')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-pipeline">Pipeline</button>
         <button onclick="switchTab('right2','tab-health')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-health">Health</button>
         <button onclick="switchTab('right2','tab-audit')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-audit">Audit</button>
         <button onclick="switchTab('right2','tab-ledger')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-ledger">Ledger</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-ctrl" class="active" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>
+        <div data-tab-content="tab-pipeline" id="pipeline-status-panel" hx-get="/fragments/pipeline-status" hx-trigger="load delay:600ms, every 10s" hx-swap="innerHTML"></div>
         <div data-tab-content="tab-health" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
         <div data-tab-content="tab-audit" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
         <div data-tab-content="tab-ledger" id="ledger-panel" hx-get="/fragments/ledger" hx-trigger="load delay:1s, every 15s" hx-swap="innerHTML"></div>

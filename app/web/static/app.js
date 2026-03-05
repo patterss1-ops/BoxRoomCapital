@@ -18,7 +18,9 @@
       '#order-actions-panel',
       '#control-actions-panel',
       '#job-detail-panel',
-      '#research-panel'
+      '#research-panel',
+      '#intelligence-feed-panel',
+      '#pipeline-status-panel'
     ];
     for (const selector of targets) {
       const node = document.querySelector(selector);
@@ -67,6 +69,11 @@
     { label: 'Run Reconcile', kind: 'post', url: '/api/actions/reconcile', body: {} },
     { label: 'Enable Kill Switch', kind: 'post', url: '/api/actions/kill-switch-enable', body: { reason: 'Command palette kill switch' }, confirm: 'Enable kill switch?' },
     { label: 'Disable Kill Switch', kind: 'post', url: '/api/actions/kill-switch-disable', body: { reason: 'Command palette clear kill switch' }, confirm: 'Disable kill switch?' },
+    { label: 'Start Scheduler', kind: 'post', url: '/api/actions/scheduler-start', body: {} },
+    { label: 'Stop Scheduler', kind: 'post', url: '/api/actions/scheduler-stop', body: {} },
+    { label: 'Start Dispatcher', kind: 'post', url: '/api/actions/dispatcher-start', body: {} },
+    { label: 'Stop Dispatcher', kind: 'post', url: '/api/actions/dispatcher-stop', body: {} },
+    { label: 'Run Daily DAG', kind: 'post', url: '/api/actions/run-daily-dag', body: {}, confirm: 'Run the full daily trading DAG now?' },
   ];
 
   let visible = [];

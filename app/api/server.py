@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import logging
+import os
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
@@ -105,16 +106,104 @@ def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
     return None, "IG authentication failed — check credentials and API key"
 
 
+def _run_preflight_checks(logger: logging.Logger) -> dict[str, str]:
+    """Check which external services have credentials configured.
+
+    Returns a dict of service_name -> "ok" | "missing".
+    """
+    checks = {
+        "ig_broker": "ok" if (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY) else "missing",
+        "telegram": "ok" if (config.NOTIFICATIONS.get("telegram_token") and config.NOTIFICATIONS.get("telegram_chat_id")) else "missing",
+        "anthropic_api": "ok" if os.getenv("ANTHROPIC_API_KEY") else "missing",
+        "openai_api": "ok" if os.getenv("OPENAI_API_KEY") else "missing",
+        "fred_api": "ok" if os.getenv("FRED_API_KEY") else "missing",
+        "finnhub_api": "ok" if os.getenv("FINNHUB_API_KEY") else "missing",
+        "sa_rapidapi": "ok" if os.getenv("SA_RAPIDAPI_KEY") else "missing",
+        "tradingview_webhook": "ok" if config.TRADINGVIEW_WEBHOOK_TOKEN else "missing",
+    }
+    ok_count = sum(1 for v in checks.values() if v == "ok")
+    missing = [k for k, v in checks.items() if v == "missing"]
+    logger.info("Preflight: %d/%d services configured", ok_count, len(checks))
+    if missing:
+        logger.warning("Preflight: missing credentials for: %s", ", ".join(missing))
+    return checks
+
+
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    _logger = logging.getLogger(__name__)
     init_db()
+
+    # Preflight checks
+    preflight = _run_preflight_checks(_logger)
+    _app.state.preflight = preflight
+
     # Check IG credentials on startup
-    if not (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY):
-        logging.getLogger(__name__).warning(
+    if preflight["ig_broker"] == "missing":
+        _logger.warning(
             "IG credentials not configured. Set IG_USERNAME, IG_PASSWORD, IG_API_KEY in .env "
             "to enable broker connection from the control plane."
         )
+
+    # Auto-start scheduler and dispatcher if enabled
+    if config.ORCHESTRATOR_ENABLED:
+        try:
+            result = control.start_scheduler()
+            _logger.info("Auto-start scheduler: %s", result.get("status"))
+        except Exception as exc:
+            _logger.error("Failed to auto-start scheduler: %s", exc)
+
+    if config.DISPATCHER_ENABLED:
+        try:
+            result = control.start_dispatcher()
+            _logger.info("Auto-start dispatcher: %s", result.get("status"))
+        except Exception as exc:
+            _logger.error("Failed to auto-start dispatcher: %s", exc)
+
+    if config.INTRADAY_ENABLED:
+        try:
+            result = control.start_intraday()
+            _logger.info("Auto-start intraday loop: %s", result.get("status"))
+        except Exception as exc:
+            _logger.error("Failed to auto-start intraday loop: %s", exc)
+
+    # Start supervision watchdog (checks every 60s, restarts crashed threads)
+    _supervisor_stop = asyncio.Event()
+
+    async def _supervisor_loop():
+        while not _supervisor_stop.is_set():
+            try:
+                await asyncio.sleep(60)
+                restarted = control.check_and_restart()
+                if restarted:
+                    _logger.warning("Supervisor restarted: %s", restarted)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                _logger.debug("Supervisor tick error: %s", exc)
+
+    supervisor_task = asyncio.create_task(_supervisor_loop())
+
     yield
+
+    # Graceful shutdown
+    _supervisor_stop.set()
+    supervisor_task.cancel()
+
+    # Graceful shutdown
+    _logger.info("Shutting down background services...")
+    try:
+        control.stop_scheduler()
+    except Exception:
+        pass
+    try:
+        control.stop_dispatcher()
+    except Exception:
+        pass
+    try:
+        control.stop_intraday()
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:
@@ -137,6 +226,15 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def api_health() -> dict[str, Any]:
         return build_api_health_payload()
+
+    @app.get("/api/preflight")
+    def api_preflight() -> dict[str, Any]:
+        """Return preflight check results and pipeline status."""
+        preflight = getattr(app.state, "preflight", {})
+        return {
+            "services": preflight,
+            "pipeline": control.pipeline_status(),
+        }
 
     @app.get("/api/metrics")
     def api_metrics(days: int = 14):
@@ -844,6 +942,50 @@ def create_app() -> FastAPI:
         update_job(job_id, status="failed", error=result["message"])
         return action_message(result["message"], ok=False)
 
+    # ─── Pipeline control endpoints ──────────────────────────────────────
+
+    @app.post("/api/actions/scheduler-start", response_class=HTMLResponse)
+    def scheduler_start_action():
+        result = control.start_scheduler()
+        ok = result.get("status") != "error"
+        return action_message(f"Scheduler: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/scheduler-stop", response_class=HTMLResponse)
+    def scheduler_stop_action():
+        result = control.stop_scheduler()
+        return action_message(f"Scheduler: {result['status']}", ok=True)
+
+    @app.post("/api/actions/dispatcher-start", response_class=HTMLResponse)
+    def dispatcher_start_action():
+        result = control.start_dispatcher()
+        ok = result.get("status") != "error"
+        return action_message(f"Dispatcher: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/dispatcher-stop", response_class=HTMLResponse)
+    def dispatcher_stop_action():
+        result = control.stop_dispatcher()
+        return action_message(f"Dispatcher: {result['status']}", ok=True)
+
+    @app.post("/api/actions/run-daily-dag", response_class=HTMLResponse)
+    def run_daily_dag_action():
+        job_id = str(uuid.uuid4())
+        create_job(job_id=job_id, job_type="daily_dag", status="running", detail="Full pipeline DAG")
+
+        def _run_dag_job(jid: str):
+            try:
+                result = control.trigger_daily_dag()
+                update_job(jid, status="completed", result=json.dumps(result))
+            except Exception as exc:
+                update_job(jid, status="failed", error=str(exc))
+
+        thread = threading.Thread(target=_run_dag_job, args=(job_id,), daemon=True)
+        thread.start()
+        return action_message(f"Daily DAG started (job {job_id[:8]})", ok=True)
+
+    @app.get("/api/pipeline-status")
+    def pipeline_status_api():
+        return control.pipeline_status()
+
     @app.post("/api/actions/discover-options", response_class=HTMLResponse)
     def discover_options_action(
         mode: str = Form(default="search"),
@@ -1422,6 +1564,69 @@ def create_app() -> FastAPI:
             request,
             "_control_actions.html",
             {"request": request, "control_actions": get_control_actions(limit=25)},
+        )
+
+    @app.get("/fragments/intelligence-feed", response_class=HTMLResponse)
+    def intelligence_feed_fragment(request: Request):
+        from datetime import datetime, timezone as tz
+
+        # Macro regime
+        macro_regime = ""
+        try:
+            from intelligence.feature_store import FeatureStore
+            from intelligence.macro_regime import MacroRegimeClassifier
+            fs = FeatureStore()
+            try:
+                result = MacroRegimeClassifier(feature_store=fs).classify()
+                macro_regime = result.regime.value if result else ""
+            finally:
+                fs.close()
+        except Exception:
+            pass
+
+        # Signal layer freshness
+        layers = []
+        try:
+            from app.signal.types import LayerId
+            from intelligence.event_store import EventStore
+            es = EventStore()
+            try:
+                for lid in LayerId:
+                    latest = es.get_latest_by_layer(lid.value)
+                    fresh = latest is not None
+                    layers.append({"id": lid.value, "fresh": fresh, "stale": False})
+            except Exception:
+                pass
+            finally:
+                es.close()
+        except Exception:
+            pass
+
+        # Top candidates from latest composite
+        candidates = []
+
+        # AI verdicts (if any)
+        ai_verdicts = {}
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_intelligence_feed.html",
+            {
+                "request": request,
+                "as_of": datetime.now(tz.utc).isoformat(),
+                "macro_regime": macro_regime,
+                "layers": layers,
+                "candidates": candidates,
+                "ai_verdicts": ai_verdicts,
+            },
+        )
+
+    @app.get("/fragments/pipeline-status", response_class=HTMLResponse)
+    def pipeline_status_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_pipeline_status.html",
+            {"request": request, "pipeline": control.pipeline_status()},
         )
 
     @app.get("/fragments/reconcile-report", response_class=HTMLResponse)
