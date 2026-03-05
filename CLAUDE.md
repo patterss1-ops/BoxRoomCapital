@@ -61,6 +61,10 @@ After each session, reflect on what went well and what could be improved. Update
 - Design tokens in `app/web/DESIGN_TOKENS.md` — dark Bloomberg-density theme
 - Test files mirror source: `tests/test_*.py`
 
+### Session discipline
+- Always update `.claude/history/SESSION_LOG.md` **before** and **after** every block of work
+- SA_RAPIDAPI_KEY dropped — user considers the API dodgy; will use webscraping instead
+
 ### What to anticipate
 - After any infrastructure work, user will want to **see it running** — always do a live test/demo
 - User cares about **real connectivity**, not mocks — verify external API calls work

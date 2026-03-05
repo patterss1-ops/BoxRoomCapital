@@ -1,0 +1,36 @@
+ ┌───────────────────────────┬────────────────────────────────────────────────────────────────┐                                                                                                                                           
+  │          Secret           │                             Notes                              │                                                                                                                                           
+  ├───────────────────────────┼────────────────────────────────────────────────────────────────┤                                                                                                                                           
+  │ KRAKEN_API_KEY            │ Only needed if you want crypto trading via Kraken              │                                                                                                                                           
+  ├───────────────────────────┼────────────────────────────────────────────────────────────────┤
+  │ KRAKEN_API_SECRET         │ Same — skip if no crypto plans for now                         │
+  ├───────────────────────────┼────────────────────────────────────────────────────────────────┤
+  │ TRADINGVIEW_WEBHOOK_TOKEN │ Any random string you choose — authenticates incoming webhooks │
+  └───────────────────────────┴────────────────────────────────────────────────────────────────┘
+
+  That's it. Everything else is set and verified working.
+
+❯ what is the API Secret is that the same as the private key?                                                                                                                                                                              
+                                                                                      
+● Yes — for Kraken, the API Secret is the Private Key. When you create an API key pair on Kraken (under Settings > API), they give you two values:                                                                                         
+                                                                                                                                                                                                                                           
+  - API Key — the public identifier → KRAKEN_API_KEY                                                                                                                                                                                       
+  - Private Key (also called API Secret) — the signing secret → KRAKEN_API_SECRET                                                                                                                                                          
+                                                                                                                                                                                                                                           
+  Same thing, different names.                                                                                                                                                                                                             
+                                                                                                                                                                                                                                           
+❯ ok dont i have other secrets for Seeking Alpha and other websites we are going to scrape?                                                                                                                                                
+                                                                                            
+● From .env.example, you have these scraper credentials listed:                                                                                                                                                                            
+                                                                                                                                                                                                                                           
+  ┌─────────────────────┬────────────┬─────────────────────────────────────────┐                                                                                                                                                           
+  │       Secret        │   Status   │                   For                   │                                                                                                                                                           
+  ├─────────────────────┼────────────┼─────────────────────────────────────────┤                                                                                                                                                           
+  │ SHARESCOPE_EMAIL    │ ❌ Missing │ UK director dealings & earnings scraper │                                                                                                                                                           
+  ├─────────────────────┼────────────┼─────────────────────────────────────────┤
+  │ SHARESCOPE_PASSWORD │ ❌ Missing │ Same                                    │
+  ├─────────────────────┼────────────┼─────────────────────────────────────────┤
+  │ KOYFIN_EMAIL        │ ❌ Missing │ Financial data scraper                  │
+  ├─────────────────────┼────────────┼─────────────────────────────────────────┤
+  │ KOYFIN_PASSWORD     │ ❌ Missing │ Same                                    │
+  └─────────────────────┴────────────┴─────────────────────────────────────────┘
