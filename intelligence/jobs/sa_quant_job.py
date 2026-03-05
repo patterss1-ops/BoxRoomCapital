@@ -52,11 +52,11 @@ class SAQuantJobRunner:
 
     @staticmethod
     def _default_client():
-        """Use scraper adapter when RapidAPI key is absent, else original client."""
+        """Use RapidAPI client if key present, else Yahoo Finance + Finnhub."""
         if os.getenv("SA_RAPIDAPI_KEY", "").strip():
             return SAQuantClient()
-        from intelligence.scrapers.sa_adapter import SAScraperAdapter
-        return SAScraperAdapter()
+        from intelligence.scrapers.sa_adapter import YFinnhubAdapter
+        return YFinnhubAdapter()
 
     def run(self, tickers: Sequence[str], as_of: str = "", job_id: str = "") -> dict:
         """Run SA Quant ingestion for a ticker batch.

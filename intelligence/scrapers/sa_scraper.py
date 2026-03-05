@@ -1,10 +1,9 @@
-"""Seeking Alpha web scraper — replaces the RapidAPI client.
+"""Seeking Alpha hybrid scraper — Playwright login + internal API.
 
-Uses Playwright headless browser to log in and extract:
-- Quant ratings + scores (L8)
-- Factor grades (value/growth/momentum/profitability/revisions)
-- News headlines
-- Analyst recommendations
+Strategy:
+1. Use Playwright + stealth to log in and obtain session cookies
+2. Use requests with those cookies to call SA's internal JSON API
+3. Cache cookies for reuse (they last ~30 min)
 
 Requires SA_EMAIL and SA_PASSWORD env vars (Replit secrets).
 """
@@ -14,13 +13,28 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
+import random
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
+
+import requests as req_lib
 
 logger = logging.getLogger(__name__)
 
-_GRADE_MAP: Dict[str, float] = {
+# SA internal API base
+_API_BASE = "https://seekingalpha.com/api/v3"
+
+# Factor grade numeric → letter mapping (SA uses 1-12 scale)
+_NUMERIC_TO_GRADE: Dict[int, str] = {
+    1: "F", 2: "D-", 3: "D", 4: "D+",
+    5: "C-", 6: "C", 7: "C+",
+    8: "B-", 9: "B", 10: "B+",
+    11: "A-", 12: "A", 13: "A+",
+}
+
+_GRADE_TO_SCORE: Dict[str, float] = {
     "A+": 100.0, "A": 95.0, "A-": 90.0,
     "B+": 85.0, "B": 80.0, "B-": 75.0,
     "C+": 70.0, "C": 65.0, "C-": 60.0,
@@ -29,33 +43,34 @@ _GRADE_MAP: Dict[str, float] = {
 }
 
 _RATING_MAP: Dict[str, str] = {
-    "strong buy": "strong buy",
-    "buy": "buy",
-    "hold": "hold",
-    "sell": "sell",
-    "strong sell": "strong sell",
-    "very bullish": "very bullish",
-    "bullish": "bullish",
-    "neutral": "hold",
-    "bearish": "bearish",
-    "very bearish": "very bearish",
+    "strong buy": "strong buy", "buy": "buy", "hold": "hold",
+    "sell": "sell", "strong sell": "strong sell",
+    "very bullish": "very bullish", "bullish": "bullish",
+    "neutral": "hold", "bearish": "bearish", "very bearish": "very bearish",
 }
+
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 @dataclass(frozen=True)
 class SAScraperConfig:
-    """Configuration for the Seeking Alpha scraper."""
-
+    """Configuration for the Seeking Alpha hybrid scraper."""
     email: str = ""
     password: str = ""
-    timeout_ms: int = 30000
+    timeout_seconds: float = 15.0
+    browser_timeout_ms: int = 30000
+    request_delay: float = 2.0  # seconds between API calls
+    chromium_path: str = ""  # optional path to Chromium executable
     source: str = "sa-scraper"
 
 
 @dataclass(frozen=True)
 class SAScrapedSnapshot:
-    """Data scraped from a SA ticker page."""
-
+    """Data scraped from SA for a single ticker."""
     ticker: str
     quant_rating: str = ""
     quant_score: Optional[float] = None
@@ -67,416 +82,458 @@ class SAScrapedSnapshot:
 
 class SAScraperError(RuntimeError):
     """Raised when SA scraping fails."""
-
     def __init__(self, message: str, retryable: bool = False):
         super().__init__(message)
         self.retryable = retryable
 
 
 class SAScraper:
-    """Playwright-based scraper for Seeking Alpha data."""
+    """Hybrid Playwright-login + internal-API scraper for Seeking Alpha."""
 
     def __init__(self, config: Optional[SAScraperConfig] = None):
         cfg = config or SAScraperConfig()
         self.config = SAScraperConfig(
-            email=cfg.email or os.getenv("SA_EMAIL", ""),
-            password=cfg.password or os.getenv("SA_PASSWORD", ""),
-            timeout_ms=cfg.timeout_ms,
+            email=cfg.email or os.getenv("SEEKING_ALPHA_EMAIL", os.getenv("SA_EMAIL", "")),
+            password=cfg.password or os.getenv("SEEKING_ALPHA_PASSWORD", os.getenv("SA_PASSWORD", "")),
+            timeout_seconds=cfg.timeout_seconds,
+            browser_timeout_ms=cfg.browser_timeout_ms,
+            request_delay=cfg.request_delay,
+            chromium_path=cfg.chromium_path or os.getenv("SA_CHROMIUM_PATH", ""),
             source=cfg.source,
         )
+        self._session: Optional[req_lib.Session] = None
+        self._cookies_obtained_at: float = 0
         self._browser = None
-        self._context = None
-        self._logged_in = False
 
-    def _ensure_browser(self):
-        """Lazy-initialize Playwright browser."""
-        if self._browser is not None:
-            return
+    # ── Chromium discovery ─────────────────────────────────────────────
 
-        try:
-            from playwright.sync_api import sync_playwright
-            self._pw = sync_playwright().start()
-            self._browser = self._pw.chromium.launch(headless=True)
-            self._context = self._browser.new_context(
-                user_agent=(
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-                viewport={"width": 1920, "height": 1080},
-            )
-        except ImportError:
-            logger.error(
-                "playwright not installed. Run: pip install playwright && playwright install chromium"
-            )
-            raise
+    @staticmethod
+    def _find_chromium() -> str:
+        """Auto-detect Chromium binary on Replit (nix store)."""
+        import glob
+        candidates = sorted(glob.glob(
+            "/nix/store/*-playwright-browsers-*/chromium-*/chrome-linux/chrome"
+        ))
+        if candidates:
+            return candidates[-1]  # newest version
+        return ""
 
-    def _login(self, page):
-        """Log into Seeking Alpha."""
-        if self._logged_in:
-            return
+    # ── Session management ────────────────────────────────────────────
 
+    def _needs_login(self) -> bool:
+        """Cookies expire after ~25 min — refresh proactively."""
+        if self._session is None:
+            return True
+        age = time.monotonic() - self._cookies_obtained_at
+        return age > 1500  # 25 minutes
+
+    def _obtain_cookies(self) -> Dict[str, str]:
+        """Use Playwright + stealth to log in and extract cookies."""
         if not self.config.email or not self.config.password:
             raise SAScraperError("SA_EMAIL and SA_PASSWORD required", retryable=False)
 
-        page.goto("https://seekingalpha.com/login", timeout=self.config.timeout_ms)
-        page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
+        try:
+            from playwright.sync_api import sync_playwright
+            from playwright_stealth import Stealth
+        except ImportError as exc:
+            raise SAScraperError(
+                "playwright/playwright-stealth not installed", retryable=False
+            ) from exc
 
-        # Fill login form — SA uses data-test-id attributes
-        email_sel = 'input[data-test-id="email-input"], input[name="email"], input[type="email"]'
-        pwd_sel = 'input[data-test-id="password-input"], input[name="password"], input[type="password"]'
-        submit_sel = (
-            'button[data-test-id="login-button"], '
-            'button[type="submit"], '
-            'form button'
-        )
+        pw = sync_playwright().start()
+        try:
+            launch_kwargs: Dict[str, Any] = {"headless": True, "args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+            chrome_path = self.config.chromium_path or self._find_chromium()
+            if chrome_path:
+                launch_kwargs["executable_path"] = chrome_path
+            browser = pw.chromium.launch(**launch_kwargs)
+            context = browser.new_context(
+                user_agent=_USER_AGENT,
+                viewport={"width": 1920, "height": 1080},
+                locale="en-US",
+            )
+            stealth = Stealth()
+            stealth.apply(context)
+            page = context.new_page()
 
-        page.wait_for_selector(email_sel, timeout=self.config.timeout_ms)
-        page.fill(email_sel, self.config.email)
-        page.fill(pwd_sel, self.config.password)
-        page.click(submit_sel)
-        page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
+            # Navigate to login
+            page.goto(
+                "https://seekingalpha.com/login",
+                timeout=self.config.browser_timeout_ms,
+            )
+            page.wait_for_load_state("networkidle", timeout=self.config.browser_timeout_ms)
+            time.sleep(random.uniform(1.5, 3.0))
 
-        # Verify login succeeded — check for user menu or absence of login button
-        page.wait_for_timeout(2000)
-        self._logged_in = True
-        logger.info("SA login succeeded")
+            # Fill login form
+            email_sel = 'input[data-test-id="email-input"], input[name="email"], input[type="email"]'
+            pwd_sel = 'input[data-test-id="password-input"], input[name="password"], input[type="password"]'
+            submit_sel = 'button[data-test-id="login-button"], button[type="submit"]'
 
-    def _extract_number(self, text: str) -> Optional[float]:
-        """Extract first numeric value from text."""
-        match = re.search(r"[-+]?\d*\.?\d+", text.replace(",", ""))
-        if match:
-            return float(match.group())
-        return None
+            page.wait_for_selector(email_sel, timeout=self.config.browser_timeout_ms)
+            time.sleep(random.uniform(0.5, 1.0))
+            page.fill(email_sel, self.config.email)
+            time.sleep(random.uniform(0.3, 0.8))
+            page.fill(pwd_sel, self.config.password)
+            time.sleep(random.uniform(0.5, 1.5))
+            page.click(submit_sel)
+            page.wait_for_load_state("networkidle", timeout=self.config.browser_timeout_ms)
+            time.sleep(random.uniform(2.0, 4.0))
 
-    def _normalize_rating(self, text: str) -> str:
-        """Normalize a rating string to canonical form."""
-        cleaned = " ".join(text.strip().lower().split())
-        return _RATING_MAP.get(cleaned, cleaned)
+            # Extract cookies
+            raw_cookies = context.cookies()
+            cookies = {c["name"]: c["value"] for c in raw_cookies}
+            logger.info("SA login succeeded — got %d cookies", len(cookies))
 
-    # ── Quant ratings + factor grades (symbol page) ───────────────────
+            browser.close()
+            return cookies
+        finally:
+            pw.stop()
+
+    def _ensure_session(self):
+        """Ensure we have a valid requests session with SA cookies."""
+        if not self._needs_login():
+            return
+
+        cookies = self._obtain_cookies()
+        self._session = req_lib.Session()
+        self._session.headers.update({
+            "User-Agent": _USER_AGENT,
+            "Accept": "application/json",
+            "Referer": "https://seekingalpha.com/",
+            "Origin": "https://seekingalpha.com",
+        })
+        for name, value in cookies.items():
+            self._session.cookies.set(name, value)
+        self._cookies_obtained_at = time.monotonic()
+
+    def _api_get(self, path: str, params: Optional[Dict[str, str]] = None) -> Any:
+        """Make an authenticated GET to SA's internal API."""
+        self._ensure_session()
+        assert self._session is not None
+
+        url = f"{_API_BASE}/{path.lstrip('/')}"
+        time.sleep(random.uniform(self.config.request_delay * 0.8,
+                                  self.config.request_delay * 1.2))
+
+        resp = self._session.get(url, params=params, timeout=self.config.timeout_seconds)
+
+        if resp.status_code == 403:
+            # Session expired or blocked — force re-login on next call
+            logger.warning("SA API returned 403 — session may be expired")
+            self._session = None
+            raise SAScraperError("SA API 403 — session expired", retryable=True)
+
+        if resp.status_code != 200:
+            raise SAScraperError(
+                f"SA API HTTP {resp.status_code} for {path}", retryable=resp.status_code >= 500
+            )
+
+        return resp.json()
+
+    def _delay(self):
+        """Human-like delay between operations."""
+        time.sleep(random.uniform(self.config.request_delay, self.config.request_delay * 2))
+
+    # ── Quant ratings + factor grades ─────────────────────────────────
 
     def fetch_snapshot(self, ticker: str) -> SAScrapedSnapshot:
-        """Scrape quant rating, scores, and factor grades for a ticker.
-
-        Navigates to seekingalpha.com/symbol/{TICKER}/ratings/quant-ratings
-        """
+        """Fetch quant rating, scores, and factor grades for a ticker."""
         symbol = ticker.strip().upper()
+        slug = symbol.lower()
         if not symbol:
             raise SAScraperError("ticker is required", retryable=False)
 
+        quant_rating = ""
+        quant_score = None
+        sa_authors_rating = ""
+        wall_st_rating = ""
+        factor_grades: Dict[str, str] = {}
+
+        # 1. Fetch factor grades via metric_grades endpoint
         try:
-            self._ensure_browser()
-            page = self._context.new_page()
-
-            try:
-                self._login(page)
-
-                # Go to the quant ratings page
-                url = f"https://seekingalpha.com/symbol/{symbol}/ratings/quant-ratings"
-                page.goto(url, timeout=self.config.timeout_ms)
-                page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-                page.wait_for_timeout(3000)
-
-                quant_rating = ""
-                quant_score = None
-                sa_authors_rating = ""
-                wall_st_rating = ""
-                factor_grades: Dict[str, str] = {}
-
-                # Extract the quant rating badge/label
-                # SA typically shows ratings in spans/divs with data-test-id
-                rating_selectors = [
-                    '[data-test-id="quant-rating"] span',
-                    '[data-test-id*="quant"] [class*="rating"]',
-                    'span[class*="quant"][class*="rating"]',
-                    'div[class*="ScoreCard"] span',
-                ]
-                for sel in rating_selectors:
-                    els = page.query_selector_all(sel)
-                    for el in els:
-                        text = el.inner_text().strip()
-                        normalized = self._normalize_rating(text)
-                        if normalized in _RATING_MAP.values():
-                            quant_rating = normalized
-                            break
-                    if quant_rating:
-                        break
-
-                # Try to get numeric quant score (1-5 scale typically)
-                score_selectors = [
-                    '[data-test-id="quant-score"]',
-                    '[data-test-id*="quant"] [class*="score"]',
-                    'span[class*="score"]',
-                ]
-                for sel in score_selectors:
-                    els = page.query_selector_all(sel)
-                    for el in els:
-                        val = self._extract_number(el.inner_text())
-                        if val is not None and 0 < val <= 5:
-                            quant_score = val
-                            break
-                    if quant_score is not None:
-                        break
-
-                # Extract SA authors and Wall Street ratings from the summary row
-                summary_selectors = [
-                    '[data-test-id*="author"] span',
-                    '[data-test-id*="sell-side"] span',
-                    '[data-test-id*="wall-st"] span',
-                ]
-                # Fallback: grab all rating-like text from the ratings section
-                all_text = page.inner_text("body")
-                for label_key, attr in [
-                    ("SA Authors", "sa_authors"),
-                    ("Sell Side", "wall_st"),
-                    ("Wall Street", "wall_st"),
-                ]:
-                    pattern = rf"{label_key}\s*[:\-]?\s*(Strong Buy|Buy|Hold|Sell|Strong Sell)"
-                    match = re.search(pattern, all_text, re.IGNORECASE)
-                    if match:
-                        if attr == "sa_authors":
-                            sa_authors_rating = self._normalize_rating(match.group(1))
-                        else:
-                            wall_st_rating = self._normalize_rating(match.group(1))
-
-                # Extract factor grades table
-                # SA shows: Valuation, Growth, Profitability, Momentum, Revisions
-                grade_keys = [
-                    ("valuation", "value_grade"),
-                    ("value", "value_grade"),
-                    ("growth", "growth_grade"),
-                    ("profitability", "profitability_grade"),
-                    ("momentum", "momentum_grade"),
-                    ("revisions", "revisions_grade"),
-                    ("eps revisions", "revisions_grade"),
-                ]
-                for label, grade_key in grade_keys:
-                    if grade_key in factor_grades:
-                        continue
-                    pattern = rf"{label}\s*[:\-]?\s*([A-Da-d][+-]?|F)"
-                    match = re.search(pattern, all_text, re.IGNORECASE)
-                    if match:
-                        grade = match.group(1).upper()
-                        if grade in _GRADE_MAP:
-                            factor_grades[grade_key] = grade
-
-                # If we didn't find the quant rating via selectors, try text
-                if not quant_rating:
-                    pattern = r"Quant\s+Rating\s*[:\-]?\s*(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)"
-                    match = re.search(pattern, all_text, re.IGNORECASE)
-                    if match:
-                        quant_rating = self._normalize_rating(match.group(1))
-
-                return SAScrapedSnapshot(
-                    ticker=symbol,
-                    quant_rating=quant_rating,
-                    quant_score=quant_score,
-                    sa_authors_rating=sa_authors_rating,
-                    wall_st_rating=wall_st_rating,
-                    factor_grades=factor_grades,
-                    source=self.config.source,
-                )
-            finally:
-                page.close()
-
-        except SAScraperError:
-            raise
+            grades_data = self._api_get(
+                "ticker_metric_grades",
+                params={"filter[slugs]": slug},
+            )
+            factor_grades = self._parse_factor_grades(grades_data)
         except Exception as exc:
-            logger.warning("SA scrape failed for %s: %s", symbol, exc)
-            raise SAScraperError(
-                f"SA scrape failed for {symbol}: {exc}", retryable=True
-            ) from exc
+            logger.warning("SA factor grades failed for %s: %s", symbol, exc)
+
+        self._delay()
+
+        # 2. Fetch quant/author/wall-st ratings via the ratings summary
+        try:
+            # Try the symbol ratings endpoint
+            ratings_data = self._api_get(
+                f"symbols/{slug}/rating/summary",
+            )
+            quant_rating, quant_score, sa_authors_rating, wall_st_rating = (
+                self._parse_ratings(ratings_data)
+            )
+        except Exception as exc:
+            logger.warning("SA ratings failed for %s: %s", symbol, exc)
+
+        # 3. If quant rating is still empty, derive from factor grades
+        if not quant_rating and factor_grades:
+            quant_rating, quant_score = self._derive_rating_from_grades(factor_grades)
+
+        return SAScrapedSnapshot(
+            ticker=symbol,
+            quant_rating=quant_rating,
+            quant_score=quant_score,
+            sa_authors_rating=sa_authors_rating,
+            wall_st_rating=wall_st_rating,
+            factor_grades=factor_grades,
+            source=self.config.source,
+        )
+
+    def _parse_factor_grades(self, data: Any) -> Dict[str, str]:
+        """Parse factor grades from API response."""
+        grades: Dict[str, str] = {}
+        if not isinstance(data, Mapping):
+            return grades
+
+        # Handle different response shapes
+        items = data.get("metrics_grades") or data.get("data") or []
+        if isinstance(items, Mapping):
+            items = [items]
+        if not isinstance(items, list):
+            return grades
+
+        grade_fields = {
+            "value_category": "value_grade",
+            "growth_category": "growth_grade",
+            "profitability_category": "profitability_grade",
+            "momentum_category": "momentum_grade",
+            "eps_revisions_category": "revisions_grade",
+            "revisions_category": "revisions_grade",
+        }
+
+        for item in items:
+            if not isinstance(item, Mapping):
+                # Could be nested in attributes (JSON:API)
+                continue
+            attrs = item.get("attributes", item) if isinstance(item, Mapping) else item
+            if not isinstance(attrs, Mapping):
+                continue
+
+            for api_key, grade_key in grade_fields.items():
+                val = attrs.get(api_key)
+                if val is not None and grade_key not in grades:
+                    numeric = int(val) if isinstance(val, (int, float)) else None
+                    if numeric and numeric in _NUMERIC_TO_GRADE:
+                        grades[grade_key] = _NUMERIC_TO_GRADE[numeric]
+            if grades:
+                break
+
+        return grades
+
+    def _parse_ratings(self, data: Any):
+        """Parse quant/author/wall-st ratings from API response."""
+        quant_rating = ""
+        quant_score = None
+        sa_authors_rating = ""
+        wall_st_rating = ""
+
+        if not isinstance(data, Mapping):
+            return quant_rating, quant_score, sa_authors_rating, wall_st_rating
+
+        # Navigate various response shapes
+        items = data.get("data", data)
+        if isinstance(items, list):
+            items = items[0] if items else {}
+        attrs = items.get("attributes", items) if isinstance(items, Mapping) else {}
+        if not isinstance(attrs, Mapping):
+            return quant_rating, quant_score, sa_authors_rating, wall_st_rating
+
+        # Quant rating
+        for key in ("quantRating", "quant_rating", "quantRecommendation"):
+            val = attrs.get(key)
+            if val:
+                quant_rating = self._normalize_rating(str(val))
+                break
+
+        # Quant score
+        for key in ("quantScore", "quant_score", "quant_rating_score"):
+            val = attrs.get(key)
+            if val is not None:
+                try:
+                    quant_score = float(val)
+                    break
+                except (ValueError, TypeError):
+                    pass
+
+        # SA authors
+        for key in ("authorsRating", "authors_rating", "saAuthorsRating"):
+            val = attrs.get(key)
+            if val:
+                sa_authors_rating = self._normalize_rating(str(val))
+                break
+
+        # Wall Street
+        for key in ("wallStreetRating", "wall_street_rating", "sellSideRating"):
+            val = attrs.get(key)
+            if val:
+                wall_st_rating = self._normalize_rating(str(val))
+                break
+
+        return quant_rating, quant_score, sa_authors_rating, wall_st_rating
+
+    def _derive_rating_from_grades(self, grades: Dict[str, str]):
+        """Derive an approximate quant rating from factor grades."""
+        scores = [_GRADE_TO_SCORE[g] for g in grades.values() if g in _GRADE_TO_SCORE]
+        if not scores:
+            return "", None
+
+        avg = sum(scores) / len(scores)
+        # Map average score to a rating
+        if avg >= 85:
+            return "strong buy", avg / 20.0
+        elif avg >= 70:
+            return "buy", avg / 20.0
+        elif avg >= 55:
+            return "hold", avg / 20.0
+        elif avg >= 40:
+            return "sell", avg / 20.0
+        else:
+            return "strong sell", avg / 20.0
+
+    def _normalize_rating(self, text: str) -> str:
+        cleaned = " ".join(text.strip().lower().split())
+        return _RATING_MAP.get(cleaned, cleaned)
+
+    # ── Factor grades convenience ─────────────────────────────────────
 
     def fetch_factor_grades(self, ticker: str) -> Dict[str, Any]:
-        """Fetch factor grades for a ticker. Returns dict of grade letters.
-
-        This is a convenience method — grades are also included in fetch_snapshot.
-        """
+        """Fetch factor grades for a ticker."""
         snapshot = self.fetch_snapshot(ticker)
         return dict(snapshot.factor_grades)
 
-    # ── News headlines ────────────────────────────────────────────────
+    # ── News ──────────────────────────────────────────────────────────
 
     def fetch_news(self, ticker: str, count: int = 20) -> List[Dict[str, Any]]:
-        """Scrape recent news/analysis headlines for a ticker.
-
-        Navigates to seekingalpha.com/symbol/{TICKER}/news
-        """
-        symbol = ticker.strip().upper()
-        if not symbol:
+        """Fetch recent news/analysis for a ticker via SA internal API."""
+        slug = ticker.strip().lower()
+        if not slug:
             return []
 
         try:
-            self._ensure_browser()
-            page = self._context.new_page()
-
-            try:
-                self._login(page)
-                url = f"https://seekingalpha.com/symbol/{symbol}/news"
-                page.goto(url, timeout=self.config.timeout_ms)
-                page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-                page.wait_for_timeout(3000)
-
-                articles: List[Dict[str, Any]] = []
-
-                # SA news pages use article tags or data-test-id on links
-                link_selectors = [
-                    'article a[data-test-id="post-list-item-title"]',
-                    'a[data-test-id*="title"]',
-                    'article h3 a',
-                    '[class*="ItemHeader"] a',
-                    'div[data-test-id*="news"] a',
-                ]
-
-                seen_headlines = set()
-                for sel in link_selectors:
-                    els = page.query_selector_all(sel)
-                    for el in els:
-                        headline = el.inner_text().strip()
-                        if not headline or headline in seen_headlines:
-                            continue
-                        seen_headlines.add(headline)
-
-                        href = el.get_attribute("href") or ""
-                        if href and not href.startswith("http"):
-                            href = f"https://seekingalpha.com{href}"
-
-                        # Try to find the date near this element
-                        parent = el.evaluate_handle("el => el.closest('article') || el.parentElement")
-                        published_at = ""
-                        try:
-                            time_el = parent.as_element().query_selector("time, [datetime], [class*='date']")
-                            if time_el:
-                                published_at = (
-                                    time_el.get_attribute("datetime")
-                                    or time_el.inner_text().strip()
-                                )
-                        except Exception:
-                            pass
-
-                        articles.append({
-                            "headline": headline,
-                            "published_at": published_at,
-                            "source": "seeking_alpha",
-                            "url": href,
-                        })
-
-                        if len(articles) >= count:
-                            break
-                    if len(articles) >= count:
-                        break
-
-                return articles
-            finally:
-                page.close()
-
+            data = self._api_get(
+                "news",
+                params={
+                    "filter[category]": "market-news::all",
+                    "filter[slugs]": slug,
+                    "page[size]": str(min(count, 40)),
+                    "include": "author,primaryTickers",
+                },
+            )
+            return self._parse_news(data, count)
         except Exception as exc:
-            logger.warning("SA news scrape failed for %s: %s", symbol, exc)
+            logger.warning("SA news fetch failed for %s: %s", ticker, exc)
             return []
+
+    def _parse_news(self, data: Any, limit: int) -> List[Dict[str, Any]]:
+        """Parse news articles from JSON:API response."""
+        articles: List[Dict[str, Any]] = []
+        if not isinstance(data, Mapping):
+            return articles
+
+        items = data.get("data", [])
+        if not isinstance(items, list):
+            return articles
+
+        for item in items[:limit]:
+            if not isinstance(item, Mapping):
+                continue
+            attrs = item.get("attributes", {})
+            if not isinstance(attrs, Mapping):
+                continue
+
+            headline = str(attrs.get("title") or attrs.get("headline") or "").strip()
+            if not headline:
+                continue
+
+            published = str(
+                attrs.get("publishOn") or attrs.get("published_at") or ""
+            ).strip()
+
+            link = ""
+            links = item.get("links", {})
+            if isinstance(links, Mapping):
+                link = str(links.get("canonical") or links.get("self") or "")
+            if link and not link.startswith("http"):
+                link = f"https://seekingalpha.com{link}"
+
+            articles.append({
+                "headline": headline,
+                "published_at": published,
+                "source": "seeking_alpha",
+                "url": link,
+            })
+
+        return articles
 
     # ── Analyst recommendations ───────────────────────────────────────
 
     def fetch_analyst_recs(self, ticker: str) -> List[Dict[str, Any]]:
-        """Scrape analyst recommendations for a ticker.
-
-        Navigates to seekingalpha.com/symbol/{TICKER}/ratings/sell-side-ratings
-        """
-        symbol = ticker.strip().upper()
-        if not symbol:
+        """Fetch sell-side analyst recommendations."""
+        slug = ticker.strip().lower()
+        if not slug:
             return []
 
         try:
-            self._ensure_browser()
-            page = self._context.new_page()
-
-            try:
-                self._login(page)
-                url = f"https://seekingalpha.com/symbol/{symbol}/ratings/sell-side-ratings"
-                page.goto(url, timeout=self.config.timeout_ms)
-                page.wait_for_load_state("networkidle", timeout=self.config.timeout_ms)
-                page.wait_for_timeout(3000)
-
-                recs: List[Dict[str, Any]] = []
-
-                # SA shows analyst recs in table rows
-                row_selectors = [
-                    'table tbody tr',
-                    '[data-test-id*="analyst"] tr',
-                    '[class*="AnalystRatings"] tr',
-                ]
-
-                for sel in row_selectors:
-                    rows = page.query_selector_all(sel)
-                    for row in rows[:30]:
-                        cells = row.query_selector_all("td")
-                        if len(cells) < 3:
-                            continue
-
-                        analyst = cells[0].inner_text().strip()
-                        rating = cells[1].inner_text().strip() if len(cells) > 1 else ""
-                        target_str = cells[2].inner_text().strip() if len(cells) > 2 else ""
-                        date_str = cells[-1].inner_text().strip() if len(cells) > 3 else ""
-
-                        target_price = self._extract_number(
-                            target_str.replace("$", "").replace("£", "")
-                        )
-
-                        if analyst:
-                            recs.append({
-                                "analyst": analyst,
-                                "rating": rating,
-                                "target_price": target_price,
-                                "date": date_str,
-                            })
-                    if recs:
-                        break
-
-                # Fallback: extract from page text if no table found
-                if not recs:
-                    all_text = page.inner_text("body")
-                    # Look for "X analysts, Y buy, Z hold" style summaries
-                    pattern = r"(\d+)\s+(?:Wall Street\s+)?analysts?\s"
-                    match = re.search(pattern, all_text, re.IGNORECASE)
-                    if match:
-                        recs.append({
-                            "analyst": "consensus",
-                            "rating": self._extract_consensus_rating(all_text),
-                            "target_price": self._extract_price_target(all_text),
-                            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-                        })
-
-                return recs
-            finally:
-                page.close()
-
+            data = self._api_get(
+                f"symbols/{slug}/rating/sell_side_ratings",
+            )
+            return self._parse_analyst_recs(data)
         except Exception as exc:
-            logger.warning("SA analyst recs scrape failed for %s: %s", symbol, exc)
+            logger.warning("SA analyst recs failed for %s: %s", ticker, exc)
             return []
 
-    def _extract_consensus_rating(self, text: str) -> str:
-        """Extract consensus rating from page text."""
-        pattern = r"(?:consensus|average)\s+(?:rating|recommendation)\s*[:\-]?\s*(Strong Buy|Buy|Hold|Sell|Strong Sell)"
-        match = re.search(pattern, text, re.IGNORECASE)
-        return match.group(1).strip() if match else ""
+    def _parse_analyst_recs(self, data: Any) -> List[Dict[str, Any]]:
+        """Parse analyst recommendations from API response."""
+        recs: List[Dict[str, Any]] = []
+        if not isinstance(data, Mapping):
+            return recs
 
-    def _extract_price_target(self, text: str) -> Optional[float]:
-        """Extract average price target from page text."""
-        pattern = r"(?:average|mean|consensus)\s+(?:price\s+)?target\s*[:\-]?\s*\$?([\d,.]+)"
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            return self._extract_number(match.group(1))
-        return None
+        items = data.get("data", [])
+        if not isinstance(items, list):
+            items = [data] if "analyst" in str(data) else []
+
+        for item in items:
+            if not isinstance(item, Mapping):
+                continue
+            attrs = item.get("attributes", item)
+            if not isinstance(attrs, Mapping):
+                continue
+
+            analyst = str(attrs.get("analyst") or attrs.get("firm") or "").strip()
+            rating = str(attrs.get("rating") or attrs.get("recommendation") or "").strip()
+            target = attrs.get("target_price") or attrs.get("priceTarget")
+            date_val = str(attrs.get("date") or attrs.get("publishedAt") or "").strip()
+
+            target_price = None
+            if target is not None:
+                try:
+                    target_price = float(target)
+                except (ValueError, TypeError):
+                    pass
+
+            if analyst or rating:
+                recs.append({
+                    "analyst": analyst,
+                    "rating": rating,
+                    "target_price": target_price,
+                    "date": date_val,
+                })
+
+        return recs
+
+    # ── Cleanup ───────────────────────────────────────────────────────
 
     def close(self):
-        """Clean up browser resources."""
-        try:
-            if self._browser:
-                self._browser.close()
-            if hasattr(self, "_pw") and self._pw:
-                self._pw.stop()
-        except Exception:
-            pass
-        self._browser = None
-        self._context = None
-        self._logged_in = False
+        """Clean up resources."""
+        if self._session:
+            self._session.close()
+        self._session = None
+        self._cookies_obtained_at = 0

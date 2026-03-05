@@ -63,6 +63,8 @@ After each session, reflect on what went well and what could be improved. Update
 
 ### Session discipline
 - Always update `.claude/history/SESSION_LOG.md` **before** and **after** every block of work
+- **Write incremental progress to SESSION_LOG.md every ~10 minutes or after completing any discrete sub-task** — don't wait until the end. Shell crashes lose all unsaved context.
+- When doing multi-step work (e.g., building + testing a scraper), write a checkpoint entry after each step completes, not just at the end
 - SA_RAPIDAPI_KEY dropped — user considers the API dodgy; will use webscraping instead
 
 ### What to anticipate
