@@ -78,6 +78,30 @@ class ScheduleWindow:
 # Conservative defaults — weekday-only, after US market close
 DEFAULT_SCHEDULE: list[ScheduleWindow] = [
     ScheduleWindow(name="us_close_orchestration", hour=21, minute=30),
+    # Full signal layer ingestion (L1-L8 batch)
+    ScheduleWindow(name="tier1_full_ingest", hour=21, minute=0),
+    # News sentiment refresh (L6 only, 4x daily)
+    ScheduleWindow(name="news_refresh_morning", hour=8, minute=0),
+    ScheduleWindow(name="news_refresh_noon", hour=12, minute=0),
+    ScheduleWindow(name="news_refresh_afternoon", hour=16, minute=0),
+    ScheduleWindow(name="news_refresh_evening", hour=20, minute=0),
+    # Congressional trading refresh (daily, including weekends for disclosure lag)
+    ScheduleWindow(name="congressional_refresh", hour=22, minute=0,
+                   weekdays=frozenset({1, 2, 3, 4, 5, 6, 7})),
+    # Macro regime + options sentiment (weekday evenings)
+    ScheduleWindow(name="macro_regime_ingest", hour=20, minute=30),
+    # CFTC Commitment of Traders (Saturday — data released Friday evening)
+    ScheduleWindow(name="cot_ingest", hour=10, minute=0,
+                   weekdays=frozenset({6})),
+    # Fundamental quality screen (Sunday morning)
+    ScheduleWindow(name="fundamentals_ingest", hour=6, minute=0,
+                   weekdays=frozenset({7})),
+    # Koyfin scraper (Sunday morning, after fundamentals)
+    ScheduleWindow(name="koyfin_scrape", hour=7, minute=0,
+                   weekdays=frozenset({7})),
+    # ShareScope UK screen scraper (Sunday morning)
+    ScheduleWindow(name="sharescope_scrape", hour=7, minute=30,
+                   weekdays=frozenset({7})),
 ]
 
 

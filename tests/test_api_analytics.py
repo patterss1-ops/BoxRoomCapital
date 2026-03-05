@@ -75,9 +75,9 @@ def test_portfolio_analytics_fragment_renders():
         response = endpoint(request=request, days=90)
         html = response.template.render(response.context)
 
-    assert "Portfolio Analytics" in html
+    assert "Analytics" in html
     assert "Sharpe" in html
-    assert "Total Return" in html
+    assert "Return" in html
 
 
 def test_overview_page_includes_portfolio_analytics_panel():

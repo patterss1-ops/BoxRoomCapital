@@ -1,0 +1,34 @@
+<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
+  <div class="flex justify-between items-baseline gap-2 mb-1.5">
+    <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Broker</h3>
+    <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border
+      {% if connected %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">
+      {{ "OK" if connected else "OFF" }}
+    </span>
+  </div>
+
+  {% if connected %}
+    <div class="grid grid-cols-[80px_1fr] gap-1 text-[11px] font-mono">
+      <span class="text-slate-500">Account</span><span class="text-slate-300">{{ account or "-" }}</span>
+      <span class="text-slate-500">Mode</span><span class="text-slate-300">{{ mode or "-" }}</span>
+      <span class="text-slate-500">Balance</span><span class="text-slate-300">{{ currency }} {{ "%.2f"|format(balance) }}</span>
+      <span class="text-slate-500">Equity</span><span class="text-slate-300">{{ currency }} {{ "%.2f"|format(equity) }}</span>
+      <span class="text-slate-500">UPnL</span><span class="{% if unrealised_pnl >= 0 %}text-emerald-400{% else %}text-red-400{% endif %}">{{ currency }} {{ "%.2f"|format(unrealised_pnl) }}</span>
+      <span class="text-slate-500">Open</span><span class="text-slate-300">{{ open_positions }}</span>
+    </div>
+    <div class="flex gap-1 mt-1.5">
+      <button hx-post="/api/broker/connect" hx-swap="none"
+        hx-on::after-request="htmx.trigger('#broker-panel', 'refreshPanel')"
+        class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2.5 py-1 rounded text-xs border border-slate-600 transition-colors">
+        Recon
+      </button>
+    </div>
+  {% else %}
+    <p class="text-[11px] text-slate-500 mb-1.5">Not connected to IG.</p>
+    <button hx-post="/api/broker/connect" hx-swap="none"
+      hx-on::after-request="htmx.trigger('#broker-panel', 'refreshPanel')"
+      class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">
+      Connect
+    </button>
+  {% endif %}
+</section>

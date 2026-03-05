@@ -225,6 +225,7 @@ def run_tier1_shadow_jobs(
         for layer_id in LAYER_ORDER
     }
 
+    # ── L8: SA Quant ────────────────────────────────────────────────────
     runner = sa_quant_runner or SAQuantJobRunner(db_path=db_path)
     sa_quant_summary: dict[str, Any] = {}
     try:
@@ -245,6 +246,90 @@ def run_tier1_shadow_jobs(
             "status": "failed",
             "detail": str(exc),
         }
+
+    # ── L1: PEAD (Post-Earnings Announcement Drift) ──────────────────
+    try:
+        from intelligence.jobs.pead_job import PEADJobRunner
+        pead_summary = PEADJobRunner(db_path=db_path).run(tickers=normalized_tickers, as_of=run_at)
+        layer_jobs[LayerId.L1_PEAD.value] = {
+            "status": "completed",
+            "detail": f"success={pead_summary.get('tickers_success', 0)}, failed={pead_summary.get('tickers_failed', 0)}",
+            "job_id": pead_summary.get("job_id"),
+            "tickers_success": int(pead_summary.get("tickers_success", 0)),
+            "tickers_failed": int(pead_summary.get("tickers_failed", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L1_PEAD.value] = {"status": "failed", "detail": str(exc)}
+
+    # ── L2: Insider Buying ───────────────────────────────────────────
+    try:
+        from intelligence.jobs.insider_job import InsiderJobRunner
+        insider_summary = InsiderJobRunner(db_path=db_path).run(tickers=normalized_tickers, as_of=run_at)
+        layer_jobs[LayerId.L2_INSIDER.value] = {
+            "status": "completed",
+            "detail": f"success={insider_summary.get('tickers_success', 0)}, failed={insider_summary.get('tickers_failed', 0)}",
+            "job_id": insider_summary.get("job_id"),
+            "tickers_success": int(insider_summary.get("tickers_success", 0)),
+            "tickers_failed": int(insider_summary.get("tickers_failed", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L2_INSIDER.value] = {"status": "failed", "detail": str(exc)}
+
+    # ── L4: Analyst Revisions ────────────────────────────────────────
+    try:
+        from intelligence.jobs.analyst_job import AnalystJobRunner
+        analyst_summary = AnalystJobRunner(db_path=db_path).run(tickers=normalized_tickers, as_of=run_at)
+        layer_jobs[LayerId.L4_ANALYST_REVISIONS.value] = {
+            "status": "completed",
+            "detail": f"success={analyst_summary.get('tickers_success', 0)}, failed={analyst_summary.get('tickers_failed', 0)}",
+            "job_id": analyst_summary.get("job_id"),
+            "tickers_success": int(analyst_summary.get("tickers_success", 0)),
+            "tickers_failed": int(analyst_summary.get("tickers_failed", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L4_ANALYST_REVISIONS.value] = {"status": "failed", "detail": str(exc)}
+
+    # ── L5: Congressional Trading ────────────────────────────────────
+    try:
+        from intelligence.jobs.congressional_job import CongressionalJobRunner
+        cong_summary = CongressionalJobRunner(db_path=db_path).run(tickers=normalized_tickers, as_of=run_at)
+        layer_jobs[LayerId.L5_CONGRESSIONAL.value] = {
+            "status": "completed",
+            "detail": f"success={cong_summary.get('tickers_success', 0)}, failed={cong_summary.get('tickers_failed', 0)}",
+            "job_id": cong_summary.get("job_id"),
+            "tickers_success": int(cong_summary.get("tickers_success", 0)),
+            "tickers_failed": int(cong_summary.get("tickers_failed", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L5_CONGRESSIONAL.value] = {"status": "failed", "detail": str(exc)}
+
+    # ── L6: News Sentiment ───────────────────────────────────────────
+    try:
+        from intelligence.jobs.news_job import NewsJobRunner
+        news_summary = NewsJobRunner(db_path=db_path).run(tickers=normalized_tickers, as_of=run_at)
+        layer_jobs[LayerId.L6_NEWS_SENTIMENT.value] = {
+            "status": "completed",
+            "detail": f"success={news_summary.get('tickers_success', 0)}, failed={news_summary.get('tickers_failed', 0)}",
+            "job_id": news_summary.get("job_id"),
+            "tickers_success": int(news_summary.get("tickers_success", 0)),
+            "tickers_failed": int(news_summary.get("tickers_failed", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L6_NEWS_SENTIMENT.value] = {"status": "failed", "detail": str(exc)}
+
+    # ── L7: Technical Overlay ────────────────────────────────────────
+    try:
+        from intelligence.jobs.technical_job import TechnicalJobRunner
+        tech_summary = TechnicalJobRunner(db_path=db_path).run(tickers=normalized_tickers, as_of=run_at)
+        layer_jobs[LayerId.L7_TECHNICAL.value] = {
+            "status": "completed",
+            "detail": f"success={tech_summary.get('tickers_success', 0)}, failed={tech_summary.get('tickers_failed', 0)}",
+            "job_id": tech_summary.get("job_id"),
+            "tickers_success": int(tech_summary.get("tickers_success", 0)),
+            "tickers_failed": int(tech_summary.get("tickers_failed", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L7_TECHNICAL.value] = {"status": "failed", "detail": str(exc)}
 
     shadow_report = shadow_runner(
         db_path=db_path,

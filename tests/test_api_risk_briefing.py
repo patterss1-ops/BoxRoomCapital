@@ -78,7 +78,7 @@ def test_risk_briefing_fragment_renders_state_and_alert(monkeypatch):
         response = client.get("/fragments/risk-briefing")
 
     assert response.status_code == 200
-    assert "Risk Briefing" in response.text
+    assert "Risk" in response.text
     assert "CRITICAL" in response.text
     assert "Fund drawdown breached hard limit." in response.text
 

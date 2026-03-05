@@ -1,3 +1,5 @@
+// switchTab and createTerminalChart are defined in base.html <head> for early availability
+
 (function () {
   const actionTarget = document.getElementById('action-result');
 
@@ -16,7 +18,9 @@
       '#order-actions-panel',
       '#control-actions-panel',
       '#job-detail-panel',
-      '#research-panel'
+      '#research-panel',
+      '#intelligence-feed-panel',
+      '#pipeline-status-panel'
     ];
     for (const selector of targets) {
       const node = document.querySelector(selector);
@@ -65,6 +69,11 @@
     { label: 'Run Reconcile', kind: 'post', url: '/api/actions/reconcile', body: {} },
     { label: 'Enable Kill Switch', kind: 'post', url: '/api/actions/kill-switch-enable', body: { reason: 'Command palette kill switch' }, confirm: 'Enable kill switch?' },
     { label: 'Disable Kill Switch', kind: 'post', url: '/api/actions/kill-switch-disable', body: { reason: 'Command palette clear kill switch' }, confirm: 'Disable kill switch?' },
+    { label: 'Start Scheduler', kind: 'post', url: '/api/actions/scheduler-start', body: {} },
+    { label: 'Stop Scheduler', kind: 'post', url: '/api/actions/scheduler-stop', body: {} },
+    { label: 'Start Dispatcher', kind: 'post', url: '/api/actions/dispatcher-start', body: {} },
+    { label: 'Stop Dispatcher', kind: 'post', url: '/api/actions/dispatcher-stop', body: {} },
+    { label: 'Run Daily DAG', kind: 'post', url: '/api/actions/run-daily-dag', body: {}, confirm: 'Run the full daily trading DAG now?' },
   ];
 
   let visible = [];
@@ -104,7 +113,7 @@
     paletteList.innerHTML = '';
     if (!visible.length) {
       const empty = document.createElement('li');
-      empty.className = 'px-3 py-2 rounded-lg text-sm text-slate-500';
+      empty.className = 'px-2 py-1.5 rounded text-xs text-slate-500';
       empty.textContent = 'No matching commands';
       paletteList.appendChild(empty);
       return;
@@ -112,7 +121,7 @@
     visible.forEach((command, index) => {
       const li = document.createElement('li');
       const isActive = index === activeIndex;
-      li.className = 'px-3 py-2 rounded-lg cursor-pointer text-sm ' +
+      li.className = 'px-2 py-1.5 rounded cursor-pointer text-xs ' +
         (isActive ? 'bg-slate-800 text-white' : 'text-slate-300 hover:bg-slate-800/50');
       li.textContent = command.label;
       li.addEventListener('mouseenter', () => {
@@ -167,6 +176,13 @@
 
   if (openButton) {
     openButton.addEventListener('click', function () {
+      openPalette();
+    });
+  }
+
+  var openButtonSidebar = document.getElementById('command-open-sidebar');
+  if (openButtonSidebar) {
+    openButtonSidebar.addEventListener('click', function () {
       openPalette();
     });
   }

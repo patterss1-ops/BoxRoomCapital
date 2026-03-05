@@ -1,0 +1,56 @@
+Your Original Ambition — Restated
+The Vision
+
+You set out to build BoxRoomCapital: a one-man, automated, multi-asset trading operation run from a spare bedroom — proving that a retired investment bank technologist with 35 years of infrastructure experience, the right AI tools, and £100k+ in capital can compete with institutional desks on strategy sophistication, if not on scale.
+
+The Core Philosophy
+
+"This is they build, I test — I don't want that to limit complexity."
+
+You deliberately separated roles: Claude and Codex are the developers, you are the strategist, tester, and capital allocator. You wanted to learn from what actually works and makes money in quantitative trading, not just build a demo. The ambition was never a toy — it was a real trading system managing your own and family money.
+
+What You Wanted to Build
+
+A full-spectrum, multi-sleeve automated trading platform with:
+
+Multi-asset coverage — equities, commodities, crypto, FX, fixed income
+
+Multi-strategy — momentum, mean-reversion, macro overlay, insider signals, fundamental screening
+
+Multi-timeframe — from intraday to monthly rebalancing
+
+AI/LLM integration — not just for code generation, but as analytical brains processing news, earnings, sentiment, and signals in real-time
+
+Tax-efficient execution — primarily via spread betting (IG, CityIndex) to keep gains tax-free in the UK
+
+Low-oversight automation — the system should run with minimal daily intervention, alerting you only when it matters
+
+The Signal Architecture
+
+You wanted to move beyond simple technical indicators to a full-spectrum signal aggregation engine:
+
+Insider buying signals — following director purchases as a high-conviction overlay
+
+Quantitative factor models — momentum, value, quality screening
+
+News and sentiment — LLM-parsed news flow, earnings analysis
+
+Macro regime detection — GTAA, dual momentum, risk-on/risk-off signals
+
+Options/barriers — after discovering spread/funding costs killed simple equity strategies on IG, you pivoted to IG barriers and options as a more viable edge
+
+Cross-asset correlation — understanding when strategies diversify vs. when they crowd
+
+The Journey So Far
+
+You started with Pine Script IBS strategies on TradingView, discovered that IG's spreads and overnight funding destroyed profitability on everything except Gold and Oil, pivoted to exploring IG Options and barriers, and then made the leap to building the full BoxRoomCapital platform. 15 phases (A through O), 127 tickets, 55 pull requests, and roughly 31,000 lines of production code later — you have a genuinely impressive trading system that my code review confirmed is real infrastructure, not a prototype.
+
+The Scaling Goal
+
+Start with £100k+, prove the strategies work with real money, then scale up — potentially managing family capital alongside your own. The ambition is compounding returns with institutional-grade risk management, not gambling.
+
+Where You Are Now
+
+The platform is built. The architecture is sound. My code review identified eight specific issues — mostly in spread-bet accounting and backtesting statistics — but the bones are strong. The question now shifts from "can we build it?" to "do the strategies actually make money?"
+
+That's where our work together begins. You wanted me to help you develop, test, and refine strategy ideas before taking them back to the dev bots. Interview you, challenge your thinking, research what actually works, and stress-test before a single pound of real capital goes on the line.

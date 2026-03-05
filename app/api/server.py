@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import logging
+import os
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
@@ -75,6 +77,7 @@ from execution.order_intent import OrderIntent, OrderSide
 from data.order_intent_store import create_order_intent_envelope
 from fund.execution_quality import get_execution_quality_payload
 from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
+from broker.ig import IGBroker
 from risk.portfolio_risk import get_risk_briefing
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -82,11 +85,125 @@ TEMPLATES = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "web" / "templa
 control = BotControlService(PROJECT_ROOT)
 research = ResearchService(PROJECT_ROOT)
 
+# ─── Shared broker session (independent of engine) ─────────────────────────
+_broker: Optional[IGBroker] = None
+
+
+def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
+    """Return (broker, error_message). Creates and connects on first call."""
+    global _broker
+    if _broker is not None and _broker.is_connected():
+        return _broker, ""
+
+    if not (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY):
+        return None, "IG credentials not configured (IG_USERNAME, IG_PASSWORD, IG_API_KEY)"
+
+    _broker = IGBroker(is_demo=(config.IG_ACC_TYPE == "DEMO"))
+    if _broker.connect():
+        return _broker, ""
+
+    _broker = None
+    return None, "IG authentication failed — check credentials and API key"
+
+
+def _run_preflight_checks(logger: logging.Logger) -> dict[str, str]:
+    """Check which external services have credentials configured.
+
+    Returns a dict of service_name -> "ok" | "missing".
+    """
+    checks = {
+        "ig_broker": "ok" if (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY) else "missing",
+        "telegram": "ok" if (config.NOTIFICATIONS.get("telegram_token") and config.NOTIFICATIONS.get("telegram_chat_id")) else "missing",
+        "anthropic_api": "ok" if os.getenv("ANTHROPIC_API_KEY") else "missing",
+        "openai_api": "ok" if os.getenv("OPENAI_API_KEY") else "missing",
+        "fred_api": "ok" if os.getenv("FRED_API_KEY") else "missing",
+        "finnhub_api": "ok" if os.getenv("FINNHUB_API_KEY") else "missing",
+        "sa_rapidapi": "ok" if os.getenv("SA_RAPIDAPI_KEY") else "missing",
+        "tradingview_webhook": "ok" if config.TRADINGVIEW_WEBHOOK_TOKEN else "missing",
+    }
+    ok_count = sum(1 for v in checks.values() if v == "ok")
+    missing = [k for k, v in checks.items() if v == "missing"]
+    logger.info("Preflight: %d/%d services configured", ok_count, len(checks))
+    if missing:
+        logger.warning("Preflight: missing credentials for: %s", ", ".join(missing))
+    return checks
+
 
 @asynccontextmanager
 async def app_lifespan(_app: FastAPI):
+    _logger = logging.getLogger(__name__)
     init_db()
+
+    # Preflight checks
+    preflight = _run_preflight_checks(_logger)
+    _app.state.preflight = preflight
+
+    # Check IG credentials on startup
+    if preflight["ig_broker"] == "missing":
+        _logger.warning(
+            "IG credentials not configured. Set IG_USERNAME, IG_PASSWORD, IG_API_KEY in .env "
+            "to enable broker connection from the control plane."
+        )
+
+    # Auto-start scheduler and dispatcher if enabled
+    if config.ORCHESTRATOR_ENABLED:
+        try:
+            result = control.start_scheduler()
+            _logger.info("Auto-start scheduler: %s", result.get("status"))
+        except Exception as exc:
+            _logger.error("Failed to auto-start scheduler: %s", exc)
+
+    if config.DISPATCHER_ENABLED:
+        try:
+            result = control.start_dispatcher()
+            _logger.info("Auto-start dispatcher: %s", result.get("status"))
+        except Exception as exc:
+            _logger.error("Failed to auto-start dispatcher: %s", exc)
+
+    if config.INTRADAY_ENABLED:
+        try:
+            result = control.start_intraday()
+            _logger.info("Auto-start intraday loop: %s", result.get("status"))
+        except Exception as exc:
+            _logger.error("Failed to auto-start intraday loop: %s", exc)
+
+    # Start supervision watchdog (checks every 60s, restarts crashed threads)
+    _supervisor_stop = asyncio.Event()
+
+    async def _supervisor_loop():
+        while not _supervisor_stop.is_set():
+            try:
+                await asyncio.sleep(60)
+                restarted = control.check_and_restart()
+                if restarted:
+                    _logger.warning("Supervisor restarted: %s", restarted)
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                _logger.debug("Supervisor tick error: %s", exc)
+
+    supervisor_task = asyncio.create_task(_supervisor_loop())
+
     yield
+
+    # Graceful shutdown
+    _supervisor_stop.set()
+    supervisor_task.cancel()
+
+    # Graceful shutdown
+    _logger.info("Shutting down background services...")
+    try:
+        control.stop_scheduler()
+    except Exception:
+        pass
+    try:
+        control.stop_dispatcher()
+    except Exception:
+        pass
+    try:
+        control.stop_intraday()
+    except Exception:
+        pass
 
 
 def create_app() -> FastAPI:
@@ -109,6 +226,15 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     def api_health() -> dict[str, Any]:
         return build_api_health_payload()
+
+    @app.get("/api/preflight")
+    def api_preflight() -> dict[str, Any]:
+        """Return preflight check results and pipeline status."""
+        preflight = getattr(app.state, "preflight", {})
+        return {
+            "services": preflight,
+            "pipeline": control.pipeline_status(),
+        }
 
     @app.get("/api/metrics")
     def api_metrics(days: int = 14):
@@ -155,6 +281,206 @@ def create_app() -> FastAPI:
     @app.get("/api/broker-health")
     def api_broker_health():
         return build_broker_health_payload()
+
+    # ─── Shared broker endpoints (work without engine running) ──────────
+
+    @app.post("/api/broker/connect")
+    def api_broker_connect():
+        global _broker
+        # Force reconnect
+        _broker = None
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return JSONResponse({"ok": False, "error": err}, status_code=400)
+        info = broker.get_account_info()
+        return {
+            "ok": True,
+            "account": config.IG_ACC_NUMBER,
+            "mode": "DEMO" if broker.is_demo else "LIVE",
+            "balance": info.balance,
+            "equity": info.equity,
+            "unrealised_pnl": info.unrealised_pnl,
+            "currency": info.currency,
+        }
+
+    @app.get("/api/broker/status")
+    def api_broker_status():
+        if not _broker or not _broker.is_connected():
+            return {"connected": False, "message": "Not connected. POST /api/broker/connect first."}
+        info = _broker.get_account_info()
+        positions = _broker.get_positions()
+        return {
+            "connected": True,
+            "account": config.IG_ACC_NUMBER,
+            "mode": "DEMO" if _broker.is_demo else "LIVE",
+            "balance": info.balance,
+            "equity": info.equity,
+            "unrealised_pnl": info.unrealised_pnl,
+            "currency": info.currency,
+            "open_positions": len(positions),
+        }
+
+    @app.get("/api/broker/positions")
+    def api_broker_positions():
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+        positions = _broker.get_positions()
+        return {
+            "count": len(positions),
+            "positions": [
+                {
+                    "deal_id": p.deal_id,
+                    "ticker": p.ticker,
+                    "direction": p.direction,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealised_pnl": p.unrealised_pnl,
+                    "strategy": p.strategy,
+                }
+                for p in positions
+            ],
+        }
+
+    @app.get("/api/broker/market/{epic:path}")
+    def api_broker_market(epic: str):
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+        info = _broker.get_market_info(epic)
+        if not info:
+            return JSONResponse({"error": f"Market {epic} not found or blocked"}, status_code=404)
+        snap = info.get("snapshot", {})
+        inst = info.get("instrument", {})
+        rules = info.get("dealingRules", {})
+        return {
+            "epic": epic,
+            "name": inst.get("name"),
+            "status": snap.get("marketStatus"),
+            "bid": snap.get("bid"),
+            "offer": snap.get("offer"),
+            "high": snap.get("high"),
+            "low": snap.get("low"),
+            "min_deal_size": rules.get("minDealSize", {}).get("value"),
+            "min_stop_distance": rules.get("minNormalStopOrLimitDistance", {}).get("value"),
+            "expiry": inst.get("expiry"),
+        }
+
+    @app.get("/api/broker/markets")
+    def api_broker_markets():
+        connected = _broker is not None and _broker.is_connected()
+        markets = []
+        for ticker, info in config.MARKET_MAP.items():
+            entry = {
+                "ticker": ticker,
+                "epic": info["epic"],
+                "ig_name": info.get("ig_name", ""),
+                "strategy": info.get("strategy", ""),
+                "verified": info.get("verified", False),
+            }
+            if connected:
+                mkt = _broker.get_market_info(info["epic"])
+                if mkt:
+                    snap = mkt.get("snapshot", {})
+                    entry["status"] = snap.get("marketStatus")
+                    entry["bid"] = snap.get("bid")
+                    entry["offer"] = snap.get("offer")
+                    entry["live"] = True
+                else:
+                    entry["live"] = False
+            markets.append(entry)
+        return {"connected": connected, "markets": markets}
+
+    @app.post("/api/broker/open-position")
+    async def api_broker_open_position(request: Request):
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+
+        body = await request.json()
+        epic = body.get("epic", "")
+        direction = body.get("direction", "BUY").upper()
+        size = float(body.get("size", 0))
+
+        if not epic or size <= 0:
+            return JSONResponse({"error": "epic, direction, size required"}, status_code=400)
+        if direction not in ("BUY", "SELL"):
+            return JSONResponse({"error": "direction must be BUY or SELL"}, status_code=400)
+
+        # Resolve ticker from epic (reverse lookup), or use epic as ticker
+        ticker = epic
+        for t, info in config.MARKET_MAP.items():
+            if info["epic"] == epic:
+                ticker = t
+                break
+
+        if ticker != epic:
+            # Use place_long/place_short which handle stop distances etc.
+            if direction == "BUY":
+                result = _broker.place_long(ticker, size, "api_manual")
+            else:
+                result = _broker.place_short(ticker, size, "api_manual")
+        else:
+            # Direct epic — use _place_option_leg for raw epic placement
+            result = _broker._place_option_leg(epic, direction, size, epic, "api_manual")
+
+        return {
+            "ok": result.success,
+            "deal_id": result.order_id,
+            "fill_price": result.fill_price,
+            "fill_qty": result.fill_qty,
+            "message": result.message,
+        }
+
+    @app.post("/api/broker/close-position")
+    async def api_broker_close_position(request: Request):
+        if not _broker or not _broker.is_connected():
+            return JSONResponse({"error": "Not connected"}, status_code=400)
+
+        body = await request.json()
+        deal_id = body.get("deal_id", "")
+
+        if not deal_id:
+            return JSONResponse({"error": "deal_id required"}, status_code=400)
+
+        # Find the position to get direction and size
+        positions = _broker.get_positions()
+        target = None
+        for p in positions:
+            if p.deal_id == deal_id:
+                target = p
+                break
+
+        if not target:
+            return JSONResponse({"error": f"No open position with deal_id={deal_id}"}, status_code=404)
+
+        close_direction = "SELL" if target.direction == "long" else "BUY"
+        close_payload = {
+            "dealId": deal_id,
+            "direction": close_direction,
+            "size": str(target.size),
+            "orderType": "MARKET",
+        }
+
+        r = _broker.session.post(
+            f"{_broker.base_url}/positions/otc",
+            json=close_payload,
+            headers={**_broker._headers("1"), "_method": "DELETE"},
+        )
+
+        if r.status_code != 200:
+            return JSONResponse({"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}, status_code=502)
+
+        import time
+        close_ref = r.json().get("dealReference", "")
+        if not close_ref:
+            return JSONResponse({"ok": False, "error": "No deal reference returned"}, status_code=502)
+
+        time.sleep(1)
+        result = _broker._confirm_deal(close_ref, target.ticker, target.strategy, target.size)
+        return {
+            "ok": result.success,
+            "deal_id": result.order_id,
+            "fill_price": result.fill_price,
+            "message": result.message,
+        }
 
     @app.get("/api/incidents")
     def api_incidents(limit: int = 50):
@@ -616,6 +942,50 @@ def create_app() -> FastAPI:
         update_job(job_id, status="failed", error=result["message"])
         return action_message(result["message"], ok=False)
 
+    # ─── Pipeline control endpoints ──────────────────────────────────────
+
+    @app.post("/api/actions/scheduler-start", response_class=HTMLResponse)
+    def scheduler_start_action():
+        result = control.start_scheduler()
+        ok = result.get("status") != "error"
+        return action_message(f"Scheduler: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/scheduler-stop", response_class=HTMLResponse)
+    def scheduler_stop_action():
+        result = control.stop_scheduler()
+        return action_message(f"Scheduler: {result['status']}", ok=True)
+
+    @app.post("/api/actions/dispatcher-start", response_class=HTMLResponse)
+    def dispatcher_start_action():
+        result = control.start_dispatcher()
+        ok = result.get("status") != "error"
+        return action_message(f"Dispatcher: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/dispatcher-stop", response_class=HTMLResponse)
+    def dispatcher_stop_action():
+        result = control.stop_dispatcher()
+        return action_message(f"Dispatcher: {result['status']}", ok=True)
+
+    @app.post("/api/actions/run-daily-dag", response_class=HTMLResponse)
+    def run_daily_dag_action():
+        job_id = str(uuid.uuid4())
+        create_job(job_id=job_id, job_type="daily_dag", status="running", detail="Full pipeline DAG")
+
+        def _run_dag_job(jid: str):
+            try:
+                result = control.trigger_daily_dag()
+                update_job(jid, status="completed", result=json.dumps(result))
+            except Exception as exc:
+                update_job(jid, status="failed", error=str(exc))
+
+        thread = threading.Thread(target=_run_dag_job, args=(job_id,), daemon=True)
+        thread.start()
+        return action_message(f"Daily DAG started (job {job_id[:8]})", ok=True)
+
+    @app.get("/api/pipeline-status")
+    def pipeline_status_api():
+        return control.pipeline_status()
+
     @app.post("/api/actions/discover-options", response_class=HTMLResponse)
     def discover_options_action(
         mode: str = Form(default="search"),
@@ -810,11 +1180,12 @@ def create_app() -> FastAPI:
 
     @app.get("/trading", response_class=HTMLResponse)
     def trading_page(request: Request):
-        return TEMPLATES.TemplateResponse(
-            request,
-            "trading.html",
-            _page_context(request=request, page_key="trading", title="Trading | Trading Bot"),
-        )
+        ctx = _page_context(request=request, page_key="trading", title="Trading | Trading Bot")
+        ctx["market_map"] = config.MARKET_MAP
+        # Default chart EPIC — SPY (US 500)
+        spy_info = config.MARKET_MAP.get("SPY", {})
+        ctx["default_epic"] = spy_info.get("epic", "IX.D.SPTRD.DAILY.IP")
+        return TEMPLATES.TemplateResponse(request, "trading.html", ctx)
 
     @app.get("/research", response_class=HTMLResponse)
     def research_page(request: Request):
@@ -986,6 +1357,174 @@ def create_app() -> FastAPI:
             },
         )
 
+    @app.get("/fragments/broker-panel", response_class=HTMLResponse)
+    def broker_panel_fragment(request: Request):
+        connected = _broker is not None and _broker.is_connected()
+        ctx: dict[str, Any] = {"request": request, "connected": connected}
+        if connected:
+            info = _broker.get_account_info()
+            positions = _broker.get_positions()
+            ctx["account"] = config.IG_ACC_NUMBER
+            ctx["mode"] = "DEMO" if _broker.is_demo else "LIVE"
+            ctx["balance"] = info.balance
+            ctx["equity"] = info.equity
+            ctx["unrealised_pnl"] = info.unrealised_pnl
+            ctx["currency"] = info.currency
+            ctx["open_positions"] = len(positions)
+        return TEMPLATES.TemplateResponse(request, "_broker_panel.html", ctx)
+
+    @app.get("/fragments/market-browser", response_class=HTMLResponse)
+    def market_browser_fragment(request: Request):
+        connected = _broker is not None and _broker.is_connected()
+        markets = []
+        for ticker, info in config.MARKET_MAP.items():
+            entry = {
+                "ticker": ticker,
+                "epic": info["epic"],
+                "ig_name": info.get("ig_name", ticker),
+                "status": None,
+                "bid": None,
+                "offer": None,
+            }
+            if connected:
+                mkt = _broker.get_market_info(info["epic"])
+                if mkt:
+                    snap = mkt.get("snapshot", {})
+                    entry["status"] = snap.get("marketStatus")
+                    entry["bid"] = snap.get("bid")
+                    entry["offer"] = snap.get("offer")
+            markets.append(entry)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_market_browser.html",
+            {"request": request, "connected": connected, "markets": markets},
+        )
+
+    @app.get("/fragments/open-positions", response_class=HTMLResponse)
+    def open_positions_fragment(request: Request):
+        connected = _broker is not None and _broker.is_connected()
+        positions = []
+        if connected:
+            for p in _broker.get_positions():
+                positions.append({
+                    "deal_id": p.deal_id,
+                    "ticker": p.ticker,
+                    "direction": p.direction,
+                    "size": p.size,
+                    "entry_price": p.entry_price,
+                    "unrealised_pnl": p.unrealised_pnl,
+                })
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_open_positions.html",
+            {"request": request, "connected": connected, "positions": positions},
+        )
+
+    @app.post("/api/actions/manual-trade", response_class=HTMLResponse)
+    def manual_trade_action(
+        epic: str = Form(default=""),
+        direction: str = Form(default="BUY"),
+        size: float = Form(default=0.5),
+    ):
+        if not epic:
+            return action_message("EPIC is required.", ok=False)
+        if direction not in ("BUY", "SELL"):
+            return action_message("Direction must be BUY or SELL.", ok=False)
+        if size <= 0:
+            return action_message("Size must be positive.", ok=False)
+
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return action_message(f"Broker not available: {err}", ok=False)
+
+        # Reverse-lookup ticker from EPIC
+        ticker = epic
+        for t, info in config.MARKET_MAP.items():
+            if info["epic"] == epic:
+                ticker = t
+                break
+
+        if direction == "BUY":
+            result = broker.place_long(ticker, size, "manual_trade")
+        else:
+            result = broker.place_short(ticker, size, "manual_trade")
+
+        if result.success:
+            return action_message(
+                f"{direction} {ticker} @ {result.fill_price} — deal {result.order_id or 'confirmed'}",
+                ok=True,
+            )
+        return action_message(f"Trade failed: {result.message}", ok=False)
+
+    @app.post("/api/actions/close-deal", response_class=HTMLResponse)
+    def close_deal_action(deal_id: str = Form(default="")):
+        if not deal_id:
+            return action_message("deal_id is required.", ok=False)
+
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return action_message(f"Broker not available: {err}", ok=False)
+
+        positions = broker.get_positions()
+        target = None
+        for p in positions:
+            if p.deal_id == deal_id:
+                target = p
+                break
+        if not target:
+            return action_message(f"No open position with deal_id={deal_id}", ok=False)
+
+        close_direction = "SELL" if target.direction == "long" else "BUY"
+        result = broker._close_option_leg(deal_id, close_direction, target.size)
+        if result.success:
+            return action_message(
+                f"Closed {target.ticker} {target.direction} @ {result.fill_price}",
+                ok=True,
+            )
+        return action_message(f"Close failed: {result.message}", ok=False)
+
+    @app.get("/api/charts/market-prices")
+    def api_market_prices(epic: str = "", resolution: str = "HOUR", points: int = 48):
+        """Fetch price history from IG for lightweight-charts."""
+        _VALID_RESOLUTIONS = {"MINUTE", "MINUTE_5", "MINUTE_15", "MINUTE_30", "HOUR", "HOUR_4", "DAY", "WEEK"}
+        if not epic or resolution not in _VALID_RESOLUTIONS:
+            return []
+        points = max(1, min(points, 200))
+
+        broker, err = _get_or_create_broker()
+        if not broker:
+            return []
+
+        try:
+            r = broker.session.get(
+                f"{broker.base_url}/prices/{epic}",
+                params={"resolution": resolution, "max": points, "pageSize": points},
+                headers=broker._headers("3"),
+                timeout=broker._TIMEOUT,
+            )
+            if r.status_code != 200:
+                return []
+
+            data = r.json()
+            result = []
+            for candle in data.get("prices", []):
+                snap_time = candle.get("snapshotTime", "")
+                close_price = candle.get("closePrice", {})
+                mid = close_price.get("bid")
+                if mid is None:
+                    continue
+                # IG returns snapshotTime as "2026/03/04 14:00:00"
+                # lightweight-charts needs UTC epoch seconds
+                try:
+                    dt = datetime.strptime(snap_time, "%Y/%m/%d %H:%M:%S")
+                    epoch = int(dt.replace(tzinfo=timezone.utc).timestamp())
+                except (ValueError, TypeError):
+                    continue
+                result.append({"time": epoch, "value": float(mid)})
+            return result
+        except Exception:
+            return []
+
     @app.get("/fragments/ledger", response_class=HTMLResponse)
     def ledger_fragment(request: Request):
         snapshot = get_unified_ledger_snapshot(nav_limit=25)
@@ -1025,6 +1564,69 @@ def create_app() -> FastAPI:
             request,
             "_control_actions.html",
             {"request": request, "control_actions": get_control_actions(limit=25)},
+        )
+
+    @app.get("/fragments/intelligence-feed", response_class=HTMLResponse)
+    def intelligence_feed_fragment(request: Request):
+        from datetime import datetime, timezone as tz
+
+        # Macro regime
+        macro_regime = ""
+        try:
+            from intelligence.feature_store import FeatureStore
+            from intelligence.macro_regime import MacroRegimeClassifier
+            fs = FeatureStore()
+            try:
+                result = MacroRegimeClassifier(feature_store=fs).classify()
+                macro_regime = result.regime.value if result else ""
+            finally:
+                fs.close()
+        except Exception:
+            pass
+
+        # Signal layer freshness
+        layers = []
+        try:
+            from app.signal.types import LayerId
+            from intelligence.event_store import EventStore
+            es = EventStore()
+            try:
+                for lid in LayerId:
+                    latest = es.get_latest_by_layer(lid.value)
+                    fresh = latest is not None
+                    layers.append({"id": lid.value, "fresh": fresh, "stale": False})
+            except Exception:
+                pass
+            finally:
+                es.close()
+        except Exception:
+            pass
+
+        # Top candidates from latest composite
+        candidates = []
+
+        # AI verdicts (if any)
+        ai_verdicts = {}
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_intelligence_feed.html",
+            {
+                "request": request,
+                "as_of": datetime.now(tz.utc).isoformat(),
+                "macro_regime": macro_regime,
+                "layers": layers,
+                "candidates": candidates,
+                "ai_verdicts": ai_verdicts,
+            },
+        )
+
+    @app.get("/fragments/pipeline-status", response_class=HTMLResponse)
+    def pipeline_status_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_pipeline_status.html",
+            {"request": request, "pipeline": control.pipeline_status()},
         )
 
     @app.get("/fragments/reconcile-report", response_class=HTMLResponse)
@@ -1891,8 +2493,12 @@ def build_broker_health_payload() -> dict[str, Any]:
     bot = getattr(engine, "_bot", None) if engine else None
     broker = getattr(bot, "broker", None) if bot else None
 
+    # Fall back to shared broker session if engine broker not available
+    if not broker and _broker is not None and _broker.is_connected():
+        broker = _broker
+
     if not broker:
-        payload["message"] = "No active broker session (engine not running)."
+        payload["message"] = "No active broker session. POST /api/broker/connect to connect."
         return payload
 
     broker_class = broker.__class__.__name__
@@ -1934,13 +2540,17 @@ def build_broker_health_payload() -> dict[str, Any]:
             payload["connected"] = bool(engine_status.get("running"))
 
     payload["ready"] = bool(
-        payload["engine_running"]
-        and payload["connected"]
+        payload["connected"]
         and not payload["kill_switch_active"]
         and not payload["error"]
     )
     if not payload["message"]:
-        payload["message"] = "Broker lane ready." if payload["ready"] else "Broker lane degraded."
+        if payload["ready"] and payload["engine_running"]:
+            payload["message"] = "Broker lane ready."
+        elif payload["ready"]:
+            payload["message"] = "Broker connected (engine not running)."
+        else:
+            payload["message"] = "Broker lane degraded."
 
     return payload
 

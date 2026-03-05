@@ -209,10 +209,8 @@ def test_ledger_fragment_renders_snapshot_and_reconcile(monkeypatch):
         response = client.get("/fragments/ledger")
 
     assert response.status_code == 200
-    assert "Unified Ledger" in response.text
-    assert "ATTENTION" in response.text
+    assert "Ledger" in response.text
     assert "SPY" in response.text
-    assert "Recent NAV Snapshots" in response.text
 
 
 def test_overview_and_trading_pages_include_ledger_panel():

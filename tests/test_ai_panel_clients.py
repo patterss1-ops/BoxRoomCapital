@@ -242,7 +242,8 @@ class TestGrokClient:
         assert exc.value.retryable is False
         assert len(session.calls) == 1
 
-    def test_missing_api_key_raises(self):
+    def test_missing_api_key_raises(self, monkeypatch):
+        monkeypatch.delenv("XAI_API_KEY", raising=False)
         config = GrokClientConfig(api_key="")
         client = GrokClient(config=config, session=FakeSession([]))
         with pytest.raises(AIPanelClientError, match="XAI_API_KEY"):
@@ -302,7 +303,8 @@ class TestChatGPTClient:
             client.fetch_verdict("MSFT", AS_OF)
         assert exc.value.retryable is False
 
-    def test_missing_api_key(self):
+    def test_missing_api_key(self, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         config = ChatGPTClientConfig(api_key="")
         client = ChatGPTClient(config=config, session=FakeSession([]))
         with pytest.raises(AIPanelClientError, match="OPENAI_API_KEY"):
@@ -374,7 +376,8 @@ class TestClaudeClient:
             client.fetch_verdict("TSLA", AS_OF)
         assert exc.value.retryable is False
 
-    def test_missing_api_key(self):
+    def test_missing_api_key(self, monkeypatch):
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
         config = ClaudeClientConfig(api_key="")
         client = ClaudeClient(config=config, session=FakeSession([]))
         with pytest.raises(AIPanelClientError, match="ANTHROPIC_API_KEY"):
@@ -429,7 +432,8 @@ class TestGeminiClient:
             client.fetch_verdict("NVDA", AS_OF)
         assert exc.value.retryable is False
 
-    def test_missing_api_key(self):
+    def test_missing_api_key(self, monkeypatch):
+        monkeypatch.delenv("GOOGLE_AI_API_KEY", raising=False)
         config = GeminiClientConfig(api_key="")
         client = GeminiClient(config=config, session=FakeSession([]))
         with pytest.raises(AIPanelClientError, match="GOOGLE_AI_API_KEY"):

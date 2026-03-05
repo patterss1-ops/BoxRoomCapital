@@ -1,29 +1,17 @@
-<div class="flex flex-wrap items-center gap-2">
-  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border {% if status.running %}bg-emerald-500/20 text-emerald-300 border-emerald-500/40{% else %}bg-amber-500/20 text-amber-300 border-amber-500/40{% endif %}">
-    Engine {{ "RUNNING" if status.running else "STOPPED" }}
-  </div>
-  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
-    Mode {{ status.mode or "-" }}
-  </div>
-  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border {% if status.kill_switch_active %}bg-red-500/20 text-red-300 border-red-500/40{% else %}bg-slate-800/50 text-slate-300 border-slate-700{% endif %}">
-    Kill {{ "ON" if status.kill_switch_active else "OFF" }}
-  </div>
-  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
-    Throttle {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%
-  </div>
-  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
-    Open {{ status.open_spreads or 0 }}
-  </div>
-  <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">
-    Cooldowns {{ status.cooldowns_count or 0 }}
-  </div>
+<div class="flex items-center gap-3 font-mono text-[11px]">
+  <span class="{% if status.running %}text-emerald-400{% else %}text-red-500{% endif %} font-semibold">{{ "RUN" if status.running else "STOP" }}</span>
+  <span class="text-slate-500">|</span>
+  <span class="text-slate-400">{{ status.mode or "-" }}</span>
+  <span class="text-slate-500">|</span>
+  <span class="{% if status.kill_switch_active %}text-red-400 font-semibold{% else %}text-slate-400{% endif %}">Kill {{ "ON" if status.kill_switch_active else "OFF" }}</span>
+  <span class="text-slate-500">|</span>
+  <span class="text-slate-400">Thr {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span>
+  <span class="text-slate-500">|</span>
+  <span class="text-white font-semibold">{{ status.open_spreads or 0 }} open</span>
+  <span class="text-slate-500">|</span>
+  <span class="text-slate-400">{{ status.cooldowns_count or 0 }} cool</span>
   {% if latest_incident %}
-    <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-red-500/20 text-red-300 border-red-500/40">
-      Latest Incident: {{ latest_incident.title }}
-    </div>
-  {% else %}
-    <div class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-emerald-500/20 text-emerald-300 border-emerald-500/40">
-      No active incidents
-    </div>
+    <span class="text-slate-500">|</span>
+    <span class="text-red-400">{{ latest_incident.title }}</span>
   {% endif %}
 </div>

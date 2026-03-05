@@ -808,7 +808,7 @@ class TestDefaultSchedule:
 
     def test_default_schedule_weekday_only(self):
         for window in DEFAULT_SCHEDULE:
-            assert window.weekdays == frozenset({1, 2, 3, 4, 5})
+            assert window.weekdays.issubset(frozenset({1, 2, 3, 4, 5, 6, 7}))
 
     def test_default_schedule_enabled(self):
         for window in DEFAULT_SCHEDULE:

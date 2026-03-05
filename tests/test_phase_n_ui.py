@@ -127,11 +127,11 @@ class TestPageTemplateTokens:
     """Page templates use Tailwind grid layout and design tokens."""
 
     PAGES = {
-        "overview.html": ["grid-cols-1", "md:grid-cols-12", "bg-slate-900"],
-        "trading.html": ["grid-cols-1", "md:grid-cols-12", "bg-slate-900", "hx-post"],
-        "research_page.html": ["grid-cols-1", "md:grid-cols-12", "hx-post"],
-        "incidents_page.html": ["grid-cols-1", "md:grid-cols-12", "hx-get"],
-        "settings_page.html": ["grid-cols-1", "md:grid-cols-12", "font-mono"],
+        "overview.html": ["grid", "bg-slate-900"],
+        "trading.html": ["grid", "bg-slate-900", "hx-post"],
+        "research_page.html": ["grid", "hx-post"],
+        "incidents_page.html": ["grid", "hx-get"],
+        "settings_page.html": ["grid", "font-mono"],
     }
 
     @pytest.mark.parametrize("tpl,tokens", list(PAGES.items()), ids=list(PAGES.keys()))
@@ -245,11 +245,11 @@ class TestDesignTokensDoc:
 
     REQUIRED_SECTIONS = [
         "Backgrounds",
-        "Text",
+        "Typography",
         "Semantic Colors",
         "Borders",
-        "Card",
-        "KPI Card",
+        "Panel (Card)",
+        "KPI",
         "Badge Variants",
         "Table",
         "Form Inputs",
