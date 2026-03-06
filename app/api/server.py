@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
+import html
 import logging
 import os
 from dataclasses import asdict, is_dataclass
@@ -18,6 +19,7 @@ import re as _re
 import requests as _requests
 
 from fastapi import FastAPI, Form, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -94,11 +96,19 @@ from fund.promotion_gate import PromotionGateConfig, evaluate_promotion_gate
 from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
 from broker.ig import IGBroker
 from intelligence.event_store import EventRecord, EventStore, compute_event_id
+from intelligence.feature_store import FeatureStore
 from risk.pre_trade_gate import RiskContext, RiskLimits, RiskOrderRequest, evaluate_pre_trade_risk
 from risk.portfolio_risk import get_risk_briefing
 from intelligence.intel_pipeline import (
     IntelSubmission,
     analyze_intel_async,
+)
+from intelligence.sa_factor_grades import normalize_factor_grades, store_factor_grades
+from intelligence.sa_quant_client import score_sa_quant_snapshot
+from intelligence.scrapers.sa_adapter import (
+    SA_BROWSER_CAPTURE_EVENT_TYPE,
+    SA_BROWSER_CAPTURE_SOURCE,
+    parse_sa_browser_payload,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -159,6 +169,15 @@ def _run_preflight_checks(logger: logging.Logger) -> dict[str, str]:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _build_bookmarklet_href(js_source: str, endpoint: str) -> str:
+    """Build a safe bookmarklet href without corrupting embedded URLs."""
+    src = js_source.replace("%%ENDPOINT%%", endpoint)
+    src = _re.sub(r"/\*.*?\*/", "", src, flags=_re.DOTALL)
+    src = _re.sub(r"(?m)^\s*//.*$", "", src)
+    src = _re.sub(r"\s+", " ", src).strip()
+    return "javascript:" + src
 
 
 def _tradingview_event_descriptor(alert: NormalizedTradingViewAlert) -> dict[str, Any]:
@@ -458,6 +477,14 @@ def create_app() -> FastAPI:
         title="Trading Bot Control Plane",
         version="1.0.0",
         lifespan=app_lifespan,
+    )
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[],
+        allow_origin_regex=r"https://([a-z0-9-]+\.)?seekingalpha\.com",
+        allow_credentials=False,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
     )
     app.include_router(ledger_router)
     app.mount(
@@ -2410,6 +2437,124 @@ def create_app() -> FastAPI:
 
         return {"ok": True, "job_id": job_id, "message": "SA intel queued for LLM analysis."}
 
+    @app.post("/api/webhooks/sa_quant_capture")
+    async def sa_quant_capture_webhook(request: Request):
+        """Receive structured SA quant data captured from the user's browser."""
+        try:
+            body = await request.body()
+            if len(body) > 128_000:
+                return JSONResponse(
+                    {"ok": False, "error": "payload_too_large"},
+                    status_code=413,
+                )
+            payload = json.loads(body.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_payload"},
+                status_code=400,
+            )
+
+        try:
+            capture = parse_sa_browser_payload(payload)
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": "invalid_capture", "detail": str(exc)},
+                status_code=422,
+            )
+
+        retrieved_at = _utc_now_iso()
+        capture_payload = capture.to_payload()
+        store = EventStore()
+        store.write_event(
+            EventRecord(
+                event_type=SA_BROWSER_CAPTURE_EVENT_TYPE,
+                source=SA_BROWSER_CAPTURE_SOURCE,
+                source_ref=capture.snapshot.source_ref,
+                retrieved_at=retrieved_at,
+                event_timestamp=capture.snapshot.updated_at or retrieved_at,
+                symbol=capture.ticker,
+                headline=f"Seeking Alpha browser capture: {capture.ticker}",
+                detail=(
+                    f"page_type={capture.page_type or 'unknown'}, "
+                    f"rating={capture.snapshot.rating or ''}, "
+                    f"grades={len(capture.factor_grades)}"
+                ),
+                confidence=0.99,
+                provenance_descriptor={
+                    "ticker": capture.ticker,
+                    "url": capture.url,
+                    "page_type": capture.page_type,
+                },
+                payload=capture_payload,
+            )
+        )
+
+        stored_feature_count = 0
+        if capture.factor_grades:
+            features = normalize_factor_grades(capture.ticker, capture.factor_grades)
+            if features:
+                fs = FeatureStore(db_path=DB_PATH)
+                try:
+                    if store_factor_grades(capture.ticker, features, fs, as_of=retrieved_at):
+                        stored_feature_count = len(features)
+                finally:
+                    fs.close()
+
+        layer_score_payload: Optional[dict[str, Any]] = None
+        if capture.has_quant_signal:
+            layer_score = score_sa_quant_snapshot(
+                snapshot=capture.snapshot,
+                as_of=retrieved_at,
+                source="sa-browser-capture",
+            )
+            layer_score_payload = layer_score.to_dict()
+            store.write_event(
+                EventRecord(
+                    event_type="signal_layer",
+                    source="sa-browser-capture",
+                    source_ref=layer_score.provenance_ref or capture.snapshot.source_ref,
+                    retrieved_at=retrieved_at,
+                    event_timestamp=retrieved_at,
+                    symbol=capture.ticker,
+                    headline="L8 SA Quant score",
+                    detail=(
+                        f"ticker={capture.ticker}, score={layer_score.score}, "
+                        f"rating={layer_score.details.get('rating', '')}"
+                    ),
+                    confidence=layer_score.confidence,
+                    provenance_descriptor={
+                        "layer_id": layer_score.layer_id.value,
+                        "ticker": capture.ticker,
+                        "as_of": retrieved_at,
+                        "capture_source": SA_BROWSER_CAPTURE_SOURCE,
+                    },
+                    payload=layer_score_payload,
+                )
+            )
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"SA capture received: {capture.ticker}",
+            detail=(
+                f"page_type={capture.page_type or 'unknown'}, "
+                f"has_quant={capture.has_quant_signal}, "
+                f"grades={len(capture.factor_grades)}"
+            ),
+            ticker=capture.ticker,
+            strategy="sa_quant_capture",
+        )
+
+        return {
+            "ok": True,
+            "ticker": capture.ticker,
+            "rating": capture.snapshot.rating,
+            "quant_score": capture.snapshot.quant_score_raw,
+            "factor_grades": capture.factor_grades,
+            "feature_count": stored_feature_count,
+            "layer_score": layer_score_payload,
+            "message": "SA browser capture stored.",
+        }
+
     @app.post("/api/webhooks/x_intel")
     async def x_intel_webhook(request: Request):
         """Receive X/Twitter content for LLM analysis.
@@ -2557,20 +2702,12 @@ def create_app() -> FastAPI:
         host = request.headers.get("host", "localhost:8000")
         scheme = request.headers.get("x-forwarded-proto", "https")
         endpoint = f"{scheme}://{host}"
-        # Read and minify the bookmarklet JS
         js_path = PROJECT_ROOT / "app" / "web" / "static" / "sa_bookmarklet.js"
         try:
             js_src = js_path.read_text()
         except FileNotFoundError:
             js_src = "alert('Bookmarklet file not found');"
-        # Inject the endpoint
-        js_src = js_src.replace("%%ENDPOINT%%", endpoint)
-        # Minify for bookmarklet URL
-        import re as _re_local
-        minified = _re_local.sub(r'\s+', ' ', js_src).strip()
-        minified = _re_local.sub(r'//[^\n]*', '', minified)  # strip comments
-        minified = _re_local.sub(r'/\*.*?\*/', '', minified)  # strip block comments
-        bookmarklet_url = "javascript:" + minified
+        bookmarklet_url = html.escape(_build_bookmarklet_href(js_src, endpoint), quote=True)
         return (
             "<html><head><title>BoxRoomCapital Bookmarklet</title>"
             "<style>body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:40px}"
@@ -2579,16 +2716,17 @@ def create_app() -> FastAPI:
             "a:hover{background:#00ff8822}code{background:#161b22;padding:2px 6px;border-radius:3px}"
             "h1{color:#00ff88}h2{color:#888;margin-top:30px}"
             ".instructions{max-width:600px;line-height:1.6}</style></head>"
-            "<body><h1>BoxRoomCapital Intel Bookmarklet</h1>"
+            "<body><h1>BoxRoomCapital Seeking Alpha Bookmarklet</h1>"
             "<div class='instructions'>"
             "<h2>Install</h2>"
             f"<p>Drag this link to your bookmarks bar:</p>"
-            f'<p><a href=\'{bookmarklet_url}\'>Send to BRC</a></p>'
+            f'<p><a href="{bookmarklet_url}">Send to BRC</a></p>'
             "<h2>Usage</h2>"
             "<ol><li>Browse to any Seeking Alpha article or stock page</li>"
             "<li>Click the <code>Send to BRC</code> bookmark</li>"
-            "<li>The page content will be sent to the LLM council for analysis</li>"
-            "<li>Results appear in the Intel History and via Telegram notification</li></ol>"
+            "<li>Article pages are sent to the LLM council for analysis</li>"
+            "<li>Stock pages with quant data are stored as SA browser captures for the signal engine</li>"
+            "<li>Results appear in Intel History and the research event store</li></ol>"
             f"<h2>Server</h2><p>Endpoint: <code>{endpoint}</code></p>"
             "</div></body></html>"
         )

@@ -15,6 +15,7 @@ from typing import Callable, Optional, Sequence
 from data.trade_db import DB_PATH, create_job, log_event, update_job
 from intelligence.event_store import EventRecord, EventStore
 import os
+from config import SA_BROWSER_CAPTURE_MAX_AGE_SECONDS
 
 from intelligence.sa_quant_client import SAQuantClient
 from intelligence.sa_factor_grades import normalize_factor_grades, store_factor_grades
@@ -44,19 +45,24 @@ class SAQuantJobRunner:
         config: SAQuantJobConfig = SAQuantJobConfig(),
         now_fn: Callable[[], str] = _utc_now_iso,
     ):
-        self.client = client or self._default_client()
+        self.client = client or self._default_client(db_path=db_path)
         self.db_path = db_path
         self.event_store = event_store or EventStore(db_path=db_path)
         self.config = config
         self._now_fn = now_fn
 
     @staticmethod
-    def _default_client():
-        """Use RapidAPI client if key present, else Yahoo Finance + Finnhub."""
+    def _default_client(db_path: str = DB_PATH):
+        """Use RapidAPI if available, else browser capture + YF/Finnhub fallback."""
         if os.getenv("SA_RAPIDAPI_KEY", "").strip():
             return SAQuantClient()
-        from intelligence.scrapers.sa_adapter import YFinnhubAdapter
-        return YFinnhubAdapter()
+        from intelligence.scrapers.sa_adapter import SABrowserCaptureAdapter, YFinnhubAdapter
+
+        return SABrowserCaptureAdapter(
+            db_path=db_path,
+            max_age_seconds=SA_BROWSER_CAPTURE_MAX_AGE_SECONDS,
+            fallback=YFinnhubAdapter(),
+        )
 
     def run(self, tickers: Sequence[str], as_of: str = "", job_id: str = "") -> dict:
         """Run SA Quant ingestion for a ticker batch.
@@ -125,7 +131,7 @@ class SAQuantJobRunner:
                         features = normalize_factor_grades(ticker, raw_grades)
                         if features:
                             from intelligence.feature_store import FeatureStore
-                            fs = FeatureStore()
+                            fs = FeatureStore(db_path=self.db_path)
                             store_factor_grades(ticker, features, fs, as_of=run_as_of)
                             fs.close()
                 except Exception:
