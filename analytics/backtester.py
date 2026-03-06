@@ -832,6 +832,11 @@ class Backtester:
             v4_params = dict(config.ROTATION_PARAMS)
             v4_params["allow_short_loser"] = True
             return SPYTLTRotation(params=params or v4_params)
+        elif name == "Dynamic":
+            from strategies.dynamic_strategy import DynamicStrategy
+            if not params or "strategy_spec" not in params:
+                raise ValueError("Dynamic strategy requires params['strategy_spec']")
+            return DynamicStrategy(params["strategy_spec"])
         else:
             raise ValueError(f"Unknown strategy: {name}")
 

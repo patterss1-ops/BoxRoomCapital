@@ -1,0 +1,232 @@
+<div class="flex items-center gap-1 mt-1 pt-1 border-t border-slate-800/50">
+  <span class="text-[9px] text-slate-600 uppercase tracking-wide">Pipeline:</span>
+
+  <!-- Stage progress indicators -->
+  {% for s in ['idea', 'review', 'backtest', 'paper', 'live'] %}
+  <span class="px-1 py-0.5 rounded text-[9px] font-semibold uppercase
+    {% if s == stage %}
+      {% if s == 'live' %}bg-emerald-500/20 text-emerald-400 border border-emerald-500/30
+      {% elif s == 'backtest' or s == 'paper' %}bg-amber-500/20 text-amber-400 border border-amber-500/30
+      {% else %}bg-blue-500/20 text-blue-400 border border-blue-500/30{% endif %}
+    {% elif s in ['idea','review','backtest','paper','live'] and ['idea','review','backtest','paper','live'].index(s) < ['idea','review','backtest','paper','live'].index(stage) %}
+      text-emerald-600
+    {% else %}text-slate-600{% endif %}">{{ s }}</span>
+  {% if not loop.last %}<span class="text-slate-700 text-[9px]">&rarr;</span>{% endif %}
+  {% endfor %}
+</div>
+
+<!-- Action buttons (contextual per stage) -->
+<div class="flex flex-wrap gap-1 mt-1.5" id="idea-actions-{{ idea.id }}">
+
+  {% if stage == 'idea' %}
+  <button hx-post="/api/ideas/{{ idea.id }}/promote"
+          hx-vals='{"target_stage": "review", "reason": "Promoted from idea"}'
+          hx-swap="none"
+          hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+          class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-blue-500 transition-colors">
+    Promote to Review
+  </button>
+
+  {% elif stage == 'review' %}
+  <!-- Research progress -->
+  {% if research_steps %}
+  <div class="w-full bg-slate-950 rounded px-2 py-1 mb-1">
+    <div class="flex items-center gap-2 text-[9px] font-mono flex-wrap">
+      {% set step_labels = {'hypothesis': '2a Hypothesis', 'evidence': '2b Evidence', 'critical_review': '2c Review', 'strategy_spec': '2d Strategy'} %}
+      {% for step in research_steps %}
+      <span class="px-1.5 py-0.5 rounded
+        {% if step.status == 'completed' %}bg-emerald-500/20 text-emerald-400
+        {% elif step.status == 'running' %}bg-amber-500/20 text-amber-400 animate-pulse
+        {% elif step.status == 'failed' %}bg-red-500/20 text-red-400
+        {% else %}bg-slate-800 text-slate-500{% endif %}">
+        {{ step_labels.get(step.step_name, step.step_name) }}
+        {% if step.status == 'completed' %}&#10003;{% elif step.status == 'running' %}...{% elif step.status == 'failed' %}&#10007;{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+    {% if idea.review_verdict %}
+    <div class="flex items-center gap-2 mt-1 text-[10px]">
+      <span class="text-slate-500">Verdict:</span>
+      <span class="font-bold {% if idea.review_verdict == 'proceed' %}text-emerald-400{% else %}text-red-400{% endif %}">
+        {{ idea.review_verdict|upper }}
+      </span>
+      {% if idea.review_score %}
+      <span class="text-slate-500">Score:</span>
+      <span class="{% if (idea.review_score or 0) >= 5 %}text-emerald-400{% else %}text-red-400{% endif %}">
+        {{ "%.1f"|format(idea.review_score or 0) }}/10
+      </span>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% if idea.strategy_spec_json %}
+    <div class="text-[9px] text-slate-500 mt-0.5">Strategy spec ready for backtest</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if idea.review_verdict == 'proceed' or not research_steps %}
+  <button hx-post="/api/ideas/{{ idea.id }}/backtest"
+          hx-swap="none"
+          hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+          class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-amber-500 transition-colors">
+    Run Backtest
+  </button>
+  {% endif %}
+
+  {% if not research_steps %}
+  <button hx-post="/api/ideas/{{ idea.id }}/research/start"
+          hx-swap="none"
+          hx-on::after-request="setTimeout(() => htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'), 2000)"
+          class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-blue-500 transition-colors">
+    Start Research
+  </button>
+  {% elif research_steps|selectattr('status', 'equalto', 'running')|list %}
+  <span class="text-[9px] text-amber-400 animate-pulse flex items-center gap-1">
+    <svg class="animate-spin h-2.5 w-2.5" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
+      <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
+    </svg>
+    Researching...
+  </span>
+  {% endif %}
+
+  {% elif stage == 'backtest' %}
+    {% if bt_result %}
+    <!-- Show backtest results inline -->
+    <div class="w-full bg-slate-950 rounded px-2 py-1 mb-1">
+      <div class="flex items-center gap-3 text-[10px] font-mono">
+        <span class="text-slate-500">Method:</span>
+        <span class="text-slate-300">{{ bt_result.method or 'n/a' }}</span>
+        <span class="text-slate-500">Trades:</span>
+        <span class="text-slate-300">{{ bt_result.total_trades or 0 }}</span>
+        <span class="text-slate-500">Win:</span>
+        <span class="{% if (bt_result.win_rate or 0) > 0.5 %}text-emerald-400{% else %}text-red-400{% endif %}">{{ "%.1f"|format((bt_result.win_rate or 0) * 100) }}%</span>
+        <span class="text-slate-500">Sharpe:</span>
+        <span class="{% if (bt_result.sharpe or 0) > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">{{ "%.2f"|format(bt_result.sharpe or 0) }}</span>
+        <span class="text-slate-500">PF:</span>
+        <span class="{% if (bt_result.profit_factor or 0) > 1 %}text-emerald-400{% else %}text-red-400{% endif %}">{{ "%.2f"|format(bt_result.profit_factor or 0) }}</span>
+        <span class="text-slate-500">MaxDD:</span>
+        <span class="text-red-400">{{ "%.1f"|format(bt_result.max_drawdown_pct or 0) }}%</span>
+      </div>
+      {% if bt_result.error %}
+      <div class="text-[10px] text-red-400 mt-0.5">{{ bt_result.error }}</div>
+      {% endif %}
+    </div>
+    <button hx-post="/api/ideas/{{ idea.id }}/promote"
+            hx-vals='{"target_stage": "paper", "reason": "Backtest passed"}'
+            hx-headers='{"Content-Type": "application/json"}'
+            hx-swap="none"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-amber-500 transition-colors">
+      Start Paper Trade
+    </button>
+    {% else %}
+    <!-- Backtest running or not yet run -->
+    <button hx-post="/api/ideas/{{ idea.id }}/backtest"
+            hx-swap="none"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-amber-500 transition-colors">
+      Run Backtest
+    </button>
+    {% if idea.backtest_job_id %}
+    <span class="text-[9px] text-amber-400 animate-pulse flex items-center gap-1">
+      <svg class="animate-spin h-2.5 w-2.5" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
+        <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
+      </svg>
+      Backtesting...
+    </span>
+    {% endif %}
+    {% endif %}
+
+  {% elif stage == 'paper' %}
+    <!-- Paper trade status -->
+    {% if idea.paper_deal_id %}
+    <div class="w-full bg-slate-950 rounded px-2 py-1 mb-1">
+      <div class="flex items-center gap-3 text-[10px] font-mono">
+        <span class="text-slate-500">Entry:</span>
+        <span class="text-slate-300">{{ "%.2f"|format(idea.paper_entry_price or 0) }}</span>
+        <span class="text-slate-500">P&L:</span>
+        <span class="{% if (idea.paper_pnl or 0) >= 0 %}text-emerald-400{% else %}text-red-400{% endif %} font-bold">
+          {{ "%.2f"|format(idea.paper_pnl or 0) }}
+        </span>
+        <span class="text-slate-500">Since:</span>
+        <span class="text-slate-300">{{ (idea.paper_entry_time or '')[:16] }}</span>
+      </div>
+    </div>
+    <button hx-post="/api/ideas/{{ idea.id }}/promote"
+            hx-vals='{"target_stage": "live", "reason": "Paper trade validated"}'
+            hx-headers='{"Content-Type": "application/json"}'
+            hx-swap="none"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-emerald-500 transition-colors">
+      Go Live
+    </button>
+    <button hx-post="/api/ideas/{{ idea.id }}/paper/close"
+            hx-vals='{"reason": "Manual close"}'
+            hx-headers='{"Content-Type": "application/json"}'
+            hx-swap="none"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2 py-0.5 rounded text-[10px] border border-slate-600 transition-colors">
+      Close Paper
+    </button>
+    {% endif %}
+
+  {% elif stage == 'live' %}
+    <span class="text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
+      <span class="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse"></span>
+      LIVE
+      {% if idea.live_strategy_slot %}
+      <span class="text-slate-500">({{ idea.live_strategy_slot }})</span>
+      {% endif %}
+    </span>
+
+  {% elif stage == 'rejected' %}
+    <span class="text-[10px] text-red-400">Rejected{% if idea.rejection_reason %}: {{ idea.rejection_reason }}{% endif %}</span>
+    <button hx-post="/api/ideas/{{ idea.id }}/promote"
+            hx-vals='{"target_stage": "idea", "reason": "Resurrected"}'
+            hx-headers='{"Content-Type": "application/json"}'
+            hx-swap="none"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2 py-0.5 rounded text-[10px] border border-slate-600 transition-colors">
+      Resurrect
+    </button>
+  {% endif %}
+
+  <!-- Reject button (available from any non-rejected stage) -->
+  {% if stage != 'rejected' %}
+  <button onclick="document.getElementById('reject-{{ idea.id }}').classList.toggle('hidden')"
+          class="bg-transparent hover:bg-red-500/10 text-red-400/60 hover:text-red-400 font-semibold px-2 py-0.5 rounded text-[10px] border border-red-500/20 hover:border-red-500/40 transition-colors ml-auto">
+    Reject
+  </button>
+  <div id="reject-{{ idea.id }}" class="hidden w-full mt-1">
+    <div class="flex gap-1">
+      <input type="text" id="reject-reason-{{ idea.id }}" placeholder="Reason..."
+             class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-0.5 text-[10px] placeholder-slate-500">
+      <button onclick="fetch('/api/ideas/{{ idea.id }}/reject', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason: document.getElementById('reject-reason-{{ idea.id }}').value})}).then(() => htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'))"
+              class="bg-red-600 hover:bg-red-500 text-white font-semibold px-2 py-0.5 rounded text-[10px] border border-red-500">
+        Confirm
+      </button>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Notes toggle -->
+  <button onclick="document.getElementById('notes-{{ idea.id }}').classList.toggle('hidden')"
+          class="bg-transparent hover:bg-slate-800 text-slate-500 hover:text-slate-300 px-1.5 py-0.5 rounded text-[10px] border border-slate-700 transition-colors">
+    Notes
+  </button>
+  <div id="notes-{{ idea.id }}" class="hidden w-full mt-1">
+    {% if idea.user_notes %}
+    <pre class="text-[9px] text-slate-400 bg-slate-950 rounded px-2 py-1 mb-1 whitespace-pre-wrap">{{ idea.user_notes }}</pre>
+    {% endif %}
+    <div class="flex gap-1">
+      <input type="text" id="note-input-{{ idea.id }}" placeholder="Add a note..."
+             class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-0.5 text-[10px] placeholder-slate-500">
+      <button onclick="fetch('/api/ideas/{{ idea.id }}/notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({notes: document.getElementById('note-input-{{ idea.id }}').value})}).then(() => {document.getElementById('note-input-{{ idea.id }}').value=''; htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')})"
+              class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2 py-0.5 rounded text-[10px] border border-slate-600">
+        Save
+      </button>
+    </div>
+  </div>
+</div>

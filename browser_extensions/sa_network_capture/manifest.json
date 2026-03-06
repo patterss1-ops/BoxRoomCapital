@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "BRC SA Network Capture",
+  "version": "0.3.0",
+  "description": "Capture full Seeking Alpha symbol snapshots from the authenticated browser and forward them to BoxRoomCapital.",
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "https://seekingalpha.com/*",
+    "https://*/*",
+    "http://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://seekingalpha.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true
+    }
+  ],
+  "options_page": "options.html",
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "page_hook.js"
+      ],
+      "matches": [
+        "https://seekingalpha.com/*"
+      ]
+    }
+  ]
+}

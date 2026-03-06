@@ -1,0 +1,135 @@
+<div class="bg-slate-900 border border-slate-800 rounded-md p-2 space-y-1.5">
+  <!-- Header -->
+  <div class="flex items-center justify-between gap-2">
+    <div class="flex items-center gap-2">
+      <span class="text-[11px] font-mono font-bold text-slate-200">{{ idea.ticker }}</span>
+      {% if idea.direction == 'long' %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">LONG</span>
+      {% elif idea.direction == 'short' %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase border bg-red-500/15 text-red-400 border-red-500/30">SHORT</span>
+      {% endif %}
+      <span class="text-[10px] {% if idea.conviction == 'high' %}text-emerald-400{% elif idea.conviction == 'medium' %}text-amber-400{% else %}text-slate-400{% endif %} font-semibold uppercase">{{ idea.conviction }}</span>
+      <span class="text-[10px] text-slate-500">{{ idea.timeframe or '' }}</span>
+    </div>
+    <span class="text-[10px] text-slate-500 font-mono">{{ (idea.created_at or '')[:16] }}</span>
+  </div>
+
+  <!-- Thesis -->
+  {% if idea.thesis %}
+  <p class="text-[11px] text-slate-300 leading-4">{{ idea.thesis }}</p>
+  {% endif %}
+
+  <!-- Entry / Invalidation -->
+  {% if idea.entry_trigger or idea.invalidation %}
+  <div class="grid grid-cols-2 gap-2">
+    {% if idea.entry_trigger %}
+    <div class="text-[10px]"><span class="text-slate-500">Entry:</span> <span class="text-slate-400">{{ idea.entry_trigger }}</span></div>
+    {% endif %}
+    {% if idea.invalidation %}
+    <div class="text-[10px]"><span class="text-slate-500">Invalid:</span> <span class="text-slate-400">{{ idea.invalidation }}</span></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Confidence bar -->
+  <div class="flex items-center gap-2">
+    <span class="text-[10px] text-slate-500 w-12">Conf</span>
+    <div class="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden">
+      <div class="h-full rounded-full transition-all {% if idea.confidence >= 0.6 %}bg-emerald-500{% elif idea.confidence >= 0.3 %}bg-amber-500{% else %}bg-red-500{% endif %}"
+           style="width: {{ ((idea.confidence or 0) * 100)|int }}%"></div>
+    </div>
+    <span class="text-[11px] font-mono {% if idea.confidence >= 0.6 %}text-emerald-400{% elif idea.confidence >= 0.3 %}text-amber-400{% else %}text-red-400{% endif %} w-10 text-right">{{ "%.0f"|format((idea.confidence or 0) * 100) }}%</span>
+  </div>
+
+  <!-- Backtest Results -->
+  {% if bt_result %}
+  <div class="space-y-0.5">
+    <span class="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Backtest Results</span>
+    <div class="bg-slate-950 rounded px-2 py-1.5">
+      <div class="grid grid-cols-4 gap-2 text-[10px] font-mono">
+        <div class="text-center">
+          <div class="{% if (bt_result.sharpe or 0) > 0.5 %}text-emerald-400{% elif (bt_result.sharpe or 0) > 0 %}text-amber-400{% else %}text-red-400{% endif %} font-bold">{{ "%.2f"|format(bt_result.sharpe or 0) }}</div>
+          <div class="text-slate-600 text-[9px]">Sharpe</div>
+        </div>
+        <div class="text-center">
+          <div class="{% if (bt_result.profit_factor or 0) > 1.5 %}text-emerald-400{% elif (bt_result.profit_factor or 0) > 1 %}text-amber-400{% else %}text-red-400{% endif %} font-bold">{{ "%.2f"|format(bt_result.profit_factor or 0) }}</div>
+          <div class="text-slate-600 text-[9px]">Profit Factor</div>
+        </div>
+        <div class="text-center">
+          <div class="{% if (bt_result.win_rate or 0) > 0.55 %}text-emerald-400{% elif (bt_result.win_rate or 0) > 0.45 %}text-amber-400{% else %}text-red-400{% endif %} font-bold">{{ "%.1f"|format((bt_result.win_rate or 0) * 100) }}%</div>
+          <div class="text-slate-600 text-[9px]">Win Rate</div>
+        </div>
+        <div class="text-center">
+          <div class="text-red-400 font-bold">{{ "%.1f"|format(bt_result.max_drawdown_pct or 0) }}%</div>
+          <div class="text-slate-600 text-[9px]">Max DD</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3 mt-1 pt-1 border-t border-slate-800/50 text-[9px]">
+        <span class="text-slate-500">{{ bt_result.method or 'n/a' }} | {{ bt_result.total_trades or 0 }} trades</span>
+        <span class="text-slate-500">{{ bt_result.period_start or '' }} to {{ bt_result.period_end or '' }}</span>
+        <span class="{% if (bt_result.total_return_pct or 0) > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">{{ "%.1f"|format(bt_result.total_return_pct or 0) }}% total</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Paper Trade Status -->
+  {% if paper_status and paper_status.success %}
+  <div class="space-y-0.5">
+    <span class="text-[10px] text-slate-500 uppercase tracking-wide font-semibold">Paper Trade</span>
+    <div class="bg-slate-950 rounded px-2 py-1.5">
+      <div class="grid grid-cols-4 gap-2 text-[10px] font-mono">
+        <div class="text-center">
+          <div class="text-slate-300 font-bold">{{ "%.2f"|format(paper_status.entry_price or 0) }}</div>
+          <div class="text-slate-600 text-[9px]">Entry</div>
+        </div>
+        <div class="text-center">
+          <div class="text-slate-300 font-bold">{{ "%.2f"|format(paper_status.current_price or 0) }}</div>
+          <div class="text-slate-600 text-[9px]">Current</div>
+        </div>
+        <div class="text-center">
+          <div class="{% if (paper_status.pnl or 0) >= 0 %}text-emerald-400{% else %}text-red-400{% endif %} font-bold">{{ "%.2f"|format(paper_status.pnl or 0) }}</div>
+          <div class="text-slate-600 text-[9px]">P&L</div>
+        </div>
+        <div class="text-center">
+          <div class="text-slate-300 font-bold">{{ "%.0f"|format(paper_status.hours_open or 0) }}h</div>
+          <div class="text-slate-600 text-[9px]">Open</div>
+        </div>
+      </div>
+      {% if paper_status.soak_met %}
+      <div class="text-[9px] text-emerald-400 mt-1">Soak period met — ready for promotion</div>
+      {% else %}
+      <div class="text-[9px] text-amber-400 mt-1">Soak: {{ "%.0f"|format(paper_status.hours_open or 0) }}h / {{ config.IDEA_PAPER_SOAK_HOURS if config else 24 }}h required</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Transition Timeline -->
+  {% if transitions %}
+  <details class="group">
+    <summary class="text-[10px] text-slate-500 uppercase tracking-wide font-semibold cursor-pointer hover:text-slate-400">
+      History ({{ transitions|length }}) <span class="group-open:rotate-90 inline-block transition-transform text-[9px]">&#9654;</span>
+    </summary>
+    <div class="mt-1 space-y-0.5 pl-2 border-l border-slate-800">
+      {% for t in transitions %}
+      <div class="flex items-center gap-2 text-[10px]">
+        <span class="text-slate-600 font-mono">{{ (t.timestamp or '')[:16] }}</span>
+        <span class="text-slate-400">{{ t.from_stage }}</span>
+        <span class="text-slate-600">&rarr;</span>
+        <span class="{% if t.to_stage == 'live' %}text-emerald-400{% elif t.to_stage == 'rejected' %}text-red-400{% else %}text-blue-400{% endif %}">{{ t.to_stage }}</span>
+        {% if t.reason %}<span class="text-slate-500 truncate max-w-[150px]">{{ t.reason }}</span>{% endif %}
+        <span class="text-slate-600 ml-auto">{{ t.actor }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  <!-- Interactive actions -->
+  <div id="idea-stage-{{ idea.id }}"
+       hx-get="/fragments/idea-actions/{{ idea.id }}"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+  </div>
+</div>

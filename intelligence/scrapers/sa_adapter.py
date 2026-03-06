@@ -17,6 +17,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Mapping, Optional
+from urllib.parse import parse_qs, urlparse
 
 from data.trade_db import DB_PATH, get_conn
 from intelligence.sa_quant_client import SAQuantSnapshot, score_sa_quant_snapshot
@@ -25,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 SA_BROWSER_CAPTURE_EVENT_TYPE = "sa_browser_capture"
 SA_BROWSER_CAPTURE_SOURCE = "sa-bookmarklet"
+SA_NETWORK_CAPTURE_SOURCE = "sa-network-extension"
+SA_SYMBOL_CAPTURE_EVENT_TYPE = "sa_symbol_capture"
+SA_CAPTURE_SOURCES = (SA_BROWSER_CAPTURE_SOURCE, SA_NETWORK_CAPTURE_SOURCE)
 
 # Yahoo recommendation key → normalized rating
 _YF_RATING_MAP: Dict[str, str] = {
@@ -61,6 +65,62 @@ _BROWSER_GRADE_KEYS: Dict[str, str] = {
     "revisions_grade": "revisions_grade",
 }
 
+_SA_NUMERIC_TO_GRADE: Dict[int, str] = {
+    1: "F",
+    2: "D-",
+    3: "D",
+    4: "D+",
+    5: "C-",
+    6: "C",
+    7: "C+",
+    8: "B-",
+    9: "B",
+    10: "B+",
+    11: "A-",
+    12: "A",
+    13: "A+",
+}
+
+_SA_HISTORY_GRADE_KEYS: Dict[str, str] = {
+    "valueGrade": "value_grade",
+    "growthGrade": "growth_grade",
+    "momentumGrade": "momentum_grade",
+    "profitabilityGrade": "profitability_grade",
+    "epsRevisionsGrade": "revisions_grade",
+    "revisionsGrade": "revisions_grade",
+}
+
+_SA_VALUATION_FIELDS = {
+    "dividend_yield",
+    "ev_12m_sales_ratio",
+    "ev_ebit",
+    "ev_ebit_fy1",
+    "ev_ebitda",
+    "ev_ebitda_fy1",
+    "ev_sales_fy1",
+    "pb_fy1_ratio",
+    "pb_ratio",
+    "pe_gaap_fy1",
+    "pe_nongaap",
+    "pe_nongaap_fy1",
+    "pe_ratio",
+    "peg_gaap",
+    "peg_nongaap_fy1",
+    "price_cf_ratio",
+    "price_cf_ratio_fy1",
+    "ps_ratio",
+    "ps_ratio_fy1",
+}
+
+_SA_CAPITAL_STRUCTURE_FIELDS = {
+    "impliedmarketcap",
+    "marketcap",
+    "other_cap_struct",
+    "tev",
+    "total_cash",
+    "total_debt",
+}
+
 
 @dataclass(frozen=True)
 class SABrowserCapture:
@@ -78,7 +138,7 @@ class SABrowserCapture:
         return bool(self.snapshot.rating or self.snapshot.quant_score_raw is not None)
 
     def to_payload(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "ticker": self.ticker,
             "title": self.title,
             "url": self.url,
@@ -89,6 +149,10 @@ class SABrowserCapture:
             "grades": dict(self.factor_grades),
             "raw_fields": dict(self.snapshot.raw_fields),
         }
+        normalized_sections = self.snapshot.raw_fields.get("normalized_sections")
+        if isinstance(normalized_sections, Mapping):
+            payload["normalized_sections"] = dict(normalized_sections)
+        return payload
 
 
 def _coerce_float(value: Any) -> Optional[float]:
@@ -116,6 +180,11 @@ def _normalize_rating(value: Any) -> str:
 
 
 def _normalize_grade_value(value: Any) -> str:
+    numeric = _coerce_float(value)
+    if numeric is not None:
+        whole = int(round(numeric))
+        if abs(numeric - whole) < 1e-9 and whole in _SA_NUMERIC_TO_GRADE:
+            return _SA_NUMERIC_TO_GRADE[whole]
     text = str(value or "").strip().upper()
     if not text:
         return ""
@@ -167,6 +236,399 @@ def _capture_timestamp(payload: Mapping[str, Any], fallback: str = "") -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _rating_from_score(value: Any) -> str:
+    numeric = _coerce_float(value)
+    if numeric is None:
+        return ""
+    if numeric >= 4.5:
+        return "strong buy"
+    if numeric >= 3.5:
+        return "buy"
+    if numeric >= 2.5:
+        return "hold"
+    if numeric >= 1.5:
+        return "sell"
+    return "strong sell"
+
+
+def _extract_sa_history_entry(payload: Mapping[str, Any]) -> Optional[Mapping[str, Any]]:
+    direct_entry = payload.get("sa_rating_history_entry")
+    if isinstance(direct_entry, Mapping):
+        return direct_entry
+
+    history_payload = payload.get("sa_history") or payload.get("sa_rating_history") or payload
+    if not isinstance(history_payload, Mapping):
+        return None
+
+    data = history_payload.get("data")
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, Mapping):
+                continue
+            attrs = item.get("attributes")
+            ratings = attrs.get("ratings") if isinstance(attrs, Mapping) else None
+            if isinstance(ratings, Mapping):
+                return item
+    return None
+
+
+def _extract_history_grades(ratings: Mapping[str, Any]) -> Dict[str, Any]:
+    normalized: Dict[str, Any] = {}
+    for key, canonical in _SA_HISTORY_GRADE_KEYS.items():
+        if key in ratings:
+            normalized[canonical] = ratings.get(key)
+    return normalized
+
+
+def _extract_query_fields(url: str) -> List[str]:
+    if not url:
+        return []
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    fields: List[str] = []
+    for raw in query.get("filter[fields]", []):
+        for item in str(raw).split(","):
+            clean = str(item or "").strip()
+            if clean:
+                fields.append(clean)
+    for raw in query.get("filter[fields][]", []):
+        clean = str(raw or "").strip()
+        if clean:
+            fields.append(clean)
+    return fields
+
+
+def _classify_symbol_response_url(url: str) -> str:
+    clean = str(url or "").strip().lower()
+    if not clean:
+        return "symbol"
+    if "/rating/periods" in clean:
+        return "ratings_history"
+    if "/relative_rankings" in clean:
+        return "relative_rankings"
+    if "/sector_metrics" in clean:
+        return "sector_metrics"
+    if "/ticker_metric_grades" in clean:
+        return "metric_grades"
+    if "/symbol_data/estimates" in clean:
+        return "earnings_estimates"
+    if "/historical_prices" in clean:
+        return "price_history"
+    if "/shares" in clean and "/symbols/" in clean:
+        return "ownership"
+    if "/metrics" in clean:
+        fields = _extract_query_fields(clean)
+        if fields == ["primary_price"]:
+            return "price"
+        if fields and all(field.endswith("_avg_5y") for field in fields):
+            return "valuation_averages_5y"
+        if any(field in _SA_CAPITAL_STRUCTURE_FIELDS for field in fields):
+            return "capital_structure"
+        if any(field in _SA_VALUATION_FIELDS for field in fields):
+            return "valuation_metrics"
+    return "symbol"
+
+
+def _metric_type_field_map(payload: Mapping[str, Any]) -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    included = payload.get("included")
+    if not isinstance(included, list):
+        return mapping
+    for item in included:
+        if not isinstance(item, Mapping) or item.get("type") != "metric_type":
+            continue
+        item_id = str(item.get("id") or "").strip()
+        attrs = item.get("attributes")
+        field = str(attrs.get("field") or "").strip() if isinstance(attrs, Mapping) else ""
+        if item_id and field:
+            mapping[item_id] = field
+    return mapping
+
+
+def _metric_values_from_payload(payload: Any) -> Dict[str, Any]:
+    if isinstance(payload, list):
+        merged: Dict[str, Any] = {}
+        for item in payload:
+            if not isinstance(item, Mapping):
+                continue
+            for key, value in item.items():
+                if key in {"slug", "tickerId"} or value is None:
+                    continue
+                merged[str(key)] = value
+        return merged
+
+    if not isinstance(payload, Mapping):
+        return {}
+
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return {}
+    field_map = _metric_type_field_map(payload)
+    values: Dict[str, Any] = {}
+    for item in data:
+        if not isinstance(item, Mapping):
+            continue
+        attrs = item.get("attributes")
+        rel = item.get("relationships")
+        metric_data = rel.get("metric_type", {}).get("data") if isinstance(rel, Mapping) else None
+        metric_id = str(metric_data.get("id") or "").strip() if isinstance(metric_data, Mapping) else ""
+        field = field_map.get(metric_id, "")
+        if not field or not isinstance(attrs, Mapping):
+            continue
+        value = attrs.get("value")
+        if value is not None:
+            values[field] = value
+    return values
+
+
+def _metric_grades_from_payload(payload: Mapping[str, Any]) -> Dict[str, Dict[str, Dict[str, Any]]]:
+    if not isinstance(payload, Mapping):
+        return {}
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return {}
+    field_map = _metric_type_field_map(payload)
+    normalized: Dict[str, Dict[str, Dict[str, Any]]] = {}
+    for item in data:
+        if not isinstance(item, Mapping):
+            continue
+        attrs = item.get("attributes")
+        rel = item.get("relationships")
+        metric_data = rel.get("metric_type", {}).get("data") if isinstance(rel, Mapping) else None
+        metric_id = str(metric_data.get("id") or "").strip() if isinstance(metric_data, Mapping) else ""
+        field = field_map.get(metric_id, "")
+        if not field or not isinstance(attrs, Mapping):
+            continue
+        algo = str(attrs.get("algo") or "default").strip() or "default"
+        grade_numeric = attrs.get("grade")
+        bucket = normalized.setdefault(algo, {})
+        bucket[field] = {
+            "grade_numeric": grade_numeric,
+            "grade": _normalize_grade_value(grade_numeric),
+        }
+    return normalized
+
+
+def _relative_rankings_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+    data = payload.get("data")
+    attrs = data.get("attributes") if isinstance(data, Mapping) else None
+    if not isinstance(attrs, Mapping):
+        return {}
+    return {
+        "overall_rank": attrs.get("overallRank"),
+        "sector_rank": attrs.get("sectorRank"),
+        "industry_rank": attrs.get("industryRank"),
+        "sector_name": attrs.get("sectorName"),
+        "industry_name": attrs.get("primaryName"),
+        "sector_total": attrs.get("totalTickersInSector"),
+        "industry_total": attrs.get("totalTickersInPrimaryIndustry"),
+        "overall_total": attrs.get("totalTickers"),
+    }
+
+
+def _compact_estimate_series(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+
+    def _first_value(entry: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(entry, Mapping):
+            return None
+        compact: Dict[str, Any] = {}
+        for period, series in entry.items():
+            if not isinstance(series, list) or not series:
+                continue
+            sample = series[0] if isinstance(series[0], Mapping) else None
+            if not isinstance(sample, Mapping):
+                continue
+            compact[str(period)] = {
+                "value": _coerce_float(sample.get("dataitemvalue")),
+                "effective_date": sample.get("effectivedate"),
+                "period": sample.get("period"),
+            }
+        return compact or None
+
+    estimates = payload.get("estimates")
+    if not isinstance(estimates, Mapping):
+        return {}
+
+    compact_estimates: Dict[str, Any] = {}
+    for ticker_payload in estimates.values():
+        if not isinstance(ticker_payload, Mapping):
+            continue
+        for metric_name, metric_payload in ticker_payload.items():
+            compact = _first_value(metric_payload)
+            if compact:
+                compact_estimates[str(metric_name)] = compact
+        if compact_estimates:
+            break
+    revisions = payload.get("revisions")
+    return {
+        "estimates": compact_estimates,
+        "revisions": revisions if isinstance(revisions, Mapping) else {},
+    }
+
+
+def _price_history_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+    data = payload.get("data")
+    if not isinstance(data, list) or not data:
+        return {}
+    first = data[0]
+    attrs = first.get("attributes") if isinstance(first, Mapping) else None
+    if not isinstance(attrs, Mapping):
+        return {}
+    return {
+        "as_of_date": attrs.get("as_of_date"),
+        "open": attrs.get("open"),
+        "high": attrs.get("high"),
+        "low": attrs.get("low"),
+        "close": attrs.get("close"),
+        "volume": attrs.get("volume"),
+    }
+
+
+def _ownership_from_payload(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {}
+    data = payload.get("data")
+    if not isinstance(data, list):
+        return {}
+    top_holders: List[Dict[str, Any]] = []
+    for item in data[:10]:
+        if not isinstance(item, Mapping):
+            continue
+        attrs = item.get("attributes")
+        if not isinstance(attrs, Mapping):
+            continue
+        top_holders.append(
+            {
+                "owner_type_id": attrs.get("ownertypeid"),
+                "percentage": attrs.get("percentage"),
+                "shares_held": attrs.get("sharesheld"),
+            }
+        )
+    return {"top_holders": top_holders}
+
+
+def _merge_nested_dict(target: Dict[str, Any], source: Mapping[str, Any]) -> Dict[str, Any]:
+    for key, value in source.items():
+        if isinstance(value, Mapping) and isinstance(target.get(key), dict):
+            _merge_nested_dict(target[key], value)
+        else:
+            target[key] = value
+    return target
+
+
+def normalize_sa_symbol_snapshot(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    summary = dict(payload.get("summary") or {}) if isinstance(payload.get("summary"), Mapping) else {}
+    raw_responses = payload.get("raw_responses") if isinstance(payload.get("raw_responses"), list) else []
+    normalized_sections: Dict[str, Any] = {}
+
+    summary.setdefault("ticker", payload.get("ticker"))
+    summary.setdefault("url", payload.get("url"))
+    summary.setdefault("title", payload.get("title"))
+    summary.setdefault("page_type", payload.get("page_type") or "symbol")
+    summary.setdefault("captured_at", payload.get("captured_at"))
+    summary.setdefault("source", payload.get("source"))
+    summary.setdefault("source_ref", payload.get("source_ref"))
+    summary.setdefault("bookmarklet_version", payload.get("bookmarklet_version"))
+
+    for record in raw_responses:
+        if not isinstance(record, Mapping):
+            continue
+        response_url = str(record.get("response_url") or "").strip()
+        section = str(record.get("section") or "").strip() or _classify_symbol_response_url(response_url)
+        canonical_section = _classify_symbol_response_url(response_url)
+        if canonical_section != "symbol":
+            section = canonical_section
+        record_payload = record.get("payload")
+
+        if section == "ratings_history":
+            history_entry = _extract_sa_history_entry(record_payload if isinstance(record_payload, Mapping) else {})
+            history_attrs = history_entry.get("attributes") if isinstance(history_entry, Mapping) else None
+            ratings = history_attrs.get("ratings") if isinstance(history_attrs, Mapping) else None
+            if isinstance(record_payload, Mapping):
+                summary.setdefault("sa_history", record_payload)
+            if isinstance(ratings, Mapping):
+                summary.setdefault("quant_score", _coerce_float(ratings.get("quantRating")))
+                summary.setdefault("rating", _rating_from_score(ratings.get("quantRating")))
+                summary.setdefault("author_rating", _rating_from_score(ratings.get("authorsRating")))
+                summary.setdefault("wall_st_rating", _rating_from_score(ratings.get("sellSideRating")))
+                merged_grades = dict(summary.get("grades") or {})
+                merged_grades.update(_normalize_factor_grades(_extract_history_grades(ratings)))
+                summary["grades"] = merged_grades
+                normalized_sections[section] = {
+                    "as_date": history_attrs.get("asDate") if isinstance(history_attrs, Mapping) else "",
+                    "ticker_id": history_attrs.get("tickerId") if isinstance(history_attrs, Mapping) else None,
+                    "quant_score": _coerce_float(ratings.get("quantRating")),
+                    "rating": _rating_from_score(ratings.get("quantRating")),
+                    "author_rating": _rating_from_score(ratings.get("authorsRating")),
+                    "wall_st_rating": _rating_from_score(ratings.get("sellSideRating")),
+                    "grades": _normalize_factor_grades(_extract_history_grades(ratings)),
+                }
+            continue
+
+        if not isinstance(record_payload, Mapping) and not isinstance(record_payload, list):
+            continue
+
+        section_payload: Dict[str, Any] = {}
+        if section == "relative_rankings" and isinstance(record_payload, Mapping):
+            section_payload = _relative_rankings_from_payload(record_payload)
+            if section_payload:
+                summary.setdefault("sector_rank", section_payload.get("sector_rank"))
+                summary.setdefault("industry_rank", section_payload.get("industry_rank"))
+        elif section == "price":
+            section_payload = _metric_values_from_payload(record_payload)
+        elif section in {"valuation_metrics", "valuation_averages_5y", "capital_structure", "sector_metrics"} and isinstance(record_payload, Mapping):
+            section_payload = _metric_values_from_payload(record_payload)
+        elif section == "metric_grades" and isinstance(record_payload, Mapping):
+            section_payload = _metric_grades_from_payload(record_payload)
+        elif section == "earnings_estimates" and isinstance(record_payload, Mapping):
+            section_payload = _compact_estimate_series(record_payload)
+        elif section == "price_history" and isinstance(record_payload, Mapping):
+            section_payload = _price_history_from_payload(record_payload)
+        elif section == "ownership" and isinstance(record_payload, Mapping):
+            section_payload = _ownership_from_payload(record_payload)
+
+        if not section_payload:
+            continue
+        if isinstance(normalized_sections.get(section), dict) and isinstance(section_payload, Mapping):
+            _merge_nested_dict(normalized_sections[section], section_payload)
+        else:
+            normalized_sections[section] = section_payload
+
+    raw_fields = dict(summary.get("raw_fields") or {}) if isinstance(summary.get("raw_fields"), Mapping) else {}
+    merged_section_names = set(raw_fields.get("section_names") or [])
+    merged_section_names.update(str(key) for key in normalized_sections.keys())
+    raw_fields["section_names"] = sorted(merged_section_names)
+    raw_fields["normalized_section_names"] = sorted(normalized_sections.keys())
+    raw_fields["raw_response_count"] = len(raw_responses)
+
+    rankings = normalized_sections.get("relative_rankings")
+    if isinstance(rankings, Mapping):
+        raw_fields.setdefault("overall_rank", rankings.get("overall_rank"))
+        raw_fields.setdefault("sector_name", rankings.get("sector_name"))
+        raw_fields.setdefault("industry_name", rankings.get("industry_name"))
+
+    price = normalized_sections.get("price")
+    if isinstance(price, Mapping) and price.get("primary_price") is not None:
+        raw_fields.setdefault("primary_price", price.get("primary_price"))
+
+    ratings_history = normalized_sections.get("ratings_history")
+    if isinstance(ratings_history, Mapping):
+        raw_fields.setdefault("ticker_id", ratings_history.get("ticker_id"))
+        raw_fields.setdefault("as_date", ratings_history.get("as_date"))
+
+    summary["raw_fields"] = raw_fields
+    return {
+        "summary": summary,
+        "normalized_sections": normalized_sections,
+    }
+
+
 def parse_sa_browser_payload(
     payload: Mapping[str, Any],
     captured_at: str = "",
@@ -176,25 +638,62 @@ def parse_sa_browser_payload(
     if not symbol:
         raise ValueError("ticker is required")
 
-    grades = _normalize_factor_grades(payload.get("grades") or payload.get("factor_grades") or {})
+    history_entry = _extract_sa_history_entry(payload)
+    history_attrs = history_entry.get("attributes") if isinstance(history_entry, Mapping) else None
+    history_ratings = history_attrs.get("ratings") if isinstance(history_attrs, Mapping) else None
+
+    grades_input = payload.get("grades") or payload.get("factor_grades") or {}
+    if not grades_input and isinstance(history_ratings, Mapping):
+        grades_input = _extract_history_grades(history_ratings)
+    grades = _normalize_factor_grades(grades_input)
+
     rating = _normalize_rating(
         payload.get("quant_rating")
         or payload.get("quantRating")
         or payload.get("rating")
         or payload.get("sa_rating")
+        or (history_ratings.get("quantRating") if isinstance(history_ratings, Mapping) and isinstance(history_ratings.get("quantRating"), str) else "")
     )
+    if not rating and isinstance(history_ratings, Mapping):
+        rating = _rating_from_score(history_ratings.get("quantRating"))
+
     quant_score = _coerce_float(
         payload.get("quant_score")
         or payload.get("quantScore")
         or payload.get("quant_score_raw")
         or payload.get("sa_quant_score")
+        or (history_ratings.get("quantRating") if isinstance(history_ratings, Mapping) else None)
     )
     if not rating and quant_score is None and not grades:
         raise ValueError("payload did not include SA quant fields")
 
     raw_fields = dict(payload.get("raw_fields") or {}) if isinstance(payload.get("raw_fields"), Mapping) else {}
-    author_rating = _normalize_rating(payload.get("author_rating") or payload.get("sa_authors_rating"))
-    wall_st_rating = _normalize_rating(payload.get("wall_st_rating") or payload.get("analyst_rating"))
+    capture_source = str(
+        payload.get("source")
+        or raw_fields.get("source")
+        or SA_BROWSER_CAPTURE_SOURCE
+    ).strip() or SA_BROWSER_CAPTURE_SOURCE
+    author_rating = _normalize_rating(
+        payload.get("author_rating")
+        or payload.get("sa_authors_rating")
+        or (history_ratings.get("authorsRating") if isinstance(history_ratings, Mapping) and isinstance(history_ratings.get("authorsRating"), str) else "")
+    )
+    if not author_rating and isinstance(history_ratings, Mapping):
+        author_rating = _rating_from_score(history_ratings.get("authorsRating"))
+
+    wall_st_rating = _normalize_rating(
+        payload.get("wall_st_rating")
+        or payload.get("analyst_rating")
+        or (history_ratings.get("sellSideRating") if isinstance(history_ratings, Mapping) and isinstance(history_ratings.get("sellSideRating"), str) else "")
+    )
+    if not wall_st_rating and isinstance(history_ratings, Mapping):
+        wall_st_rating = _rating_from_score(history_ratings.get("sellSideRating"))
+
+    history_as_date = (
+        str(history_attrs.get("asDate") or "").strip()
+        if isinstance(history_attrs, Mapping)
+        else ""
+    )
     raw_fields.update(
         {
             "rating": rating,
@@ -208,11 +707,19 @@ def parse_sa_browser_payload(
             "title": str(payload.get("title") or ""),
             "url": str(payload.get("url") or ""),
             "page_type": str(payload.get("page_type") or payload.get("pageType") or ""),
-            "source": SA_BROWSER_CAPTURE_SOURCE,
+            "source": capture_source,
+            "sa_rating_history_entry": dict(history_entry) if isinstance(history_entry, Mapping) else None,
+            "as_date": history_as_date,
         }
     )
+    normalized_sections = payload.get("normalized_sections")
+    if isinstance(normalized_sections, Mapping):
+        raw_fields["normalized_sections"] = dict(normalized_sections)
+    normalized_section_names = payload.get("normalized_section_names")
+    if isinstance(normalized_section_names, list):
+        raw_fields["normalized_section_names"] = list(normalized_section_names)
 
-    updated_at = _capture_timestamp(payload, fallback=captured_at)
+    updated_at = _capture_timestamp(payload, fallback=history_as_date or captured_at)
     source_ref = str(payload.get("url") or payload.get("source_ref") or f"sa-browser-{symbol}").strip()
     snapshot = SAQuantSnapshot(
         ticker=symbol,
@@ -285,16 +792,18 @@ class SABrowserCaptureAdapter:
 
         conn = get_conn(self.db_path)
         rows = conn.execute(
-            """SELECT payload, retrieved_at
+            """SELECT payload, retrieved_at, source
                FROM research_events
-               WHERE event_type=? AND source=? AND symbol=?
+               WHERE event_type=? AND symbol=?
                ORDER BY retrieved_at DESC, created_at DESC
                LIMIT 10""",
-            (SA_BROWSER_CAPTURE_EVENT_TYPE, SA_BROWSER_CAPTURE_SOURCE, symbol),
+            (SA_BROWSER_CAPTURE_EVENT_TYPE, symbol),
         ).fetchall()
         conn.close()
 
         for row in rows:
+            if str(row["source"] or "").strip() not in SA_CAPTURE_SOURCES:
+                continue
             try:
                 payload = json.loads(row["payload"] or "{}")
             except (TypeError, ValueError, json.JSONDecodeError):

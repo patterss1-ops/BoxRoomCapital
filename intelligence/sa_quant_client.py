@@ -274,6 +274,19 @@ def score_sa_quant_snapshot(
         "rating_score": rating_score,
         "numeric_score": numeric_score,
     }
+    raw_fields = snapshot.raw_fields or {}
+    if isinstance(raw_fields, Mapping):
+        if raw_fields.get("primary_price") is not None:
+            details["primary_price"] = raw_fields.get("primary_price")
+        if raw_fields.get("overall_rank") is not None:
+            details["overall_rank"] = raw_fields.get("overall_rank")
+        if raw_fields.get("sector_name"):
+            details["sector_name"] = raw_fields.get("sector_name")
+        if raw_fields.get("industry_name"):
+            details["industry_name"] = raw_fields.get("industry_name")
+        section_names = raw_fields.get("normalized_section_names") or raw_fields.get("section_names")
+        if isinstance(section_names, Sequence) and not isinstance(section_names, (str, bytes)):
+            details["section_names"] = list(section_names)
 
     provenance_seed = (
         f"{snapshot.ticker}|{as_of_dt.date().isoformat()}|"

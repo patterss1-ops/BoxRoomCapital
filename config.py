@@ -655,6 +655,29 @@ PORTFOLIO_ANALYTICS_RISK_FREE_RATE = _env_float(
     max_value=0.25,
 )
 
+# ─── IDEA PIPELINE (council trade ideas lifecycle) ───────────────────────────
+
+IDEA_PIPELINE_ENABLED = _env_bool("IDEA_PIPELINE_ENABLED", True)
+IDEA_BACKTEST_AUTO = _env_bool("IDEA_BACKTEST_AUTO", False)
+IDEA_PAPER_SOAK_HOURS = _env_int("IDEA_PAPER_SOAK_HOURS", 24, min_value=1, max_value=720)
+IDEA_PAPER_DEFAULT_STAKE = _env_float("IDEA_PAPER_DEFAULT_STAKE", 1.0, min_value=0.1, max_value=100.0)
+IDEA_BACKTEST_MIN_SHARPE = _env_float("IDEA_BACKTEST_MIN_SHARPE", 0.0, min_value=-5.0, max_value=10.0)
+IDEA_BACKTEST_MIN_PF = _env_float("IDEA_BACKTEST_MIN_PF", 1.0, min_value=0.0, max_value=10.0)
+IDEA_LIVE_STRATEGY_SLOT = os.getenv("IDEA_LIVE_STRATEGY_SLOT", "discretionary")
+
+# ─── Automated Idea Research Pipeline ────────────────────────────────────────
+IDEA_RESEARCH_AUTO = _env_bool("IDEA_RESEARCH_AUTO", True)
+IDEA_RESEARCH_MODEL_HYPOTHESIS = os.getenv("IDEA_RESEARCH_MODEL_HYPOTHESIS", "grok")
+IDEA_RESEARCH_MODEL_REVIEW = os.getenv("IDEA_RESEARCH_MODEL_REVIEW", "claude")
+IDEA_RESEARCH_MODEL_STRATEGY = os.getenv("IDEA_RESEARCH_MODEL_STRATEGY", "openai")
+IDEA_REVIEW_MIN_SCORE = _env_float("IDEA_REVIEW_MIN_SCORE", 5.0, min_value=0.0, max_value=10.0)
+IDEA_AUTO_PROMOTE_BACKTEST = _env_bool("IDEA_AUTO_PROMOTE_BACKTEST", True)
+IDEA_AUTO_PROMOTE_PAPER = _env_bool("IDEA_AUTO_PROMOTE_PAPER", False)
+IDEA_DYNAMIC_BT_MIN_SHARPE = _env_float("IDEA_DYNAMIC_BT_MIN_SHARPE", 0.5, min_value=-5.0, max_value=10.0)
+IDEA_DYNAMIC_BT_MIN_PF = _env_float("IDEA_DYNAMIC_BT_MIN_PF", 1.2, min_value=0.0, max_value=10.0)
+IDEA_DYNAMIC_BT_MIN_TRADES = _env_int("IDEA_DYNAMIC_BT_MIN_TRADES", 20, min_value=1, max_value=1000)
+IDEA_DYNAMIC_BT_WF_STATUS = os.getenv("IDEA_DYNAMIC_BT_WF_STATUS", "marginal")
+
 # ─── PIPELINE & ORCHESTRATOR ─────────────────────────────────────────────────
 
 ORCHESTRATOR_ENABLED = _env_bool("ORCHESTRATOR_ENABLED", False)
