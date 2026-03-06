@@ -586,6 +586,13 @@ CRYPTO_MARKETS = {
     "SOL": {"pair": "SOLUSD", "strategy": "momentum", "direction": "both"},
 }
 
+# ─── X / TWITTER API ────────────────────────────────────────────────────
+X_CONSUMER_KEY = os.getenv("X_CONSUMER_KEY", "")
+X_CONSUMER_SECRET = os.getenv("X_CONSUMER_SECRET", "")
+X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN", "")
+X_ACCESS_TOKEN_SECRET = os.getenv("X_ACCESS_TOKEN_SECRET", "")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
+
 # ─── INTRADAY EVENT LOOP ─────────────────────────────────────────────────
 INTRADAY_ENABLED = _env_bool("INTRADAY_ENABLED", False)
 INTRADAY_POLL_SECONDS = _env_int("INTRADAY_POLL_SECONDS", 300, min_value=60, max_value=3600)

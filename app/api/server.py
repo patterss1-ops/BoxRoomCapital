@@ -180,6 +180,14 @@ def _build_bookmarklet_href(js_source: str, endpoint: str) -> str:
     return "javascript:" + src
 
 
+def _extract_bookmarklet_version(js_source: str) -> str:
+    """Extract the inline bookmarklet version stamp when present."""
+    match = _re.search(r'BOOKMARKLET_VERSION\s*=\s*"([^"]+)"', js_source)
+    if not match:
+        return "unknown"
+    return match.group(1).strip() or "unknown"
+
+
 def _tradingview_event_descriptor(alert: NormalizedTradingViewAlert) -> dict[str, Any]:
     return {
         "provider": "tradingview",
@@ -2645,6 +2653,16 @@ def create_app() -> FastAPI:
             # Strip /analyze command prefix if present
             content = text.replace("/analyze", "", 1).strip() if text.startswith("/analyze") else text
 
+            # If it's an X link, fetch the full tweet via API
+            if is_x_content and url:
+                tweet_data = _fetch_tweet_from_url(url)
+                if tweet_data:
+                    content = tweet_data["text"]
+                    if tweet_data.get("author"):
+                        content = f"@{tweet_data['author']}: {content}"
+                    if tweet_data.get("created_at"):
+                        content += f"\n\n[Posted: {tweet_data['created_at']}]"
+
             submission = IntelSubmission(
                 source="x_twitter" if is_x_content else "telegram",
                 content=content,
@@ -2707,17 +2725,19 @@ def create_app() -> FastAPI:
             js_src = js_path.read_text()
         except FileNotFoundError:
             js_src = "alert('Bookmarklet file not found');"
+        bookmarklet_version = _extract_bookmarklet_version(js_src)
         bookmarklet_url = html.escape(_build_bookmarklet_href(js_src, endpoint), quote=True)
-        return (
+        html_body = (
             "<html><head><title>BoxRoomCapital Bookmarklet</title>"
             "<style>body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:40px}"
             "a{color:#00ff88;font-size:18px;padding:12px 24px;border:2px solid #00ff88;"
             "text-decoration:none;border-radius:6px;display:inline-block}"
             "a:hover{background:#00ff8822}code{background:#161b22;padding:2px 6px;border-radius:3px}"
-            "h1{color:#00ff88}h2{color:#888;margin-top:30px}"
+            "h1{color:#00ff88}h2{color:#888;margin-top:30px}.meta{color:#8b949e;margin:8px 0 20px 0}"
             ".instructions{max-width:600px;line-height:1.6}</style></head>"
             "<body><h1>BoxRoomCapital Seeking Alpha Bookmarklet</h1>"
             "<div class='instructions'>"
+            f"<p class='meta'>Bookmarklet version: <code>{html.escape(bookmarklet_version)}</code></p>"
             "<h2>Install</h2>"
             f"<p>Drag this link to your bookmarks bar:</p>"
             f'<p><a href="{bookmarklet_url}">Send to BRC</a></p>'
@@ -2730,8 +2750,74 @@ def create_app() -> FastAPI:
             f"<h2>Server</h2><p>Endpoint: <code>{endpoint}</code></p>"
             "</div></body></html>"
         )
+        return HTMLResponse(
+            content=html_body,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     return app
+
+
+def _fetch_tweet_from_url(url: str) -> dict | None:
+    """Fetch full tweet text from an X/Twitter URL using the v2 API."""
+    # Extract tweet ID from URL
+    match = _re.search(r'(?:twitter\.com|x\.com)/.+/status/(\d+)', url)
+    if not match:
+        return None
+
+    tweet_id = match.group(1)
+    consumer_key = config.X_CONSUMER_KEY
+    consumer_secret = config.X_CONSUMER_SECRET
+    access_token = config.X_ACCESS_TOKEN
+    access_token_secret = config.X_ACCESS_TOKEN_SECRET
+
+    if not all([consumer_key, consumer_secret, access_token, access_token_secret]):
+        logger.warning("X API credentials not configured — cannot fetch tweet")
+        return None
+
+    try:
+        from requests_oauthlib import OAuth1Session
+        oauth = OAuth1Session(
+            consumer_key,
+            client_secret=consumer_secret,
+            resource_owner_key=access_token,
+            resource_owner_secret=access_token_secret,
+        )
+        resp = oauth.get(
+            f"https://api.x.com/2/tweets/{tweet_id}",
+            params={
+                "tweet.fields": "text,author_id,created_at,conversation_id",
+                "expansions": "author_id",
+                "user.fields": "username,name",
+            },
+            timeout=10,
+        )
+        if resp.status_code != 200:
+            logger.warning("X API returned %d: %s", resp.status_code, resp.text[:200])
+            return None
+
+        data = resp.json()
+        tweet = data.get("data", {})
+        # Resolve author username from includes
+        author = ""
+        for user in data.get("includes", {}).get("users", []):
+            if user.get("id") == tweet.get("author_id"):
+                author = user.get("username", "")
+                break
+
+        return {
+            "text": tweet.get("text", ""),
+            "author": author,
+            "created_at": tweet.get("created_at", ""),
+            "tweet_id": tweet_id,
+        }
+    except Exception as e:
+        logger.warning("Failed to fetch tweet %s: %s", tweet_id, e)
+        return None
 
 
 def _telegram_reply(chat_id: int, text: str) -> None:
