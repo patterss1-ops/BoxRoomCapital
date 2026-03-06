@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 _RUNTIME_DIR = Path(__file__).resolve().parent / ".runtime"
 _SETTINGS_OVERRIDE_PATH = _RUNTIME_DIR / "settings_override.json"
@@ -585,6 +585,13 @@ CRYPTO_MARKETS = {
     "ETH": {"pair": "XETHZUSD", "strategy": "momentum", "direction": "both"},
     "SOL": {"pair": "SOLUSD", "strategy": "momentum", "direction": "both"},
 }
+
+# ─── X / TWITTER API ────────────────────────────────────────────────────
+X_CONSUMER_KEY = os.getenv("X_CONSUMER_KEY", "")
+X_CONSUMER_SECRET = os.getenv("X_CONSUMER_SECRET", "")
+X_ACCESS_TOKEN = os.getenv("X_ACCESS_TOKEN", "")
+X_ACCESS_TOKEN_SECRET = os.getenv("X_ACCESS_TOKEN_SECRET", "")
+X_BEARER_TOKEN = os.getenv("X_BEARER_TOKEN", "")
 
 # ─── INTRADAY EVENT LOOP ─────────────────────────────────────────────────
 INTRADAY_ENABLED = _env_bool("INTRADAY_ENABLED", False)

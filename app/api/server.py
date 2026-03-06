@@ -180,6 +180,14 @@ def _build_bookmarklet_href(js_source: str, endpoint: str) -> str:
     return "javascript:" + src
 
 
+def _extract_bookmarklet_version(js_source: str) -> str:
+    """Extract the inline bookmarklet version stamp when present."""
+    match = _re.search(r'BOOKMARKLET_VERSION\s*=\s*"([^"]+)"', js_source)
+    if not match:
+        return "unknown"
+    return match.group(1).strip() or "unknown"
+
+
 def _tradingview_event_descriptor(alert: NormalizedTradingViewAlert) -> dict[str, Any]:
     return {
         "provider": "tradingview",
@@ -2380,6 +2388,81 @@ def create_app() -> FastAPI:
 
     # ─── Intelligence webhooks ─────────────────────────────────────────
 
+    @app.get("/api/webhooks/sa_debug_ping")
+    async def sa_debug_ping(
+        stage: str = "",
+        v: str = "",
+        href: str = "",
+        host: str = "",
+        page_type: str = "",
+    ):
+        """Lightweight debug beacon for bookmarklet execution tracing."""
+        _safe_log_event(
+            category="DEBUG",
+            headline=f"SA bookmarklet ping: {stage or 'unknown'}",
+            detail=(
+                f"v={v or '-'}, host={host or '-'}, page_type={page_type or '-'}, "
+                f"url={href or '-'}"
+            )[:500],
+            ticker=None,
+            strategy="sa_debug_ping",
+        )
+        return Response(status_code=204)
+
+    @app.get("/api/debug/tweet_fetch")
+    async def debug_tweet_fetch(url: str = ""):
+        """Diagnostic: test X API tweet fetch from the live server process."""
+        if not url:
+            return {"ok": False, "error": "pass ?url=https://x.com/.../status/123"}
+        diag = {}
+        try:
+            # Step 1: credential check
+            diag["config_ck_len"] = len(config.X_CONSUMER_KEY or "")
+            diag["config_cs_len"] = len(config.X_CONSUMER_SECRET or "")
+            diag["config_at_len"] = len(config.X_ACCESS_TOKEN or "")
+            diag["config_ats_len"] = len(config.X_ACCESS_TOKEN_SECRET or "")
+            diag["config_ck_start"] = (config.X_CONSUMER_KEY or "")[:6]
+
+            # Step 2: extract tweet ID
+            match = _re.search(r'(?:twitter\.com|x\.com)/.+/status/(\d+)', url)
+            diag["tweet_id"] = match.group(1) if match else None
+            if not match:
+                return {"ok": False, "error": "no tweet ID in URL", **diag}
+            tweet_id = match.group(1)
+
+            # Step 3: get oauth via our function
+            oauth = _get_x_oauth()
+            diag["oauth_available"] = oauth is not None
+            # Re-check after lazy reload
+            diag["config_ck_len_after"] = len(config.X_CONSUMER_KEY or "")
+            if not oauth:
+                return {"ok": False, "error": "oauth is None", **diag}
+
+            # Step 4: raw API call with this oauth session
+            resp = oauth.get(
+                f"https://api.x.com/2/tweets/{tweet_id}",
+                params={"tweet.fields": "text,author_id,created_at",
+                        "expansions": "author_id", "user.fields": "username"},
+                timeout=10,
+            )
+            diag["api_status"] = resp.status_code
+            diag["api_body_preview"] = resp.text[:500]
+
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"X API returned {resp.status_code}", **diag}
+
+            # Step 5: full fetch
+            result = _fetch_tweet_from_url(url)
+            if result:
+                return {"ok": True, "text_preview": result["text"][:500],
+                        "author": result.get("author"), **diag}
+            else:
+                return {"ok": False, "error": "fetch_tweet_from_url returned None despite raw API success", **diag}
+        except Exception as exc:
+            import traceback
+            diag["traceback"] = traceback.format_exc()
+            return {"ok": False, "error": str(exc), **diag}
+
     @app.post("/api/webhooks/sa_intel")
     async def sa_intel_webhook(request: Request):
         """Receive Seeking Alpha page data from browser bookmarklet.
@@ -2645,6 +2728,22 @@ def create_app() -> FastAPI:
             # Strip /analyze command prefix if present
             content = text.replace("/analyze", "", 1).strip() if text.startswith("/analyze") else text
 
+            # If it's an X link, fetch the full tweet via API
+            if is_x_content and url:
+                logger.info("Fetching tweet for URL: %s (X_CONSUMER_KEY set: %s)", url, bool(config.X_CONSUMER_KEY))
+                try:
+                    tweet_data = _fetch_tweet_from_url(url)
+                    logger.info("Tweet fetch result: %s", "success" if tweet_data else "failed/None")
+                except Exception as exc:
+                    logger.error("Tweet fetch EXCEPTION: %s", exc, exc_info=True)
+                    tweet_data = None
+                if tweet_data:
+                    content = tweet_data["text"]
+                    if tweet_data.get("author"):
+                        content = f"@{tweet_data['author']}: {content}"
+                    if tweet_data.get("created_at"):
+                        content += f"\n\n[Posted: {tweet_data['created_at']}]"
+
             submission = IntelSubmission(
                 source="x_twitter" if is_x_content else "telegram",
                 content=content,
@@ -2707,17 +2806,19 @@ def create_app() -> FastAPI:
             js_src = js_path.read_text()
         except FileNotFoundError:
             js_src = "alert('Bookmarklet file not found');"
+        bookmarklet_version = _extract_bookmarklet_version(js_src)
         bookmarklet_url = html.escape(_build_bookmarklet_href(js_src, endpoint), quote=True)
-        return (
+        html_body = (
             "<html><head><title>BoxRoomCapital Bookmarklet</title>"
             "<style>body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:40px}"
             "a{color:#00ff88;font-size:18px;padding:12px 24px;border:2px solid #00ff88;"
             "text-decoration:none;border-radius:6px;display:inline-block}"
             "a:hover{background:#00ff8822}code{background:#161b22;padding:2px 6px;border-radius:3px}"
-            "h1{color:#00ff88}h2{color:#888;margin-top:30px}"
+            "h1{color:#00ff88}h2{color:#888;margin-top:30px}.meta{color:#8b949e;margin:8px 0 20px 0}"
             ".instructions{max-width:600px;line-height:1.6}</style></head>"
             "<body><h1>BoxRoomCapital Seeking Alpha Bookmarklet</h1>"
             "<div class='instructions'>"
+            f"<p class='meta'>Bookmarklet version: <code>{html.escape(bookmarklet_version)}</code></p>"
             "<h2>Install</h2>"
             f"<p>Drag this link to your bookmarks bar:</p>"
             f'<p><a href="{bookmarklet_url}">Send to BRC</a></p>'
@@ -2730,8 +2831,206 @@ def create_app() -> FastAPI:
             f"<h2>Server</h2><p>Endpoint: <code>{endpoint}</code></p>"
             "</div></body></html>"
         )
+        return HTMLResponse(
+            content=html_body,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     return app
+
+
+def _get_x_oauth() -> "OAuth1Session | None":
+    """Create an authenticated X API OAuth1 session, or None if unconfigured."""
+    ck = config.X_CONSUMER_KEY
+    cs = config.X_CONSUMER_SECRET
+    at = config.X_ACCESS_TOKEN
+    ats = config.X_ACCESS_TOKEN_SECRET
+    # Lazy reload: if credentials are empty, try reloading .env in case it was
+    # created after the process started (common in Replit).
+    if not all([ck, cs, at, ats]):
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+        ck = os.getenv("X_CONSUMER_KEY", "")
+        cs = os.getenv("X_CONSUMER_SECRET", "")
+        at = os.getenv("X_ACCESS_TOKEN", "")
+        ats = os.getenv("X_ACCESS_TOKEN_SECRET", "")
+        # Update config module so subsequent calls don't need to reload
+        config.X_CONSUMER_KEY = ck
+        config.X_CONSUMER_SECRET = cs
+        config.X_ACCESS_TOKEN = at
+        config.X_ACCESS_TOKEN_SECRET = ats
+    if not all([ck, cs, at, ats]):
+        logger.warning("X API credentials not configured (checked .env and env vars)")
+        return None
+    from requests_oauthlib import OAuth1Session
+    return OAuth1Session(ck, client_secret=cs, resource_owner_key=at, resource_owner_secret=ats)
+
+
+def _fetch_single_tweet(oauth, tweet_id: str) -> dict | None:
+    """Fetch a single tweet with full metadata."""
+    resp = oauth.get(
+        f"https://api.x.com/2/tweets/{tweet_id}",
+        params={
+            "tweet.fields": "text,author_id,created_at,conversation_id,referenced_tweets,note_tweet,attachments",
+            "expansions": "author_id,attachments.media_keys,referenced_tweets.id",
+            "media.fields": "type,url,alt_text",
+            "user.fields": "username,name",
+        },
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        logger.warning("X API returned %d: %s", resp.status_code, resp.text[:200])
+        return None
+    return resp.json()
+
+
+def _resolve_author(data: dict, author_id: str) -> str:
+    """Extract username from includes.users."""
+    for user in data.get("includes", {}).get("users", []):
+        if user.get("id") == author_id:
+            return user.get("username", "")
+    return ""
+
+
+def _get_tweet_text(data: dict) -> str:
+    """Get full tweet text, preferring note_tweet (long-form) over regular text."""
+    tweet = data.get("data", {})
+    # note_tweet contains the full text for tweets > 280 chars and X Articles
+    note = tweet.get("note_tweet", {})
+    if note and note.get("text"):
+        return note["text"]
+    return tweet.get("text", "")
+
+
+def _describe_media(data: dict) -> str:
+    """Summarize attached media from includes."""
+    media_list = data.get("includes", {}).get("media", [])
+    if not media_list:
+        return ""
+    descriptions = []
+    for m in media_list:
+        mtype = m.get("type", "unknown")
+        alt = m.get("alt_text", "")
+        if alt:
+            descriptions.append(f"[{mtype}: {alt}]")
+        else:
+            descriptions.append(f"[{mtype} attached]")
+    return "\n".join(descriptions)
+
+
+def _fetch_thread(oauth, conversation_id: str, author_username: str) -> list[str]:
+    """Fetch all tweets in a thread by the same author (recent threads only)."""
+    try:
+        resp = oauth.get(
+            "https://api.x.com/2/tweets/search/recent",
+            params={
+                "query": f"conversation_id:{conversation_id} from:{author_username}",
+                "tweet.fields": "text,created_at,note_tweet",
+                "max_results": 100,
+                "sort_order": "recency",
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return []
+        tweets = resp.json().get("data", [])
+        # Reverse to chronological order (API returns newest first)
+        tweets.reverse()
+        parts = []
+        for t in tweets:
+            note = t.get("note_tweet", {})
+            text = note.get("text") if note and note.get("text") else t.get("text", "")
+            parts.append(text)
+        return parts
+    except Exception as e:
+        logger.warning("Thread fetch failed: %s", e)
+        return []
+
+
+def _fetch_tweet_from_url(url: str) -> dict | None:
+    """Fetch full tweet text from an X/Twitter URL using the v2 API.
+
+    Handles: threads, retweets, long tweets (note_tweet), and media attachments.
+    """
+    match = _re.search(r'(?:twitter\.com|x\.com)/.+/status/(\d+)', url)
+    if not match:
+        return None
+
+    tweet_id = match.group(1)
+    oauth = _get_x_oauth()
+    if not oauth:
+        return None
+
+    try:
+        data = _fetch_single_tweet(oauth, tweet_id)
+        if not data or "data" not in data:
+            return None
+
+        tweet = data["data"]
+        author_id = tweet.get("author_id", "")
+        author = _resolve_author(data, author_id)
+        created_at = tweet.get("created_at", "")
+        conversation_id = tweet.get("conversation_id", "")
+
+        # Handle retweets — fetch the original tweet for full text
+        ref_tweets = tweet.get("referenced_tweets", [])
+        retweeted_id = None
+        for ref in ref_tweets:
+            if ref.get("type") == "retweeted":
+                retweeted_id = ref.get("id")
+                break
+
+        if retweeted_id:
+            orig_data = _fetch_single_tweet(oauth, retweeted_id)
+            if orig_data and "data" in orig_data:
+                orig_tweet = orig_data["data"]
+                orig_author = _resolve_author(orig_data, orig_tweet.get("author_id", ""))
+                text = _get_tweet_text(orig_data)
+                media_desc = _describe_media(orig_data)
+                if media_desc:
+                    text += f"\n\n{media_desc}"
+                # Check if original is a thread
+                orig_conv_id = orig_tweet.get("conversation_id", "")
+                if orig_conv_id and orig_author:
+                    thread_parts = _fetch_thread(oauth, orig_conv_id, orig_author)
+                    if len(thread_parts) > 1:
+                        text = "\n\n---\n\n".join(thread_parts)
+                        if media_desc:
+                            text += f"\n\n{media_desc}"
+                return {
+                    "text": f"RT @{orig_author}: {text}" if orig_author else text,
+                    "author": author,
+                    "created_at": created_at,
+                    "tweet_id": tweet_id,
+                }
+
+        # Get full text (handles note_tweet / X Articles)
+        text = _get_tweet_text(data)
+        media_desc = _describe_media(data)
+        if media_desc:
+            text += f"\n\n{media_desc}"
+
+        # Check if this is part of a thread
+        if conversation_id and author:
+            thread_parts = _fetch_thread(oauth, conversation_id, author)
+            if len(thread_parts) > 1:
+                text = "\n\n---\n\n".join(thread_parts)
+                if media_desc:
+                    text += f"\n\n{media_desc}"
+
+        return {
+            "text": text,
+            "author": author,
+            "created_at": created_at,
+            "tweet_id": tweet_id,
+        }
+    except Exception as e:
+        logger.warning("Failed to fetch tweet %s: %s", tweet_id, e)
+        return None
 
 
 def _telegram_reply(chat_id: int, text: str) -> None:

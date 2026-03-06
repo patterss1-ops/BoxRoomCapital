@@ -126,7 +126,10 @@ class _FallbackClient:
 
 
 def test_parse_sa_browser_payload_normalizes_quant_fields():
-    capture = parse_sa_browser_payload(_sample_payload())
+    payload = _sample_payload()
+    payload["tickers"] = ["AAPL", "MSFT"]
+    payload["scan_debug"] = {"button_tabs": [{"label": "Ratings"}], "final": {"grades": 5}}
+    capture = parse_sa_browser_payload(payload)
 
     assert capture.ticker == "AAPL"
     assert capture.snapshot.rating == "strong buy"
@@ -134,12 +137,15 @@ def test_parse_sa_browser_payload_normalizes_quant_fields():
     assert capture.factor_grades["value_grade"] == "B+"
     assert capture.factor_grades["profitability_grade"] == "A-"
     assert capture.has_quant_signal is True
+    assert capture.snapshot.raw_fields["tickers"] == ["AAPL", "MSFT"]
+    assert capture.snapshot.raw_fields["scan_debug"]["button_tabs"][0]["label"] == "Ratings"
 
 
 def test_bookmarklet_builder_preserves_https_urls():
     js = """
     // comment line should be removed
     (function () {
+      var BOOKMARKLET_VERSION = "2026-03-06T12:38Z";
       var ENDPOINT = "%%ENDPOINT%%";
       fetch(ENDPOINT + "/api/webhooks/sa_intel");
     })();
@@ -150,6 +156,56 @@ def test_bookmarklet_builder_preserves_https_urls():
     assert href.startswith("javascript:")
     assert "https://example.replit.dev" in href
     assert 'fetch(ENDPOINT + "/api/webhooks/sa_intel")' in href
+
+
+def test_extract_bookmarklet_version():
+    js = 'var BOOKMARKLET_VERSION = "2026-03-06T14:44Z";'
+
+    version = server._extract_bookmarklet_version(js)
+
+    assert version == "2026-03-06T14:44Z"
+
+
+def test_bookmarklet_js_restricts_execution_to_seeking_alpha():
+    js_path = server.PROJECT_ROOT / "app" / "web" / "static" / "sa_bookmarklet.js"
+    js = js_path.read_text(encoding="utf-8")
+
+    assert 'This bookmarklet only runs on seekingalpha.com pages.' in js
+    assert 'function isSeekingAlphaHost(hostname)' in js
+    assert 'function sendDebugPing(stage, extra)' in js
+    assert 'merged.bookmarklet_version' in js
+    assert 'seekingalpha.com' in js
+
+
+def test_sa_debug_ping_logs_stage(monkeypatch):
+    logged = {}
+
+    def _capture(**kwargs):
+        logged.update(kwargs)
+
+    monkeypatch.setattr(server, "_safe_log_event", _capture)
+
+    async def _run():
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.get(
+                "/api/webhooks/sa_debug_ping",
+                params={
+                    "stage": "pre_post",
+                    "v": "2026-03-06T14:44Z",
+                    "href": "https://seekingalpha.com/symbol/MU",
+                    "host": "seekingalpha.com",
+                    "page_type": "symbol",
+                },
+            )
+
+    response = asyncio.run(_run())
+
+    assert response.status_code == 204
+    assert logged["strategy"] == "sa_debug_ping"
+    assert logged["headline"] == "SA bookmarklet ping: pre_post"
+    assert "2026-03-06T14:44Z" in logged["detail"]
+    assert "seekingalpha.com" in logged["detail"]
 
 
 def test_sa_quant_capture_preflight_allows_seeking_alpha_origin():
