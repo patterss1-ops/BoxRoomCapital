@@ -159,11 +159,11 @@ def test_bookmarklet_builder_preserves_https_urls():
 
 
 def test_extract_bookmarklet_version():
-    js = 'var BOOKMARKLET_VERSION = "2026-03-06T13:03Z";'
+    js = 'var BOOKMARKLET_VERSION = "2026-03-06T13:52Z";'
 
     version = server._extract_bookmarklet_version(js)
 
-    assert version == "2026-03-06T13:03Z"
+    assert version == "2026-03-06T13:52Z"
 
 
 def test_bookmarklet_js_restricts_execution_to_seeking_alpha():
@@ -172,7 +172,39 @@ def test_bookmarklet_js_restricts_execution_to_seeking_alpha():
 
     assert 'This bookmarklet only runs on seekingalpha.com pages.' in js
     assert 'function isSeekingAlphaHost(hostname)' in js
+    assert 'function sendDebugPing(stage, extra)' in js
     assert 'seekingalpha.com' in js
+
+
+def test_sa_debug_ping_logs_stage(monkeypatch):
+    logged = {}
+
+    def _capture(**kwargs):
+        logged.update(kwargs)
+
+    monkeypatch.setattr(server, "_safe_log_event", _capture)
+
+    async def _run():
+        transport = httpx.ASGITransport(app=server.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            return await client.get(
+                "/api/webhooks/sa_debug_ping",
+                params={
+                    "stage": "pre_post",
+                    "v": "2026-03-06T13:52Z",
+                    "href": "https://seekingalpha.com/symbol/MU",
+                    "host": "seekingalpha.com",
+                    "page_type": "symbol",
+                },
+            )
+
+    response = asyncio.run(_run())
+
+    assert response.status_code == 204
+    assert logged["strategy"] == "sa_debug_ping"
+    assert logged["headline"] == "SA bookmarklet ping: pre_post"
+    assert "2026-03-06T13:52Z" in logged["detail"]
+    assert "seekingalpha.com" in logged["detail"]
 
 
 def test_sa_quant_capture_preflight_allows_seeking_alpha_origin():

@@ -2388,6 +2388,27 @@ def create_app() -> FastAPI:
 
     # ─── Intelligence webhooks ─────────────────────────────────────────
 
+    @app.get("/api/webhooks/sa_debug_ping")
+    async def sa_debug_ping(
+        stage: str = "",
+        v: str = "",
+        href: str = "",
+        host: str = "",
+        page_type: str = "",
+    ):
+        """Lightweight debug beacon for bookmarklet execution tracing."""
+        _safe_log_event(
+            category="DEBUG",
+            headline=f"SA bookmarklet ping: {stage or 'unknown'}",
+            detail=(
+                f"v={v or '-'}, host={host or '-'}, page_type={page_type or '-'}, "
+                f"url={href or '-'}"
+            )[:500],
+            ticker=None,
+            strategy="sa_debug_ping",
+        )
+        return Response(status_code=204)
+
     @app.post("/api/webhooks/sa_intel")
     async def sa_intel_webhook(request: Request):
         """Receive Seeking Alpha page data from browser bookmarklet.
@@ -2762,57 +2783,175 @@ def create_app() -> FastAPI:
     return app
 
 
+def _get_x_oauth() -> "OAuth1Session | None":
+    """Create an authenticated X API OAuth1 session, or None if unconfigured."""
+    ck = config.X_CONSUMER_KEY
+    cs = config.X_CONSUMER_SECRET
+    at = config.X_ACCESS_TOKEN
+    ats = config.X_ACCESS_TOKEN_SECRET
+    if not all([ck, cs, at, ats]):
+        logger.warning("X API credentials not configured")
+        return None
+    from requests_oauthlib import OAuth1Session
+    return OAuth1Session(ck, client_secret=cs, resource_owner_key=at, resource_owner_secret=ats)
+
+
+def _fetch_single_tweet(oauth, tweet_id: str) -> dict | None:
+    """Fetch a single tweet with full metadata."""
+    resp = oauth.get(
+        f"https://api.x.com/2/tweets/{tweet_id}",
+        params={
+            "tweet.fields": "text,author_id,created_at,conversation_id,referenced_tweets,note_tweet,attachments",
+            "expansions": "author_id,attachments.media_keys,referenced_tweets.id",
+            "media.fields": "type,url,alt_text",
+            "user.fields": "username,name",
+        },
+        timeout=10,
+    )
+    if resp.status_code != 200:
+        logger.warning("X API returned %d: %s", resp.status_code, resp.text[:200])
+        return None
+    return resp.json()
+
+
+def _resolve_author(data: dict, author_id: str) -> str:
+    """Extract username from includes.users."""
+    for user in data.get("includes", {}).get("users", []):
+        if user.get("id") == author_id:
+            return user.get("username", "")
+    return ""
+
+
+def _get_tweet_text(data: dict) -> str:
+    """Get full tweet text, preferring note_tweet (long-form) over regular text."""
+    tweet = data.get("data", {})
+    # note_tweet contains the full text for tweets > 280 chars and X Articles
+    note = tweet.get("note_tweet", {})
+    if note and note.get("text"):
+        return note["text"]
+    return tweet.get("text", "")
+
+
+def _describe_media(data: dict) -> str:
+    """Summarize attached media from includes."""
+    media_list = data.get("includes", {}).get("media", [])
+    if not media_list:
+        return ""
+    descriptions = []
+    for m in media_list:
+        mtype = m.get("type", "unknown")
+        alt = m.get("alt_text", "")
+        if alt:
+            descriptions.append(f"[{mtype}: {alt}]")
+        else:
+            descriptions.append(f"[{mtype} attached]")
+    return "\n".join(descriptions)
+
+
+def _fetch_thread(oauth, conversation_id: str, author_username: str) -> list[str]:
+    """Fetch all tweets in a thread by the same author (recent threads only)."""
+    try:
+        resp = oauth.get(
+            "https://api.x.com/2/tweets/search/recent",
+            params={
+                "query": f"conversation_id:{conversation_id} from:{author_username}",
+                "tweet.fields": "text,created_at,note_tweet",
+                "max_results": 100,
+                "sort_order": "recency",
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            return []
+        tweets = resp.json().get("data", [])
+        # Reverse to chronological order (API returns newest first)
+        tweets.reverse()
+        parts = []
+        for t in tweets:
+            note = t.get("note_tweet", {})
+            text = note.get("text") if note and note.get("text") else t.get("text", "")
+            parts.append(text)
+        return parts
+    except Exception as e:
+        logger.warning("Thread fetch failed: %s", e)
+        return []
+
+
 def _fetch_tweet_from_url(url: str) -> dict | None:
-    """Fetch full tweet text from an X/Twitter URL using the v2 API."""
-    # Extract tweet ID from URL
+    """Fetch full tweet text from an X/Twitter URL using the v2 API.
+
+    Handles: threads, retweets, long tweets (note_tweet), and media attachments.
+    """
     match = _re.search(r'(?:twitter\.com|x\.com)/.+/status/(\d+)', url)
     if not match:
         return None
 
     tweet_id = match.group(1)
-    consumer_key = config.X_CONSUMER_KEY
-    consumer_secret = config.X_CONSUMER_SECRET
-    access_token = config.X_ACCESS_TOKEN
-    access_token_secret = config.X_ACCESS_TOKEN_SECRET
-
-    if not all([consumer_key, consumer_secret, access_token, access_token_secret]):
-        logger.warning("X API credentials not configured — cannot fetch tweet")
+    oauth = _get_x_oauth()
+    if not oauth:
         return None
 
     try:
-        from requests_oauthlib import OAuth1Session
-        oauth = OAuth1Session(
-            consumer_key,
-            client_secret=consumer_secret,
-            resource_owner_key=access_token,
-            resource_owner_secret=access_token_secret,
-        )
-        resp = oauth.get(
-            f"https://api.x.com/2/tweets/{tweet_id}",
-            params={
-                "tweet.fields": "text,author_id,created_at,conversation_id",
-                "expansions": "author_id",
-                "user.fields": "username,name",
-            },
-            timeout=10,
-        )
-        if resp.status_code != 200:
-            logger.warning("X API returned %d: %s", resp.status_code, resp.text[:200])
+        data = _fetch_single_tweet(oauth, tweet_id)
+        if not data or "data" not in data:
             return None
 
-        data = resp.json()
-        tweet = data.get("data", {})
-        # Resolve author username from includes
-        author = ""
-        for user in data.get("includes", {}).get("users", []):
-            if user.get("id") == tweet.get("author_id"):
-                author = user.get("username", "")
+        tweet = data["data"]
+        author_id = tweet.get("author_id", "")
+        author = _resolve_author(data, author_id)
+        created_at = tweet.get("created_at", "")
+        conversation_id = tweet.get("conversation_id", "")
+
+        # Handle retweets — fetch the original tweet for full text
+        ref_tweets = tweet.get("referenced_tweets", [])
+        retweeted_id = None
+        for ref in ref_tweets:
+            if ref.get("type") == "retweeted":
+                retweeted_id = ref.get("id")
                 break
 
+        if retweeted_id:
+            orig_data = _fetch_single_tweet(oauth, retweeted_id)
+            if orig_data and "data" in orig_data:
+                orig_tweet = orig_data["data"]
+                orig_author = _resolve_author(orig_data, orig_tweet.get("author_id", ""))
+                text = _get_tweet_text(orig_data)
+                media_desc = _describe_media(orig_data)
+                if media_desc:
+                    text += f"\n\n{media_desc}"
+                # Check if original is a thread
+                orig_conv_id = orig_tweet.get("conversation_id", "")
+                if orig_conv_id and orig_author:
+                    thread_parts = _fetch_thread(oauth, orig_conv_id, orig_author)
+                    if len(thread_parts) > 1:
+                        text = "\n\n---\n\n".join(thread_parts)
+                        if media_desc:
+                            text += f"\n\n{media_desc}"
+                return {
+                    "text": f"RT @{orig_author}: {text}" if orig_author else text,
+                    "author": author,
+                    "created_at": created_at,
+                    "tweet_id": tweet_id,
+                }
+
+        # Get full text (handles note_tweet / X Articles)
+        text = _get_tweet_text(data)
+        media_desc = _describe_media(data)
+        if media_desc:
+            text += f"\n\n{media_desc}"
+
+        # Check if this is part of a thread
+        if conversation_id and author:
+            thread_parts = _fetch_thread(oauth, conversation_id, author)
+            if len(thread_parts) > 1:
+                text = "\n\n---\n\n".join(thread_parts)
+                if media_desc:
+                    text += f"\n\n{media_desc}"
+
         return {
-            "text": tweet.get("text", ""),
+            "text": text,
             "author": author,
-            "created_at": tweet.get("created_at", ""),
+            "created_at": created_at,
             "tweet_id": tweet_id,
         }
     except Exception as e:

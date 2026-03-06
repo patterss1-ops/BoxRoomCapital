@@ -10,7 +10,7 @@
  */
 (function () {
   var ENDPOINT = window.__BRC_ENDPOINT || "%%ENDPOINT%%";
-  var BOOKMARKLET_VERSION = "2026-03-06T13:03Z";
+  var BOOKMARKLET_VERSION = "2026-03-06T13:52Z";
   var TAB_WAIT_MS = 1400;
   var MAX_BUTTON_TABS = 14;
   var MAX_ROUTE_TABS = 14;
@@ -125,6 +125,22 @@
   function isSeekingAlphaHost(hostname) {
     var host = String(hostname || "").toLowerCase();
     return host === "seekingalpha.com" || /(?:^|\\.)seekingalpha\\.com$/.test(host);
+  }
+
+  function sendDebugPing(stage, extra) {
+    try {
+      var params = new URLSearchParams();
+      params.set('stage', cleanText(stage || 'unknown'));
+      params.set('v', BOOKMARKLET_VERSION);
+      params.set('href', normalizeHref((extra && extra.href) || window.location.href));
+      params.set('host', String(window.location.hostname || ''));
+      params.set('page_type', cleanText((extra && extra.page_type) || ''));
+      var img = new Image();
+      img.referrerPolicy = 'no-referrer';
+      img.src = ENDPOINT + '/api/webhooks/sa_debug_ping?' + params.toString() + '&_ts=' + Date.now();
+    } catch (err) {
+      return;
+    }
   }
 
   function normalizeRatingValue(value) {
@@ -705,7 +721,9 @@
   async function main() {
     var status = showStatusBox();
     try {
+      sendDebugPing('start');
       if (!isSeekingAlphaHost(window.location.hostname)) {
+        sendDebugPing('blocked_non_sa');
         status.style.borderColor = '#ff4444';
         status.style.color = '#ff4444';
         status.textContent = 'This bookmarklet only runs on seekingalpha.com pages.';
@@ -726,6 +744,7 @@
       if (hasIntel) requests.push(postJson('/api/webhooks/sa_intel', data));
 
       if (!requests.length) {
+        sendDebugPing('no_payload', { href: data.url, page_type: data.page_type });
         status.style.borderColor = '#ff4444';
         status.style.color = '#ff4444';
         status.textContent = 'No article or quant data detected on this page.';
@@ -733,6 +752,7 @@
         return;
       }
 
+      sendDebugPing('pre_post', { href: data.url, page_type: data.page_type });
       status.textContent = 'Sending captured Seeking Alpha data...';
       var results = await Promise.allSettled(requests);
       var messages = [];
@@ -758,14 +778,17 @@
       });
 
       if (failures.length) {
+        sendDebugPing('post_fail', { href: data.url, page_type: data.page_type });
         status.style.borderColor = '#ff4444';
         status.style.color = '#ff4444';
         status.textContent = failures.join(' | ');
       } else {
+        sendDebugPing('post_ok', { href: data.url, page_type: data.page_type });
         status.textContent = messages.join(' | ');
       }
       setTimeout(function () { status.remove(); }, 9000);
     } catch (err) {
+      sendDebugPing('exception');
       status.style.borderColor = '#ff4444';
       status.style.color = '#ff4444';
       status.textContent = 'Failed: ' + err.message;
