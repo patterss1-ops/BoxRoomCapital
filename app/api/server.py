@@ -2676,7 +2676,9 @@ def create_app() -> FastAPI:
 
             # If it's an X link, fetch the full tweet via API
             if is_x_content and url:
+                logger.info("Fetching tweet for URL: %s (X_CONSUMER_KEY set: %s)", url, bool(config.X_CONSUMER_KEY))
                 tweet_data = _fetch_tweet_from_url(url)
+                logger.info("Tweet fetch result: %s", "success" if tweet_data else "failed/None")
                 if tweet_data:
                     content = tweet_data["text"]
                     if tweet_data.get("author"):

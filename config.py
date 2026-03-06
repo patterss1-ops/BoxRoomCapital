@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 _RUNTIME_DIR = Path(__file__).resolve().parent / ".runtime"
 _SETTINGS_OVERRIDE_PATH = _RUNTIME_DIR / "settings_override.json"

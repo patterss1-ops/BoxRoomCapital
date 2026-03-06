@@ -159,11 +159,11 @@ def test_bookmarklet_builder_preserves_https_urls():
 
 
 def test_extract_bookmarklet_version():
-    js = 'var BOOKMARKLET_VERSION = "2026-03-06T13:52Z";'
+    js = 'var BOOKMARKLET_VERSION = "2026-03-06T14:15Z";'
 
     version = server._extract_bookmarklet_version(js)
 
-    assert version == "2026-03-06T13:52Z"
+    assert version == "2026-03-06T14:15Z"
 
 
 def test_bookmarklet_js_restricts_execution_to_seeking_alpha():
@@ -191,7 +191,7 @@ def test_sa_debug_ping_logs_stage(monkeypatch):
                 "/api/webhooks/sa_debug_ping",
                 params={
                     "stage": "pre_post",
-                    "v": "2026-03-06T13:52Z",
+                    "v": "2026-03-06T14:15Z",
                     "href": "https://seekingalpha.com/symbol/MU",
                     "host": "seekingalpha.com",
                     "page_type": "symbol",
@@ -203,7 +203,7 @@ def test_sa_debug_ping_logs_stage(monkeypatch):
     assert response.status_code == 204
     assert logged["strategy"] == "sa_debug_ping"
     assert logged["headline"] == "SA bookmarklet ping: pre_post"
-    assert "2026-03-06T13:52Z" in logged["detail"]
+    assert "2026-03-06T14:15Z" in logged["detail"]
     assert "seekingalpha.com" in logged["detail"]
 
 

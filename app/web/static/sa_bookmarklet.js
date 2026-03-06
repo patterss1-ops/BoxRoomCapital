@@ -10,10 +10,11 @@
  */
 (function () {
   var ENDPOINT = window.__BRC_ENDPOINT || "%%ENDPOINT%%";
-  var BOOKMARKLET_VERSION = "2026-03-06T13:52Z";
+  var BOOKMARKLET_VERSION = "2026-03-06T14:15Z";
   var TAB_WAIT_MS = 1400;
   var MAX_BUTTON_TABS = 14;
   var MAX_ROUTE_TABS = 14;
+  var FETCH_TIMEOUT_MS = 6000;
   var TAB_KEYWORDS = [
     "quant",
     "rating",
@@ -141,6 +142,19 @@
     } catch (err) {
       return;
     }
+  }
+
+  function fetchWithTimeout(url, options, timeoutMs) {
+    var controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    var timer = null;
+    var config = Object.assign({}, options || {});
+    if (controller) config.signal = controller.signal;
+    if (controller && timeoutMs > 0) {
+      timer = setTimeout(function () { controller.abort(); }, timeoutMs);
+    }
+    return fetch(url, config).finally(function () {
+      if (timer) clearTimeout(timer);
+    });
   }
 
   function normalizeRatingValue(value) {
@@ -616,13 +630,25 @@
     return snapshotFromDocument(document, window.location.href, null, { kind: 'tab', label: item.label });
   }
 
+  function isSafeInPageTab(item) {
+    var el = item && item.element;
+    if (!el) return false;
+    if (el.tagName && el.tagName.toLowerCase() === 'a') return false;
+    if (el.closest && el.closest('a[href]')) return false;
+    if (el.getAttribute('href') || el.getAttribute('data-href') || el.getAttribute('data-url')) return false;
+    var role = cleanText(el.getAttribute('role') || '').toLowerCase();
+    var controls = cleanText(el.getAttribute('aria-controls') || '');
+    if (role === 'tab' && controls) return true;
+    return false;
+  }
+
   async function fetchRouteTab(item, status) {
     status.textContent = 'Fetching route: ' + item.label;
-    var response = await fetch(item.href, {
+    var response = await fetchWithTimeout(item.href, {
       method: 'GET',
       credentials: 'include',
       headers: { Accept: 'text/html' }
-    });
+    }, FETCH_TIMEOUT_MS);
     if (!response.ok) {
       throw new Error('HTTP ' + response.status + ' for ' + item.href);
     }
@@ -643,10 +669,18 @@
       route_tabs: []
     };
 
+    sendDebugPing('symbol_enrich_start', { href: data.url, page_type: data.page_type });
     await expandPossibleMenus(status, debug);
 
     var buttonTabs = collectButtonTabs();
     for (var i = 0; i < buttonTabs.length; i++) {
+      if (!isSafeInPageTab(buttonTabs[i])) {
+        debug.button_tabs.push({
+          label: buttonTabs[i].label,
+          skipped: 'unsafe_navigation'
+        });
+        continue;
+      }
       try {
         var buttonSnap = await clickButtonTab(buttonTabs[i], status);
         merged = mergeData(merged, buttonSnap);
@@ -663,6 +697,10 @@
     }
 
     var routeTabs = collectRouteTabs();
+    sendDebugPing('symbol_routes_collected', {
+      href: data.url,
+      page_type: data.page_type
+    });
     for (var j = 0; j < routeTabs.length; j++) {
       try {
         var routeSnap = await fetchRouteTab(routeTabs[j], status);
@@ -686,6 +724,10 @@
     debug.final = summarizeSnapshot(merged);
     merged.scan_debug = debug;
     merged.tickers = [merged.ticker || primarySymbolFromUrl(merged.url || window.location.href)].filter(Boolean);
+    sendDebugPing('symbol_enrich_done', {
+      href: merged.url || data.url,
+      page_type: merged.page_type
+    });
     return merged;
   }
 
