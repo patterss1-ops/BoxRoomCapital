@@ -1,0 +1,55 @@
+● Restart the app and hit the same URL again. This time we'll see the exact tweet ID extraction, API response status, and raw body.
+
+❯ {"ok":false,"error":"fetch_tweet_from_url returned None","tweet_id_match":"2029435958622593425","oauth_available":true,"api_status":401,"api_body_preview":"{\n  \"title\": \"Unauthorized\",\n  \"type\": \"about:blank\",\n            
+  \"status\": 401,\n  \"detail\": \"Unauthorized\"\n}"}                                                                                                                                                                                
+                                                                                                                                                                                                                                           
+● 401 Unauthorized from the X API. The OAuth credentials are loaded but rejected by X. This could be:                                                                                                                                      
+                                                                                                                                                                                                                                           
+  1. App permissions changed/revoked since we set it up                                                                                                                                                                                    
+  2. Access tokens expired or regenerated
+  3. The app only has read access at a different auth level                                                                                                                                                                                
+                                                                  
+  Let me check if the Bearer token works instead (it uses app-only auth, different from OAuth1 user tokens).
+
+● Bash(python3 -c "
+      import os, requests…)
+  ⎿  Bearer token set: False                                                                                                                                                                                                               
+   
+● No bearer token. Let me check the OAuth1 credentials directly.                                                                                                                                                                           
+                                                                  
+● Bash(python3 -c "                                                                                                                                                                                                                        
+      import os…)
+  ⎿  Consumer key: ... (0 chars)                                                                                                                                                                                                           
+     Consumer secret: ... (0 chars)                               
+     Access token: ... (0 chars)                                                                                                                                                                                                           
+     … +8 lines (ctrl+o to expand)                                
+                                                                                                                                                                                                                                           
+● The env vars are empty in this shell — 0 chars for all four. But earlier when I tested via import config it showed True for all of them. Let me check how config loads them.
+                                                                                                                                                                                                                                           
+● Bash(python3 -c "                                                                                                                                                                                                                        
+      import sys; sys.path.insert(0, '/home/runner/workspace')…)
+  ⎿  X_CONSUMER_KEY: 25 chars, starts: EVeMDxB9...                                                                                                                                                                                         
+     X_CONSUMER_SECRET: 50 chars                                  
+     X_ACCESS_TOKEN: 50 chars                                                                                                                                                                                                              
+     X_ACCESS_TOKEN_SECRET: 45 chars                              
+                                                                                                                                                                                                                                           
+● Config has them (loaded from .env via dotenv). But the earlier direct test from this shell worked (200 OK, got tweet content). So the credentials ARE valid. The issue must be that the live server process isn't loading them from .env
+  at startup.                                                                                                                                                                                                                              
+                                                                                                                                                                                                                                           
+● Searched for 2 patterns (ctrl+o to expand)  
+                                                                                                                                                                                                                                           
+● Bash(ls -la /home/runner/workspace/.env 2>&1; head -5 /home/runner/workspace/.env 2>&1 | sed 's/=.*/=***/')                                                                                                                              
+  ⎿  -rw-r--r-- 1 runner runner 370 Mar  6 13:45 /home/runner/workspace/.env
+     X_CONSUMER_KEY=***                                                                                                                                                                                                                    
+     X_CONSUMER_SECRET=***                                                                                                                                                                                                                 
+     … +3 lines (ctrl+o to expand)                                                                                                                                                                                                         
+                                                                                                                                                                                                                                           
+● .env has all 5 credentials and config.py calls load_dotenv() at import time. So when the server starts via python3 run_console.py → imports config → credentials should load. But the diagnostic endpoint showed 401...
+                                                                                                                                                                                                                                           
+  Wait — the diagnostic endpoint's raw API call got 401, but it created its own OAuth session. The earlier test from this shell via config worked fine. Let me check if the server process's _get_x_oauth() lazy reload is actually loading
+   from the right .env path.
+                                                                                                                                                                                                                                           
+● Searched for 1 pattern, read 1 file (ctrl+o to expand)          
+                       
+● The code looks correct. Config loads from .env, credentials are 25-50 chars long. But the diagnostic endpoint got 401. The diagnostic endpoint creates its own OAuth session directly — let me update it to use _get_x_oauth() AND log   
+  the credential lengths so we can confirm the live process actually has them.

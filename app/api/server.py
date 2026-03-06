@@ -2409,6 +2409,60 @@ def create_app() -> FastAPI:
         )
         return Response(status_code=204)
 
+    @app.get("/api/debug/tweet_fetch")
+    async def debug_tweet_fetch(url: str = ""):
+        """Diagnostic: test X API tweet fetch from the live server process."""
+        if not url:
+            return {"ok": False, "error": "pass ?url=https://x.com/.../status/123"}
+        diag = {}
+        try:
+            # Step 1: credential check
+            diag["config_ck_len"] = len(config.X_CONSUMER_KEY or "")
+            diag["config_cs_len"] = len(config.X_CONSUMER_SECRET or "")
+            diag["config_at_len"] = len(config.X_ACCESS_TOKEN or "")
+            diag["config_ats_len"] = len(config.X_ACCESS_TOKEN_SECRET or "")
+            diag["config_ck_start"] = (config.X_CONSUMER_KEY or "")[:6]
+
+            # Step 2: extract tweet ID
+            match = _re.search(r'(?:twitter\.com|x\.com)/.+/status/(\d+)', url)
+            diag["tweet_id"] = match.group(1) if match else None
+            if not match:
+                return {"ok": False, "error": "no tweet ID in URL", **diag}
+            tweet_id = match.group(1)
+
+            # Step 3: get oauth via our function
+            oauth = _get_x_oauth()
+            diag["oauth_available"] = oauth is not None
+            # Re-check after lazy reload
+            diag["config_ck_len_after"] = len(config.X_CONSUMER_KEY or "")
+            if not oauth:
+                return {"ok": False, "error": "oauth is None", **diag}
+
+            # Step 4: raw API call with this oauth session
+            resp = oauth.get(
+                f"https://api.x.com/2/tweets/{tweet_id}",
+                params={"tweet.fields": "text,author_id,created_at",
+                        "expansions": "author_id", "user.fields": "username"},
+                timeout=10,
+            )
+            diag["api_status"] = resp.status_code
+            diag["api_body_preview"] = resp.text[:500]
+
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"X API returned {resp.status_code}", **diag}
+
+            # Step 5: full fetch
+            result = _fetch_tweet_from_url(url)
+            if result:
+                return {"ok": True, "text_preview": result["text"][:500],
+                        "author": result.get("author"), **diag}
+            else:
+                return {"ok": False, "error": "fetch_tweet_from_url returned None despite raw API success", **diag}
+        except Exception as exc:
+            import traceback
+            diag["traceback"] = traceback.format_exc()
+            return {"ok": False, "error": str(exc), **diag}
+
     @app.post("/api/webhooks/sa_intel")
     async def sa_intel_webhook(request: Request):
         """Receive Seeking Alpha page data from browser bookmarklet.
@@ -2677,8 +2731,12 @@ def create_app() -> FastAPI:
             # If it's an X link, fetch the full tweet via API
             if is_x_content and url:
                 logger.info("Fetching tweet for URL: %s (X_CONSUMER_KEY set: %s)", url, bool(config.X_CONSUMER_KEY))
-                tweet_data = _fetch_tweet_from_url(url)
-                logger.info("Tweet fetch result: %s", "success" if tweet_data else "failed/None")
+                try:
+                    tweet_data = _fetch_tweet_from_url(url)
+                    logger.info("Tweet fetch result: %s", "success" if tweet_data else "failed/None")
+                except Exception as exc:
+                    logger.error("Tweet fetch EXCEPTION: %s", exc, exc_info=True)
+                    tweet_data = None
                 if tweet_data:
                     content = tweet_data["text"]
                     if tweet_data.get("author"):
@@ -2791,8 +2849,22 @@ def _get_x_oauth() -> "OAuth1Session | None":
     cs = config.X_CONSUMER_SECRET
     at = config.X_ACCESS_TOKEN
     ats = config.X_ACCESS_TOKEN_SECRET
+    # Lazy reload: if credentials are empty, try reloading .env in case it was
+    # created after the process started (common in Replit).
     if not all([ck, cs, at, ats]):
-        logger.warning("X API credentials not configured")
+        from dotenv import load_dotenv
+        load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=True)
+        ck = os.getenv("X_CONSUMER_KEY", "")
+        cs = os.getenv("X_CONSUMER_SECRET", "")
+        at = os.getenv("X_ACCESS_TOKEN", "")
+        ats = os.getenv("X_ACCESS_TOKEN_SECRET", "")
+        # Update config module so subsequent calls don't need to reload
+        config.X_CONSUMER_KEY = ck
+        config.X_CONSUMER_SECRET = cs
+        config.X_ACCESS_TOKEN = at
+        config.X_ACCESS_TOKEN_SECRET = ats
+    if not all([ck, cs, at, ats]):
+        logger.warning("X API credentials not configured (checked .env and env vars)")
         return None
     from requests_oauthlib import OAuth1Session
     return OAuth1Session(ck, client_secret=cs, resource_owner_key=at, resource_owner_secret=ats)

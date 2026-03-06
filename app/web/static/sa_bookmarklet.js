@@ -10,11 +10,13 @@
  */
 (function () {
   var ENDPOINT = window.__BRC_ENDPOINT || "%%ENDPOINT%%";
-  var BOOKMARKLET_VERSION = "2026-03-06T14:15Z";
+  var BOOKMARKLET_VERSION = "2026-03-06T14:44Z";
   var TAB_WAIT_MS = 1400;
   var MAX_BUTTON_TABS = 14;
   var MAX_ROUTE_TABS = 14;
   var FETCH_TIMEOUT_MS = 6000;
+  var IFRAME_RENDER_WAIT_MS = 2200;
+  var IFRAME_TIMEOUT_MS = 8000;
   var TAB_KEYWORDS = [
     "quant",
     "rating",
@@ -157,6 +159,60 @@
     });
   }
 
+  function loadIframeTab(item, status) {
+    return new Promise(function (resolve, reject) {
+      var frame = document.createElement('iframe');
+      var finished = false;
+      var timer = null;
+
+      function cleanup() {
+        if (timer) clearTimeout(timer);
+        if (frame && frame.parentNode) frame.parentNode.removeChild(frame);
+      }
+
+      function fail(err) {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        reject(err instanceof Error ? err : new Error(String(err || 'iframe load failed')));
+      }
+
+      function succeed(data) {
+        if (finished) return;
+        finished = true;
+        cleanup();
+        resolve(data);
+      }
+
+      frame.style.cssText = 'position:fixed;left:-99999px;top:-99999px;width:1280px;height:2400px;opacity:0;pointer-events:none;';
+      frame.setAttribute('aria-hidden', 'true');
+      frame.referrerPolicy = 'no-referrer';
+
+      timer = setTimeout(function () {
+        fail(new Error('Timeout loading ' + item.href));
+      }, IFRAME_TIMEOUT_MS);
+
+      frame.onload = function () {
+        Promise.resolve().then(async function () {
+          status.textContent = 'Rendering route: ' + item.label;
+          await sleep(IFRAME_RENDER_WAIT_MS);
+          var doc = frame.contentDocument;
+          if (!doc || !doc.documentElement) {
+            throw new Error('Iframe document unavailable for ' + item.href);
+          }
+          succeed(snapshotFromDocument(doc, item.href, null, { kind: 'route', label: item.label }));
+        }).catch(fail);
+      };
+
+      frame.onerror = function () {
+        fail(new Error('Iframe load error for ' + item.href));
+      };
+
+      document.body.appendChild(frame);
+      frame.src = item.href;
+    });
+  }
+
   function normalizeRatingValue(value) {
     var clean = cleanText(value).toLowerCase();
     if (!clean) return "";
@@ -235,13 +291,24 @@
 
   function classifyContext(url, label, kind) {
     var haystack = (cleanText(url) + " " + cleanText(label)).toLowerCase();
+    var isBase = kind === "base";
     return {
       kind: kind || "base",
-      quant: kind === "base" || /quant/.test(haystack),
-      author: kind === "base" || /author|sa analysts?/.test(haystack),
-      sellSide: kind === "base" || /sell-side|wall st|wall street|analysts?/.test(haystack),
-      grades: kind === "base" || /factor|grade|valuation|growth|profitability|momentum|revision|revisions|dividend/.test(haystack)
+      // Base symbol pages are noisy. Only treat quant as explicit when the route itself is quant-related.
+      quant: /quant/.test(haystack) || /\/ratings\/quant-ratings/.test(haystack),
+      author: isBase || /author|sa analysts?/.test(haystack),
+      sellSide: isBase || /sell-side|wall st|wall street|analysts?/.test(haystack),
+      grades: isBase || /factor|grade|valuation|growth|profitability|momentum|revision|revisions|dividend/.test(haystack)
     };
+  }
+
+  function ratingFromFiveScale(score) {
+    if (!validFiveScale(score)) return "";
+    if (score >= 4.5) return "strong buy";
+    if (score >= 3.5) return "buy";
+    if (score >= 2.5) return "hold";
+    if (score >= 1.5) return "sell";
+    return "strong sell";
   }
 
   function extractRatingByPatterns(pageText, htmlText, patterns) {
@@ -254,12 +321,12 @@
     if (!flags.quant) return "";
     return extractRatingByPatterns(pageText, htmlText, {
       text: [
-        /Quant (?:Rating|Recommendation)[^A-Za-z]{0,24}(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)/i,
-        /Quant (?:Rating|Recommendation)[\s\S]{0,120}?(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)/i
+        /Quant (?:Rating|Recommendation)(?:\s*[:\-]|\s{1,3})\s*(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)\b/i,
+        /Quant (?:Rating|Recommendation)[^A-Za-z]{0,20}(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)\b/i
       ],
       html: [
-        /(?:quantRatingLabel|quant_rating_label|quantRecommendation|quant_recommendation|quantRating|quant_rating)["'=:>\s\[{,]{0,40}"?([^"'<\]}]{2,40})/i,
-        /Quant (?:Rating|Recommendation)[\s\S]{0,160}?(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)/i
+        /(?:quantRatingLabel|quant_rating_label|quantRecommendation|quant_recommendation|quantRating|quant_rating)["'=:>\s\[{,]{0,40}"?(strong buy|buy|hold|sell|strong sell|very bullish|bullish|neutral|bearish|very bearish)\b/i,
+        /Quant (?:Rating|Recommendation)(?:\s*[:\-]|\s{1,3})\s*(Strong Buy|Buy|Hold|Sell|Strong Sell|Very Bullish|Bullish|Neutral|Bearish|Very Bearish)\b/i
       ]
     });
   }
@@ -306,20 +373,28 @@
     for (var i = 0; i < directSelectors.length; i++) {
       var els = (root || document).querySelectorAll(directSelectors[i]);
       for (var j = 0; j < els.length; j++) {
-        var value = firstNumber(cleanText(els[j].textContent), [/(-?\d+(?:\.\d+)?)/]);
+        var directText = cleanText(els[j].textContent);
+        if (!directText) continue;
+        if (/buy|hold|sell|bullish|bearish/i.test(directText) && !/\/\s*5|out of 5/i.test(directText)) continue;
+        var value = firstNumber(directText, [
+          /(\d\.\d{1,2})\s*(?:\/\s*5|out of 5)?/i,
+          /(\d)\s*\/\s*5/i
+        ]);
         if (validFiveScale(value)) return value;
       }
     }
 
     var textValue = firstNumber(pageText, [
-      /Quant (?:Rating|Score)[^0-9]{0,24}(\d(?:\.\d+)?)/i,
-      /Quant (?:Rating|Score)[\s\S]{0,80}?(\d(?:\.\d+)?)/i
+      /Quant (?:Rating|Score)[^0-9]{0,16}(\d\.\d{1,2})\s*(?:\/\s*5|out of 5)?/i,
+      /Quant (?:Rating|Score)[^0-9]{0,16}(\d)\s*\/\s*5/i
     ]);
     if (validFiveScale(textValue)) return textValue;
 
     var htmlValue = firstNumber(htmlText, [
-      /(?:quantRatingScore|quant_rating_score|quantScore|quant_score)["'=:>\s\[{,]{0,40}(\d(?:\.\d+)?)/i,
-      /Quant (?:Rating|Score)[\s\S]{0,120}?(\d(?:\.\d+)?)/i
+      /(?:quantRatingScore|quant_rating_score|quantScore|quant_score)["'=:>\s\[{,]{0,40}(\d\.\d{1,2})/i,
+      /(?:quantRatingScore|quant_rating_score|quantScore|quant_score)["'=:>\s\[{,]{0,40}(\d)\s*\/\s*5/i,
+      /Quant (?:Rating|Score)[^0-9]{0,20}(\d\.\d{1,2})\s*(?:\/\s*5|out of 5)?/i,
+      /Quant (?:Rating|Score)[^0-9]{0,20}(\d)\s*\/\s*5/i
     ]);
     if (validFiveScale(htmlValue)) return htmlValue;
 
@@ -422,6 +497,11 @@
     var pageType = detectPageType(url || window.location.href);
     var flags = classifyContext(url || window.location.href, context && context.label, context && context.kind);
     var tickers = extractTickerList(root, url, pageType);
+    var quantScore = extractQuantScore(root, pageText, html, flags);
+    var quantRating = extractQuantRating(pageText, html, flags);
+    if (!quantRating && flags.quant) {
+      quantRating = ratingFromFiveScale(quantScore);
+    }
     var data = {
       bookmarklet_version: BOOKMARKLET_VERSION,
       source: "seeking_alpha",
@@ -435,8 +515,8 @@
       ticker: tickers[0] || "",
       tickers: tickers,
       page_type: pageType,
-      rating: extractQuantRating(pageText, html, flags),
-      quant_score: extractQuantScore(root, pageText, html, flags),
+      rating: quantRating,
+      quant_score: quantScore,
       author_rating: extractAuthorRating(pageText, html, flags),
       wall_st_rating: extractWallStreetRating(pageText, html, flags),
       grades: extractGrades(root, pageText, html, flags),
@@ -454,6 +534,7 @@
     var nextMeta = next.__meta || { rating_conf: 0, quant_conf: 0, author_conf: 0, wall_conf: 0, grade_conf: 0 };
 
     merged.source = merged.source || next.source || "seeking_alpha";
+    merged.bookmarklet_version = merged.bookmarklet_version || next.bookmarklet_version || BOOKMARKLET_VERSION;
     merged.page_type = merged.page_type || next.page_type || "article";
     merged.url = merged.url || next.url || window.location.href;
     merged.title = merged.title || next.title || document.title || "";
@@ -643,19 +724,29 @@
   }
 
   async function fetchRouteTab(item, status) {
-    status.textContent = 'Fetching route: ' + item.label;
-    var response = await fetchWithTimeout(item.href, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { Accept: 'text/html' }
-    }, FETCH_TIMEOUT_MS);
-    if (!response.ok) {
-      throw new Error('HTTP ' + response.status + ' for ' + item.href);
+    try {
+      status.textContent = 'Loading route: ' + item.label;
+      var iframeData = await loadIframeTab(item, status);
+      iframeData.__route_method = 'iframe';
+      return iframeData;
+    } catch (iframeErr) {
+      status.textContent = 'Fetching route HTML: ' + item.label;
+      var response = await fetchWithTimeout(item.href, {
+        method: 'GET',
+        credentials: 'include',
+        headers: { Accept: 'text/html' }
+      }, FETCH_TIMEOUT_MS);
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status + ' for ' + item.href);
+      }
+      var html = await response.text();
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(html, 'text/html');
+      var htmlData = snapshotFromDocument(doc, item.href, html, { kind: 'route', label: item.label });
+      htmlData.__route_method = 'fetch';
+      htmlData.__route_fallback = String(iframeErr && iframeErr.message || iframeErr);
+      return htmlData;
     }
-    var html = await response.text();
-    var parser = new DOMParser();
-    var doc = parser.parseFromString(html, 'text/html');
-    return snapshotFromDocument(doc, item.href, html, { kind: 'route', label: item.label });
   }
 
   async function enrichSymbolSnapshot(data, status) {
@@ -709,6 +800,8 @@
           label: routeTabs[j].label,
           href: routeTabs[j].href,
           source: routeTabs[j].source,
+          method: routeSnap.__route_method || 'unknown',
+          fallback: routeSnap.__route_fallback || '',
           summary: summarizeSnapshot(routeSnap)
         });
       } catch (err) {
