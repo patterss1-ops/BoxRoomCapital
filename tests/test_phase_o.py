@@ -18,6 +18,7 @@ import sqlite3
 import sys
 import tempfile
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -227,6 +228,19 @@ class TestWebhookExecutionWiring:
 
     @pytest.fixture(autouse=True)
     def setup_app(self, tmp_path, monkeypatch):
+        class _FakeEventStore:
+            def __init__(self, db_path=None):
+                self.db_path = db_path
+
+            def get_event(self, event_id):
+                return None
+
+            def write_event(self, event):
+                return {"id": event.event_id}
+
+            def list_events(self, limit=100, event_type="", source=""):
+                return []
+
         self.db_path = str(tmp_path / "test_webhook.db")
         _init_temp_db(self.db_path)
 
@@ -234,6 +248,34 @@ class TestWebhookExecutionWiring:
         import config as cfg
         self._original_token = cfg.TRADINGVIEW_WEBHOOK_TOKEN
         monkeypatch.setattr(cfg, "TRADINGVIEW_WEBHOOK_TOKEN", "test-token-12345")
+        monkeypatch.setattr(cfg, "TRADINGVIEW_MAX_SIGNAL_AGE_SECONDS", 600)
+
+        from app.api import server as server_module
+        monkeypatch.setattr(server_module, "log_event", lambda **kwargs: None)
+        monkeypatch.setattr(
+            server_module,
+            "create_order_intent_envelope",
+            lambda *args, **kwargs: {"intent_id": "test-intent-phase-o"},
+        )
+        monkeypatch.setattr(server_module, "EventStore", _FakeEventStore)
+        monkeypatch.setattr(server_module, "_build_tradingview_risk_context", lambda *args, **kwargs: None)
+        monkeypatch.setattr(
+            server_module,
+            "evaluate_promotion_gate",
+            lambda *args, **kwargs: type("Promo", (), {"allowed": True, "reason_code": "OK", "message": "ok"})(),
+        )
+        monkeypatch.setattr(
+            server_module.control,
+            "status",
+            lambda: {"kill_switch_active": False, "kill_switch_reason": "", "cooldowns": {}},
+        )
+        monkeypatch.setattr(
+            server_module,
+            "get_active_strategy_parameter_set",
+            lambda strategy_key, status="live", db_path=server_module.DB_PATH: (
+                {"id": "live-set", "status": "live"} if status == "live" else None
+            ),
+        )
 
         from app.api.server import create_app
         self.app = create_app()
@@ -243,10 +285,14 @@ class TestWebhookExecutionWiring:
 
     def _webhook_payload(self, action="buy", ticker="SPY", qty=10.0, **extra):
         payload = {
+            "schema_version": "tv.v1",
+            "alert_id": f"{ticker.lower()}-{action}-001",
             "action": action,
             "ticker": ticker,
-            "qty": qty,
-            "strategy": "test_strategy",
+            "signal_price": 500.0,
+            "strategy_id": "ibs_spreadbet_short" if action in {"short", "cover"} else "ibs_spreadbet_long",
+            "timeframe": "1D",
+            "event_timestamp": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
             "token": "test-token-12345",
             **extra,
         }
@@ -295,12 +341,12 @@ class TestWebhookExecutionWiring:
             assert "action" in data
 
     def test_webhook_action_mapping(self):
-        """Buy/sell/long/short actions are all recognized."""
-        for action in ["buy", "sell", "long", "short"]:
+        """Configured long/short action sets are recognized."""
+        for action in ["buy", "sell", "short", "cover"]:
             payload = self._webhook_payload(action=action)
             resp = self.client.post("/api/webhooks/tradingview", json=payload)
             data = resp.json()
-            assert data.get("error") != "INVALID_ACTION", f"action={action} not recognized"
+            assert data.get("error") != "unsupported_action", f"action={action} not recognized"
 
     def test_invalid_action_rejected(self):
         """Unknown action like 'hold' returns error."""
@@ -308,7 +354,7 @@ class TestWebhookExecutionWiring:
         resp = self.client.post("/api/webhooks/tradingview", json=payload)
         data = resp.json()
         if resp.status_code == 422:
-            assert data.get("error") == "INVALID_ACTION"
+            assert data.get("error") == "unsupported_action"
 
     def test_webhook_endpoint_exists(self):
         """POST /api/webhooks/tradingview endpoint exists."""

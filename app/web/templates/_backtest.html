@@ -42,20 +42,24 @@
             {% endif %}
           </td>
           {% if job.result_parsed and job.result_parsed is mapping and job.result_parsed.get('total_return_pct') is not none %}
+            {% set sharpe_ratio = job.result_parsed.get('sharpe_ratio') %}
+            {% set max_drawdown_pct = job.result_parsed.get('max_drawdown_pct') %}
+            {% set total_trades = job.result_parsed.get('total_trades') %}
+            {% set win_rate = job.result_parsed.get('win_rate') %}
             <td class="py-1.5 pr-3 text-right font-mono text-xs {% if job.result_parsed.total_return_pct > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
               {{ "%.1f"|format(job.result_parsed.total_return_pct) }}%
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
-              {{ "%.2f"|format(job.result_parsed.get('sharpe_ratio', 0)) }}
+              {{ "%.2f"|format(sharpe_ratio if sharpe_ratio is not none else 0) }}
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-red-400">
-              {{ "%.1f"|format(job.result_parsed.get('max_drawdown_pct', 0)) }}%
+              {{ "%.1f"|format(max_drawdown_pct if max_drawdown_pct is not none else 0) }}%
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
-              {{ job.result_parsed.get('total_trades', '-') }}
+              {{ total_trades if total_trades is not none else '-' }}
             </td>
             <td class="py-1.5 text-right font-mono text-xs text-slate-300">
-              {{ "%.1f"|format(job.result_parsed.get('win_rate', 0)) }}%
+              {{ "%.1f"|format(win_rate if win_rate is not none else 0) }}%
             </td>
           {% else %}
             <td class="py-1.5 pr-3 text-right text-slate-500 text-xs" colspan="5">

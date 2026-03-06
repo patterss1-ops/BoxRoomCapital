@@ -217,6 +217,64 @@ class TestApiIncidents:
         assert resp.status_code == 200
         assert len(resp.json()["items"]) == 1
 
+    def test_incidents_filter_testclient_artifacts(self, monkeypatch):
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-05T19:26:04.386451",
+                    "category": "REJECTION",
+                    "title": "TradingView webhook rejected",
+                    "detail": '{"client_ip": "testclient", "reason": "missing webhook token"}',
+                    "source": "bot_event",
+                },
+                {
+                    "timestamp": "2026-03-05T19:24:54.063240",
+                    "category": "ERROR",
+                    "title": "Startup recovery left unresolved actions",
+                    "detail": "pending=8 recovered=0 unresolved=8",
+                    "source": "bot_event",
+                },
+            ],
+        )
+        with TestClient(server.app) as client:
+            resp = client.get("/api/incidents?limit=10")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["title"] == "Startup recovery left unresolved actions"
+
+
+class TestTopStrip:
+    def test_top_strip_skips_testclient_incident(self, monkeypatch):
+        _stub_status(monkeypatch)
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-05T19:26:04.386451",
+                    "category": "REJECTION",
+                    "title": "TradingView webhook rejected",
+                    "detail": '{"client_ip": "testclient", "reason": "missing webhook token"}',
+                    "source": "bot_event",
+                },
+                {
+                    "timestamp": "2026-03-05T19:24:54.063240",
+                    "category": "ERROR",
+                    "title": "Startup recovery left unresolved actions",
+                    "detail": "pending=8 recovered=0 unresolved=8",
+                    "source": "bot_event",
+                },
+            ],
+        )
+        with TestClient(server.app) as client:
+            resp = client.get("/fragments/top-strip")
+        assert resp.status_code == 200
+        assert "Startup recovery left unresolved actions" in resp.text
+        assert "TradingView webhook rejected" not in resp.text
+
 
 class TestApiControlActions:
     def test_control_actions_list(self, monkeypatch):

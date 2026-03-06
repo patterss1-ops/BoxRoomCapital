@@ -600,6 +600,26 @@ TRADINGVIEW_WEBHOOK_MAX_PAYLOAD_BYTES = _env_int(
     min_value=1024,
     max_value=1_048_576,
 )
+SA_BROWSER_CAPTURE_MAX_AGE_SECONDS = _env_int(
+    "SA_BROWSER_CAPTURE_MAX_AGE_SECONDS",
+    86_400,
+    min_value=300,
+    max_value=604_800,
+)
+TRADINGVIEW_MAX_SIGNAL_AGE_SECONDS = _env_int(
+    "TRADINGVIEW_MAX_SIGNAL_AGE_SECONDS",
+    600,
+    min_value=0,
+    max_value=86_400,
+)
+TRADINGVIEW_ENABLED_STRATEGIES = [
+    item.strip().lower()
+    for item in os.getenv(
+        "TRADINGVIEW_ENABLED_STRATEGIES",
+        "ibs_spreadbet_long,ibs_spreadbet_short",
+    ).split(",")
+    if item.strip()
+]
 
 # ─── PORTFOLIO ANALYTICS API (O-005) ───────────────────────────────────────
 
