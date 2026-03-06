@@ -1,5 +1,5 @@
 """
-Abstract broker interface. All broker implementations (paper, CityIndex) implement this.
+Abstract broker interface. All broker implementations (IG, IBKR, Kraken, paper) implement this.
 """
 from abc import ABC, abstractmethod
 from dataclasses import dataclass

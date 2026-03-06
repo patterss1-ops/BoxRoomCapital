@@ -24,7 +24,7 @@ from data.order_intent_store import ensure_order_intent_schema
 # ─── Constants ────────────────────────────────────────────────────────────────
 
 STRATEGIES = ["GTAA", "DualMomentum", "IBS_SPY", "IBS_QQQ"]
-BROKERS = ["IBKR_ISA", "IBKR_TRADING", "CITYINDEX"]
+BROKERS = ["IBKR_ISA", "IBKR_TRADING", "IG_SPREADBET"]
 TICKERS = ["SPY", "QQQ", "IWM", "DIA", "EWU", "EWG", "EWJ", "IEF", "GLD", "TLT", "VGK", "XLE"]
 NOW = datetime.now()
 TODAY = date.today()
@@ -131,7 +131,7 @@ def seed_broker_positions(conn):
     broker_configs = [
         ("IBKR_ISA", "ibkr", "ISA", "IBKR ISA Account"),
         ("IBKR_TRADING", "ibkr", "GIA", "IBKR Trading Account"),
-        ("CITYINDEX", "cityindex", "SPREADBET", "City Index Spread Betting"),
+        ("IG_SPREADBET", "ig", "SPREADBET", "IG Spread Betting"),
     ]
     for acc_id, broker, acc_type, label in broker_configs:
         conn.execute(
@@ -228,7 +228,7 @@ def seed_system_events(conn):
         ("REJECTION", "Order rejected by broker", "Insufficient margin for 15 IWM"),
         ("REJECTION", "Risk check failed", "Position size exceeds 20% portfolio limit"),
         ("HEARTBEAT", "System heartbeat", "All systems operational — latency 45ms"),
-        ("HEARTBEAT", "Broker connectivity OK", "IBKR: 32ms, CityIndex: 78ms"),
+        ("HEARTBEAT", "Broker connectivity OK", "IBKR: 32ms, IG: 45ms, Kraken: 78ms"),
         ("MARKET", "Market opened", "US equity session started 09:30 ET"),
         ("MARKET", "Market closed", "US equity session ended 16:00 ET"),
         ("POSITION", "Position updated", "SPY unrealised +$150.30 (+2.8%)"),

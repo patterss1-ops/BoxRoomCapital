@@ -13,6 +13,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+import re as _re
+
+import requests as _requests
+
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -35,6 +39,7 @@ from intelligence.jobs.signal_layer_jobs import (
     run_tier1_shadow_jobs,
 )
 from data.trade_db import (
+    DB_PATH,
     complete_calibration_run,
     create_job,
     create_calibration_run,
@@ -59,6 +64,7 @@ from data.trade_db import (
     get_strategy_parameter_set,
     get_strategy_promotions,
     get_summary,
+    get_conn,
     init_db,
     insert_calibration_points,
     log_event,
@@ -66,24 +72,46 @@ from data.trade_db import (
     update_job,
 )
 from intelligence.webhook_server import (
+    NormalizedTradingViewAlert,
+    TradingViewStrategySpec,
     WebhookValidationError,
     build_audit_detail,
     extract_auth_token,
+    get_tradingview_strategy_registry,
+    normalize_tradingview_alert,
     parse_json_payload,
     summarize_payload,
     validate_expected_token,
 )
 from execution.order_intent import OrderIntent, OrderSide
+from execution.dispatcher import default_broker_resolver
+from execution.policy.capability_policy import RouteAccountType, StrategyRequirements
+from execution.policy.route_policy import RoutePolicyState
+from execution.router import AccountRouter, RouteConfigEntry, RouteIntent
 from data.order_intent_store import create_order_intent_envelope
 from fund.execution_quality import get_execution_quality_payload
+from fund.promotion_gate import PromotionGateConfig, evaluate_promotion_gate
 from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
 from broker.ig import IGBroker
+from intelligence.event_store import EventRecord, EventStore, compute_event_id
+from risk.pre_trade_gate import RiskContext, RiskLimits, RiskOrderRequest, evaluate_pre_trade_risk
 from risk.portfolio_risk import get_risk_briefing
+from intelligence.intel_pipeline import (
+    IntelSubmission,
+    analyze_intel_async,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "web" / "templates"))
 control = BotControlService(PROJECT_ROOT)
 research = ResearchService(PROJECT_ROOT)
+logger = logging.getLogger(__name__)
+
+_TRADINGVIEW_RISK_LIMITS = RiskLimits(
+    max_position_pct_equity=15.0,
+    max_sleeve_pct_equity=40.0,
+    max_correlated_pct_equity=60.0,
+)
 
 # ─── Shared broker session (independent of engine) ─────────────────────────
 _broker: Optional[IGBroker] = None
@@ -127,6 +155,225 @@ def _run_preflight_checks(logger: logging.Logger) -> dict[str, str]:
     if missing:
         logger.warning("Preflight: missing credentials for: %s", ", ".join(missing))
     return checks
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _tradingview_event_descriptor(alert: NormalizedTradingViewAlert) -> dict[str, Any]:
+    return {
+        "provider": "tradingview",
+        "strategy_id": alert.strategy_id,
+        "ticker": alert.ticker,
+        "action": alert.action,
+        "timeframe": alert.timeframe,
+        "alert_id": alert.alert_id,
+        "event_timestamp": alert.event_timestamp,
+    }
+
+
+def _tradingview_event_id(alert: NormalizedTradingViewAlert) -> str:
+    return compute_event_id(
+        event_type="signal",
+        source="tradingview",
+        descriptor=_tradingview_event_descriptor(alert),
+        source_ref=alert.source_ref,
+    )
+
+
+def _decode_json_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if not isinstance(value, str) or not value:
+        return {}
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _resolve_tradingview_lane(
+    strategy_id: str,
+    db_path: str,
+) -> tuple[str, Optional[dict[str, Any]]]:
+    for lane in ("live", "staged_live", "shadow"):
+        active = get_active_strategy_parameter_set(strategy_id, status=lane, db_path=db_path)
+        if active:
+            return lane, active
+    return "missing", None
+
+
+def _tradingview_action_semantics(action: str) -> tuple[str, bool]:
+    clean = str(action or "").strip().lower()
+    mapping = {
+        "buy": (OrderSide.BUY.value, False),
+        "sell": (OrderSide.SELL.value, True),
+        "short": (OrderSide.SELL.value, False),
+        "cover": (OrderSide.BUY.value, True),
+    }
+    result = mapping.get(clean)
+    if result is None:
+        raise ValueError(f"Unsupported TradingView action '{action}'")
+    return result
+
+
+def _build_tradingview_route_state(engine_status: dict[str, Any]) -> RoutePolicyState:
+    cooldowns = engine_status.get("cooldowns") or {}
+    cooldown_tickers = {
+        str(ticker).upper()
+        for ticker in cooldowns.keys()
+        if str(ticker).strip()
+    }
+    return RoutePolicyState(
+        kill_switch_active=bool(engine_status.get("kill_switch_active")),
+        kill_switch_reason=str(engine_status.get("kill_switch_reason") or ""),
+        cooldown_tickers=cooldown_tickers,
+    )
+
+
+def _build_tradingview_router(spec: TradingViewStrategySpec) -> AccountRouter:
+    broker_name = str(spec.broker_target or "").strip().lower()
+    return AccountRouter(
+        route_map={
+            f"strategy:{spec.strategy_id}": RouteConfigEntry(
+                broker_name=broker_name,
+                account_type=RouteAccountType(spec.account_type),
+            ),
+        },
+        brokers={broker_name: default_broker_resolver(broker_name)},
+    )
+
+
+def _get_tradingview_equity(db_path: str) -> float:
+    try:
+        conn = get_conn(db_path)
+        row = conn.execute(
+            "SELECT total_nav FROM fund_daily_report ORDER BY report_date DESC LIMIT 1"
+        ).fetchone()
+        conn.close()
+    except Exception:
+        return 0.0
+    if not row:
+        return 0.0
+    try:
+        return float(row["total_nav"] or 0.0)
+    except (TypeError, ValueError, KeyError):
+        return 0.0
+
+
+def _build_tradingview_risk_context(
+    engine_status: dict[str, Any],
+    db_path: str,
+) -> Optional[RiskContext]:
+    equity = _get_tradingview_equity(db_path)
+    if equity <= 0:
+        return None
+
+    conn = get_conn(db_path)
+    ticker_rows = conn.execute(
+        """SELECT UPPER(bp.ticker) as ticker,
+                  SUM(ABS(CAST(bp.market_value AS REAL))) as exposure
+           FROM broker_positions bp
+           JOIN broker_accounts ba ON bp.broker_account_id = ba.id
+           WHERE ba.is_active = 1
+           GROUP BY UPPER(bp.ticker)"""
+    ).fetchall()
+    sleeve_rows = conn.execute(
+        """SELECT COALESCE(bp.sleeve, 'unassigned') as sleeve,
+                  SUM(ABS(CAST(bp.market_value AS REAL))) as exposure
+           FROM broker_positions bp
+           JOIN broker_accounts ba ON bp.broker_account_id = ba.id
+           WHERE ba.is_active = 1
+           GROUP BY COALESCE(bp.sleeve, 'unassigned')"""
+    ).fetchall()
+    conn.close()
+
+    cooldowns = engine_status.get("cooldowns") or {}
+    return RiskContext(
+        equity=equity,
+        kill_switch_active=bool(engine_status.get("kill_switch_active")),
+        kill_switch_reason=str(engine_status.get("kill_switch_reason") or ""),
+        cooldown_tickers={
+            str(ticker).upper()
+            for ticker in cooldowns.keys()
+            if str(ticker).strip()
+        },
+        ticker_exposure_notional={
+            str(row["ticker"]).upper(): float(row["exposure"] or 0.0)
+            for row in ticker_rows
+        },
+        sleeve_exposure_notional={
+            str(row["sleeve"]): float(row["exposure"] or 0.0)
+            for row in sleeve_rows
+        },
+    )
+
+
+def _estimate_tradingview_notional(
+    alert: NormalizedTradingViewAlert,
+    spec: TradingViewStrategySpec,
+) -> float:
+    if alert.signal_price and alert.signal_price > 0:
+        return float(alert.signal_price) * float(spec.base_qty)
+    return float(spec.base_qty)
+
+
+def _build_tradingview_event_record(
+    alert: NormalizedTradingViewAlert,
+    lane: str,
+    client_ip: str,
+    state: str,
+    intent_id: str = "",
+    rejection_code: str = "",
+    rejection_detail: str = "",
+    duplicate_count: int = 0,
+) -> EventRecord:
+    payload = {
+        "schema_version": alert.schema_version,
+        "alert_id": alert.alert_id,
+        "strategy_id": alert.strategy_id,
+        "ticker": alert.ticker,
+        "action": alert.action,
+        "timeframe": alert.timeframe,
+        "event_timestamp": alert.event_timestamp,
+        "signal_price": alert.signal_price,
+        "indicators": dict(alert.indicators),
+        "state": state,
+        "lane": lane,
+        "intent_id": intent_id,
+        "rejection_code": rejection_code,
+        "rejection_detail": rejection_detail,
+        "client_ip": client_ip,
+        "correlation_id": alert.correlation_id,
+        "duplicate_count": max(0, int(duplicate_count)),
+        "raw_payload": dict(alert.raw_payload),
+    }
+    detail = {
+        "state": state,
+        "lane": lane,
+        "client_ip": client_ip,
+        "alert_id": alert.alert_id,
+        "strategy_id": alert.strategy_id,
+        "ticker": alert.ticker,
+        "action": alert.action,
+        "rejection_code": rejection_code,
+    }
+    return EventRecord(
+        event_type="signal",
+        source="tradingview",
+        source_ref=alert.source_ref,
+        retrieved_at=_utc_now_iso(),
+        event_timestamp=alert.event_timestamp,
+        symbol=alert.ticker,
+        headline=f"TradingView alert {state}: {alert.action} {alert.ticker}",
+        detail=json.dumps(detail, sort_keys=True),
+        confidence=1.0,
+        provenance_descriptor=_tradingview_event_descriptor(alert),
+        payload=payload,
+        event_id=_tradingview_event_id(alert),
+    )
 
 
 @asynccontextmanager
@@ -484,7 +731,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/incidents")
     def api_incidents(limit: int = 50):
-        return {"items": get_incidents(limit=limit)}
+        return {"items": _visible_incidents(limit=limit)}
 
     @app.get("/api/control-actions")
     def api_control_actions(limit: int = 50):
@@ -608,9 +855,32 @@ def create_app() -> FastAPI:
         result.sort(key=lambda x: x["time"])
         return result
 
+    @app.get("/api/tradingview/alerts")
+    def api_tradingview_alerts(limit: int = 50, state: str = "", strategy_id: str = ""):
+        store = EventStore(db_path=DB_PATH)
+        requested_state = str(state or "").strip().lower()
+        requested_strategy = str(strategy_id or "").strip().lower()
+        rows = store.list_events(limit=max(limit * 3, limit), source="tradingview")
+
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _decode_json_payload(row.get("payload"))
+            payload_state = str(payload.get("state") or "").strip().lower()
+            payload_strategy = str(payload.get("strategy_id") or "").strip().lower()
+            if requested_state and payload_state != requested_state:
+                continue
+            if requested_strategy and payload_strategy != requested_strategy:
+                continue
+            row["payload"] = payload
+            items.append(row)
+            if len(items) >= limit:
+                break
+        return {"items": items}
+
     @app.post("/api/webhooks/tradingview")
     async def tradingview_webhook(request: Request, token: str = ""):
         payload: Optional[dict[str, Any]] = None
+        alert: Optional[NormalizedTradingViewAlert] = None
         client_ip = request.client.host if request.client else "-"
         try:
             payload = parse_json_payload(
@@ -626,7 +896,11 @@ def create_app() -> FastAPI:
                 expected_token=config.TRADINGVIEW_WEBHOOK_TOKEN,
                 provided_token=provided_token,
             )
-            signal = summarize_payload(payload)
+            alert = normalize_tradingview_alert(
+                payload=payload,
+                registry=get_tradingview_strategy_registry(),
+                max_age_seconds=config.TRADINGVIEW_MAX_SIGNAL_AGE_SECONDS,
+            )
         except WebhookValidationError as exc:
             _safe_log_event(
                 category="REJECTION",
@@ -644,82 +918,253 @@ def create_app() -> FastAPI:
                 status_code=exc.status_code,
             )
 
-        _safe_log_event(
-            category="SIGNAL",
-            headline=f"TradingView webhook accepted: {signal.action or '-'} {signal.ticker or '-'}",
-            detail=build_audit_detail(reason="accepted", client_ip=client_ip, payload=payload),
-            ticker=signal.ticker or None,
-            strategy=signal.strategy or "tradingview_webhook",
-        )
+        spec = get_tradingview_strategy_registry()[alert.strategy_id]
+        store = EventStore(db_path=DB_PATH)
+        existing = store.get_event(_tradingview_event_id(alert))
+        if existing:
+            existing_payload = _decode_json_payload(existing.get("payload"))
+            duplicate_count = int(existing_payload.get("duplicate_count") or 0) + 1
+            store.write_event(
+                _build_tradingview_event_record(
+                    alert=alert,
+                    lane=str(existing_payload.get("lane") or "unknown"),
+                    client_ip=client_ip,
+                    state=str(existing_payload.get("state") or "accepted"),
+                    intent_id=str(existing_payload.get("intent_id") or ""),
+                    rejection_code=str(existing_payload.get("rejection_code") or ""),
+                    rejection_detail=str(existing_payload.get("rejection_detail") or ""),
+                    duplicate_count=duplicate_count,
+                )
+            )
+            _safe_log_event(
+                category="SIGNAL",
+                headline=f"TradingView alert duplicate: {alert.action} {alert.ticker}",
+                detail=build_audit_detail(reason="duplicate", client_ip=client_ip, payload=payload),
+                ticker=alert.ticker,
+                strategy=alert.strategy_id,
+            )
+            return {
+                "ok": True,
+                "state": "duplicate",
+                "ticker": alert.ticker,
+                "action": alert.action,
+                "strategy": alert.strategy_id,
+                "timeframe": alert.timeframe,
+                "duplicate_count": duplicate_count,
+            }
 
-        # O-002: Check kill switch before creating intent
-        engine_status = control.status()
-        if engine_status.get("kill_switch_active"):
+        lane, _lane_item = _resolve_tradingview_lane(alert.strategy_id, db_path=DB_PATH)
+        if lane == "missing":
+            store.write_event(
+                _build_tradingview_event_record(
+                    alert=alert,
+                    lane=lane,
+                    client_ip=client_ip,
+                    state="rejected",
+                    rejection_code="NO_LANE_DATA",
+                    rejection_detail="Strategy has no shadow/staged_live/live parameter set.",
+                )
+            )
             _safe_log_event(
                 category="REJECTION",
-                headline="Kill switch active — webhook intent blocked",
-                detail=f"ticker={signal.ticker}, action={signal.action}",
-                ticker=signal.ticker,
-                strategy=signal.strategy or "tradingview_webhook",
+                headline="TradingView webhook rejected",
+                detail=build_audit_detail(reason="no lane data", client_ip=client_ip, payload=payload),
+                ticker=alert.ticker,
+                strategy=alert.strategy_id,
             )
             return JSONResponse(
-                {"ok": False, "error": "KILL_SWITCH_ACTIVE",
-                 "detail": "Kill switch is active. Order intent not created."},
-                status_code=403,
+                {"ok": False, "error": "NO_LANE_DATA", "detail": "Strategy has no configured promotion lane."},
+                status_code=409,
             )
 
-        # O-002: Map action → side and create order intent
-        action_lower = (signal.action or "").lower().strip()
-        action_to_side = {"buy": "BUY", "sell": "SELL", "long": "BUY", "short": "SELL"}
-        side_str = action_to_side.get(action_lower)
-        if not side_str:
+        if lane != "live":
+            store.write_event(
+                _build_tradingview_event_record(
+                    alert=alert,
+                    lane=lane,
+                    client_ip=client_ip,
+                    state="audit_only",
+                )
+            )
+            _safe_log_event(
+                category="SIGNAL",
+                headline=f"TradingView alert audited ({lane}): {alert.action} {alert.ticker}",
+                detail=build_audit_detail(reason=f"audit_only:{lane}", client_ip=client_ip, payload=payload),
+                ticker=alert.ticker,
+                strategy=alert.strategy_id,
+            )
+            return {
+                "ok": True,
+                "state": "audit_only",
+                "lane": lane,
+                "message": "TradingView alert accepted and stored for audit. No order intent created in this lane.",
+                "ticker": alert.ticker,
+                "action": alert.action,
+                "strategy": alert.strategy_id,
+                "timeframe": alert.timeframe,
+            }
+
+        engine_status = control.status()
+        route_state = _build_tradingview_route_state(engine_status)
+        requirements = StrategyRequirements(**dict(spec.requirements))
+        route_decision = _build_tradingview_router(spec).resolve(
+            RouteIntent(
+                strategy_id=spec.strategy_id,
+                sleeve=spec.sleeve,
+                ticker=alert.ticker,
+                requirements=requirements,
+            ),
+            policy_state=route_state,
+        )
+        if not route_decision.allowed:
+            store.write_event(
+                _build_tradingview_event_record(
+                    alert=alert,
+                    lane=lane,
+                    client_ip=client_ip,
+                    state="rejected",
+                    rejection_code=str(route_decision.reason_code).upper(),
+                    rejection_detail=str(route_decision.message),
+                )
+            )
+            _safe_log_event(
+                category="REJECTION",
+                headline="TradingView webhook rejected",
+                detail=build_audit_detail(reason=route_decision.message, client_ip=client_ip, payload=payload),
+                ticker=alert.ticker,
+                strategy=alert.strategy_id,
+            )
             return JSONResponse(
-                {"ok": False, "error": "INVALID_ACTION",
-                 "detail": f"Unmapped action '{signal.action}'. Expected buy/sell/long/short."},
-                status_code=422,
+                {"ok": False, "error": str(route_decision.reason_code).upper(), "detail": route_decision.message},
+                status_code=403 if route_decision.reason_code in {"kill_switch_active", "market_cooldown_active"} else 422,
             )
 
-        if not signal.ticker:
+        side_str, is_exit = _tradingview_action_semantics(alert.action)
+        risk_context = _build_tradingview_risk_context(engine_status, db_path=DB_PATH)
+        if risk_context is not None and not is_exit:
+            notional = _estimate_tradingview_notional(alert, spec)
+            risk_decision = evaluate_pre_trade_risk(
+                request=RiskOrderRequest(
+                    ticker=alert.ticker,
+                    sleeve=spec.sleeve,
+                    order_exposure_notional=notional,
+                ),
+                context=risk_context,
+                limits=_TRADINGVIEW_RISK_LIMITS,
+            )
+            if not risk_decision.approved:
+                store.write_event(
+                    _build_tradingview_event_record(
+                        alert=alert,
+                        lane=lane,
+                        client_ip=client_ip,
+                        state="rejected",
+                        rejection_code=risk_decision.rule_id,
+                        rejection_detail=risk_decision.message,
+                    )
+                )
+                _safe_log_event(
+                    category="REJECTION",
+                    headline="TradingView webhook rejected",
+                    detail=build_audit_detail(reason=risk_decision.message, client_ip=client_ip, payload=payload),
+                    ticker=alert.ticker,
+                    strategy=alert.strategy_id,
+                )
+                return JSONResponse(
+                    {"ok": False, "error": risk_decision.rule_id, "detail": risk_decision.message},
+                    status_code=409,
+                )
+
+        promo_decision = evaluate_promotion_gate(
+            strategy_key=spec.strategy_id,
+            is_exit=is_exit,
+            config=PromotionGateConfig(enabled=True, require_live_set=True),
+            db_path=DB_PATH,
+        )
+        if not promo_decision.allowed:
+            store.write_event(
+                _build_tradingview_event_record(
+                    alert=alert,
+                    lane=lane,
+                    client_ip=client_ip,
+                    state="rejected",
+                    rejection_code=promo_decision.reason_code,
+                    rejection_detail=promo_decision.message,
+                )
+            )
+            _safe_log_event(
+                category="REJECTION",
+                headline="TradingView webhook rejected",
+                detail=build_audit_detail(reason=promo_decision.message, client_ip=client_ip, payload=payload),
+                ticker=alert.ticker,
+                strategy=alert.strategy_id,
+            )
             return JSONResponse(
-                {"ok": False, "error": "MISSING_TICKER",
-                 "detail": "Webhook payload missing ticker/symbol field."},
-                status_code=422,
+                {"ok": False, "error": promo_decision.reason_code, "detail": promo_decision.message},
+                status_code=409,
             )
 
-        try:
-            qty = float(payload.get("qty") or payload.get("quantity") or payload.get("size") or 1.0)
-            if qty <= 0:
-                raise ValueError("qty must be positive")
-        except (ValueError, TypeError):
-            qty = 1.0
-
+        resolved = route_decision.resolution
+        metadata = {
+            "source": "tradingview_webhook",
+            "source_ref": alert.source_ref,
+            "schema_version": alert.schema_version,
+            "alert_id": alert.alert_id,
+            "signal_timestamp": alert.event_timestamp,
+            "signal_price": alert.signal_price,
+            "indicators": dict(alert.indicators),
+            "raw_payload": payload,
+            "is_exit": is_exit,
+        }
         intent = OrderIntent(
-            strategy_id=signal.strategy or "tradingview_webhook",
-            strategy_version="1",
-            sleeve="default",
-            account_type="ISA",
-            broker_target="IBKR_ISA",
-            instrument=signal.ticker,
+            strategy_id=spec.strategy_id,
+            strategy_version=spec.strategy_version,
+            sleeve=spec.sleeve,
+            account_type=resolved.account_type if resolved is not None else spec.account_type,
+            broker_target=resolved.broker_name if resolved is not None else spec.broker_target,
+            instrument=alert.ticker,
             side=side_str,
-            qty=qty,
+            qty=spec.base_qty,
             order_type="MARKET",
-            metadata={"source": "tradingview_webhook", "raw_payload": payload},
+            risk_tags=list(spec.risk_tags),
+            metadata=metadata,
         )
         envelope = create_order_intent_envelope(
             intent=intent,
-            action_type="webhook_signal",
+            action_type="tradingview_signal",
             actor="system",
+            correlation_id=alert.correlation_id,
+            db_path=DB_PATH,
         )
         intent_id = envelope.get("intent_id", "")
+        store.write_event(
+            _build_tradingview_event_record(
+                alert=alert,
+                lane=lane,
+                client_ip=client_ip,
+                state="intent_created",
+                intent_id=intent_id,
+            )
+        )
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"TradingView alert accepted: {alert.action} {alert.ticker}",
+            detail=build_audit_detail(reason="intent_created", client_ip=client_ip, payload=payload),
+            ticker=alert.ticker,
+            strategy=alert.strategy_id,
+        )
 
         return {
             "ok": True,
-            "message": "TradingView webhook accepted and order intent created.",
-            "ticker": signal.ticker,
-            "action": signal.action,
-            "strategy": signal.strategy,
-            "timeframe": signal.timeframe,
+            "state": "intent_created",
+            "message": "TradingView alert accepted and order intent created.",
+            "ticker": alert.ticker,
+            "action": alert.action,
+            "strategy": alert.strategy_id,
+            "timeframe": alert.timeframe,
             "intent_id": intent_id,
+            "lane": lane,
         }
 
     @app.post("/api/actions/start", response_class=HTMLResponse)
@@ -1247,7 +1692,7 @@ def create_app() -> FastAPI:
                 "jobs": get_jobs(limit=20),
                 "events": get_bot_events(limit=25),
                 "order_actions": get_order_actions(limit=25),
-                "incidents": get_incidents(limit=25),
+                "incidents": _visible_incidents(limit=25),
                 "control_actions": get_control_actions(limit=25),
                 "reconcile_report": control.reconcile_report().get("report", {}),
                 "option_summary": get_option_contract_summary(),
@@ -1260,7 +1705,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/top-strip", response_class=HTMLResponse)
     def top_strip_fragment(request: Request):
         payload = build_status_payload()
-        latest = get_incidents(limit=1)
+        latest = _visible_incidents(limit=1)
         latest_incident = latest[0] if latest else None
         return TEMPLATES.TemplateResponse(
             request,
@@ -1555,7 +2000,7 @@ def create_app() -> FastAPI:
         return TEMPLATES.TemplateResponse(
             request,
             "_incidents.html",
-            {"request": request, "incidents": get_incidents(limit=25)},
+            {"request": request, "incidents": _visible_incidents(limit=25)},
         )
 
     @app.get("/fragments/control-actions", response_class=HTMLResponse)
@@ -1906,12 +2351,296 @@ def create_app() -> FastAPI:
             {"request": request, "backtest_jobs": backtest_jobs},
         )
 
+    # ─── Intelligence webhooks ─────────────────────────────────────────
+
+    @app.post("/api/webhooks/sa_intel")
+    async def sa_intel_webhook(request: Request):
+        """Receive Seeking Alpha page data from browser bookmarklet.
+
+        Expects JSON with: title, content, url, tickers (optional), author (optional).
+        Runs LLM council analysis in background and returns job ID.
+        """
+        try:
+            body = await request.body()
+            if len(body) > 256_000:
+                return JSONResponse(
+                    {"ok": False, "error": "payload_too_large"},
+                    status_code=413,
+                )
+            payload = json.loads(body.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_payload"},
+                status_code=400,
+            )
+
+        content = str(payload.get("content") or payload.get("text") or "").strip()
+        if not content:
+            return JSONResponse(
+                {"ok": False, "error": "missing_content", "detail": "No content field in payload."},
+                status_code=422,
+            )
+
+        tickers_raw = payload.get("tickers") or []
+        if isinstance(tickers_raw, str):
+            tickers_raw = [t.strip() for t in tickers_raw.split(",") if t.strip()]
+
+        submission = IntelSubmission(
+            source="seeking_alpha",
+            content=content,
+            url=str(payload.get("url", "")),
+            title=str(payload.get("title", "")),
+            author=str(payload.get("author", "")),
+            tickers=tickers_raw,
+            metadata={"sa_rating": payload.get("rating"), "sa_grades": payload.get("grades")},
+        )
+
+        job_id = str(uuid.uuid4())
+        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
+                    detail=f"SA intel: {submission.title[:80]}")
+        analyze_intel_async(submission, job_id)
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"SA intel received: {submission.title[:60]}",
+            detail=f"url={submission.url}, tickers={','.join(submission.tickers[:5])}",
+            ticker=submission.tickers[0] if submission.tickers else None,
+            strategy="sa_intel",
+        )
+
+        return {"ok": True, "job_id": job_id, "message": "SA intel queued for LLM analysis."}
+
+    @app.post("/api/webhooks/x_intel")
+    async def x_intel_webhook(request: Request):
+        """Receive X/Twitter content for LLM analysis.
+
+        Expects JSON with: content (tweet/thread text), url (optional),
+        author (optional), tickers (optional).
+        """
+        try:
+            body = await request.body()
+            if len(body) > 256_000:
+                return JSONResponse(
+                    {"ok": False, "error": "payload_too_large"},
+                    status_code=413,
+                )
+            payload = json.loads(body.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_payload"},
+                status_code=400,
+            )
+
+        content = str(payload.get("content") or payload.get("text") or "").strip()
+        if not content:
+            return JSONResponse(
+                {"ok": False, "error": "missing_content", "detail": "No content field in payload."},
+                status_code=422,
+            )
+
+        tickers_raw = payload.get("tickers") or []
+        if isinstance(tickers_raw, str):
+            tickers_raw = [t.strip() for t in tickers_raw.split(",") if t.strip()]
+
+        submission = IntelSubmission(
+            source="x_twitter",
+            content=content,
+            url=str(payload.get("url", "")),
+            title=str(payload.get("title") or payload.get("author", "")),
+            author=str(payload.get("author", "")),
+            tickers=tickers_raw,
+        )
+
+        job_id = str(uuid.uuid4())
+        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
+                    detail=f"X intel: {submission.title[:80]}")
+        analyze_intel_async(submission, job_id)
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"X intel received: {submission.author or 'unknown'}",
+            detail=f"url={submission.url}, content_len={len(content)}",
+            strategy="x_intel",
+        )
+
+        return {"ok": True, "job_id": job_id, "message": "X intel queued for LLM analysis."}
+
+    @app.post("/api/webhooks/telegram")
+    async def telegram_webhook(request: Request):
+        """Receive Telegram bot updates (forwarded messages, commands).
+
+        Set up via: POST https://api.telegram.org/bot<TOKEN>/setWebhook?url=<YOUR_URL>/api/webhooks/telegram
+        """
+        try:
+            payload = json.loads((await request.body()).decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"ok": False}, status_code=400)
+
+        message = payload.get("message") or payload.get("channel_post") or {}
+        text = str(message.get("text") or message.get("caption") or "").strip()
+        chat_id = message.get("chat", {}).get("id")
+
+        if not text or not chat_id:
+            return {"ok": True}  # Acknowledge but ignore non-text updates
+
+        expected_chat = os.getenv("TELEGRAM_CHAT_ID", "")
+        if expected_chat and str(chat_id) != expected_chat:
+            return {"ok": True}  # Ignore messages from unknown chats
+
+        # Check if it's an X/Twitter link or forwarded content
+        is_x_content = any(domain in text for domain in [
+            "twitter.com/", "x.com/", "nitter.", "vxtwitter.com/",
+        ])
+
+        # Extract URL if present
+        urls = _re.findall(r'https?://\S+', text)
+        url = urls[0] if urls else ""
+
+        if is_x_content or text.startswith("/analyze"):
+            # Strip /analyze command prefix if present
+            content = text.replace("/analyze", "", 1).strip() if text.startswith("/analyze") else text
+
+            submission = IntelSubmission(
+                source="x_twitter" if is_x_content else "telegram",
+                content=content,
+                url=url,
+                title=f"Forwarded via Telegram",
+            )
+
+            job_id = str(uuid.uuid4())
+            create_job(job_id=job_id, job_type="intel_analysis", status="queued",
+                        detail=f"Telegram intel: {content[:80]}")
+            analyze_intel_async(submission, job_id)
+
+            # Reply to the user
+            _telegram_reply(chat_id, f"Queued for LLM analysis (job {job_id[:8]})")
+        elif text == "/status":
+            status = control.status()
+            mode = status.get("mode", "unknown")
+            _telegram_reply(chat_id, f"Bot: {mode}\nKill switch: {'ON' if status.get('kill_switch_active') else 'off'}")
+        elif text == "/help":
+            _telegram_reply(
+                chat_id,
+                "Commands:\n"
+                "/analyze <text> - Analyze content for trade ideas\n"
+                "/status - Bot status\n"
+                "Forward X/Twitter links to auto-analyze\n"
+                "Paste any text to analyze",
+            )
+        else:
+            # Treat any other text as content to analyze
+            submission = IntelSubmission(
+                source="telegram",
+                content=text,
+                url=url,
+                title="Telegram message",
+            )
+            job_id = str(uuid.uuid4())
+            create_job(job_id=job_id, job_type="intel_analysis", status="queued",
+                        detail=f"Telegram intel: {text[:80]}")
+            analyze_intel_async(submission, job_id)
+            _telegram_reply(chat_id, f"Analyzing... (job {job_id[:8]})")
+
+        return {"ok": True}
+
+    @app.get("/api/intel/history")
+    def intel_history(limit: int = 20):
+        """List recent intel analysis results."""
+        from intelligence.event_store import EventStore
+        store = EventStore()
+        events = store.list_events(limit=limit, event_type="intel_analysis")
+        return {"ok": True, "count": len(events), "events": events}
+
+    @app.get("/intel/bookmarklet", response_class=HTMLResponse)
+    def bookmarklet_install(request: Request):
+        """Page to install the SA bookmarklet."""
+        host = request.headers.get("host", "localhost:8000")
+        scheme = request.headers.get("x-forwarded-proto", "https")
+        endpoint = f"{scheme}://{host}"
+        # Read and minify the bookmarklet JS
+        js_path = PROJECT_ROOT / "app" / "web" / "static" / "sa_bookmarklet.js"
+        try:
+            js_src = js_path.read_text()
+        except FileNotFoundError:
+            js_src = "alert('Bookmarklet file not found');"
+        # Inject the endpoint
+        js_src = js_src.replace("%%ENDPOINT%%", endpoint)
+        # Minify for bookmarklet URL
+        import re as _re_local
+        minified = _re_local.sub(r'\s+', ' ', js_src).strip()
+        minified = _re_local.sub(r'//[^\n]*', '', minified)  # strip comments
+        minified = _re_local.sub(r'/\*.*?\*/', '', minified)  # strip block comments
+        bookmarklet_url = "javascript:" + minified
+        return (
+            "<html><head><title>BoxRoomCapital Bookmarklet</title>"
+            "<style>body{background:#0d1117;color:#c9d1d9;font-family:monospace;padding:40px}"
+            "a{color:#00ff88;font-size:18px;padding:12px 24px;border:2px solid #00ff88;"
+            "text-decoration:none;border-radius:6px;display:inline-block}"
+            "a:hover{background:#00ff8822}code{background:#161b22;padding:2px 6px;border-radius:3px}"
+            "h1{color:#00ff88}h2{color:#888;margin-top:30px}"
+            ".instructions{max-width:600px;line-height:1.6}</style></head>"
+            "<body><h1>BoxRoomCapital Intel Bookmarklet</h1>"
+            "<div class='instructions'>"
+            "<h2>Install</h2>"
+            f"<p>Drag this link to your bookmarks bar:</p>"
+            f'<p><a href=\'{bookmarklet_url}\'>Send to BRC</a></p>'
+            "<h2>Usage</h2>"
+            "<ol><li>Browse to any Seeking Alpha article or stock page</li>"
+            "<li>Click the <code>Send to BRC</code> bookmark</li>"
+            "<li>The page content will be sent to the LLM council for analysis</li>"
+            "<li>Results appear in the Intel History and via Telegram notification</li></ol>"
+            f"<h2>Server</h2><p>Endpoint: <code>{endpoint}</code></p>"
+            "</div></body></html>"
+        )
+
     return app
+
+
+def _telegram_reply(chat_id: int, text: str) -> None:
+    """Send a reply to a Telegram chat."""
+    token = os.getenv("TELEGRAM_TOKEN", "")
+    if not token:
+        return
+    try:
+        _requests.post(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=5,
+        )
+    except Exception as e:
+        logger.warning("Telegram reply failed: %s", e)
 
 
 def action_message(text: str, ok: bool) -> str:
     css = "action-msg ok" if ok else "action-msg error"
     return f"<div class='{css}'>{text}</div>"
+
+
+def _is_test_artifact_incident(item: Optional[dict[str, Any]]) -> bool:
+    """Hide FastAPI TestClient-generated incidents from operator-facing UI."""
+    if not item:
+        return False
+    detail = item.get("detail")
+    if not isinstance(detail, str):
+        return False
+    try:
+        payload = json.loads(detail)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    return payload.get("client_ip") == "testclient"
+
+
+def _visible_incidents(limit: int = 25) -> list[dict[str, Any]]:
+    """Return incidents intended for operators, excluding test artifacts."""
+    raw_incidents = get_incidents(limit=max(limit * 4, limit))
+    visible: list[dict[str, Any]] = []
+    for incident in raw_incidents:
+        if _is_test_artifact_incident(incident):
+            continue
+        visible.append(incident)
+        if len(visible) >= limit:
+            break
+    return visible
 
 
 def _safe_log_event(**kwargs: Any) -> None:

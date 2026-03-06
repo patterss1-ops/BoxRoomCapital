@@ -13,7 +13,6 @@ from typing import Callable, Optional
 
 import config
 from broker.base import BaseBroker, OrderResult
-from broker.cityindex import CityIndexBroker
 from broker.ibkr import IBKRBroker
 from broker.ig import IGBroker
 from broker.paper import PaperBroker
@@ -383,8 +382,4 @@ def default_broker_resolver(broker_name: str) -> BaseBroker:
         return IGBroker(is_demo=is_demo)
     if key == "ibkr":
         return IBKRBroker()
-    if key in {"cityindex", "city_index"}:
-        is_demo = str(config.BROKER_MODE or "paper").lower() != "live"
-        return CityIndexBroker(is_demo=is_demo)
-
     raise ValueError(f"Unsupported broker target '{broker_name}'")

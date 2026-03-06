@@ -1,0 +1,45 @@
+//@version=5
+indicator("BRC IBS Spreadbet Long v1", overlay=true)
+
+entryIbs = input.float(0.30, "Entry IBS", minval=0.0, maxval=1.0)
+exitIbs = input.float(0.70, "Exit IBS", minval=0.0, maxval=1.0)
+entryRsi = input.float(25.0, "Entry RSI(2)", minval=0.0, maxval=100.0)
+exitRsi = input.float(65.0, "Exit RSI(2)", minval=0.0, maxval=100.0)
+emaLength = input.int(200, "EMA Length", minval=1)
+maxHoldBars = input.int(7, "Max Hold Bars", minval=1)
+maxVix = input.float(35.0, "Max VIX", minval=0.0)
+vixSymbol = input.symbol("CBOE:VIX", "VIX Symbol")
+
+dayHighLowRange = math.max(high - low, syminfo.mintick)
+ibs = (close - low) / dayHighLowRange
+rsi2 = ta.rsi(close, 2)
+ema200 = ta.ema(close, emaLength)
+vixClose = request.security(vixSymbol, "D", close)
+
+var bool inTrade = false
+var int barsInTrade = 0
+
+longEntry = not inTrade and ibs < entryIbs and rsi2 < entryRsi and close > ema200 and vixClose < maxVix
+longExit = inTrade and (ibs > exitIbs or rsi2 > exitRsi or barsInTrade >= maxHoldBars)
+
+if barstate.isconfirmed
+    if longEntry
+        inTrade := true
+        barsInTrade := 0
+    else if longExit
+        inTrade := false
+        barsInTrade := 0
+    else if inTrade
+        barsInTrade += 1
+
+plot(ibs, "IBS", display=display.none)
+plot(rsi2, "RSI2", display=display.none)
+plot(ema200, "EMA200", display=display.none)
+plot(vixClose, "VIX", display=display.none)
+plot(float(barsInTrade), "BarsInTrade", display=display.none)
+
+plotshape(longEntry, title="Long Entry", style=shape.triangleup, color=color.lime, location=location.belowbar, size=size.tiny, text="BRC BUY")
+plotshape(longExit, title="Long Exit", style=shape.triangledown, color=color.orange, location=location.abovebar, size=size.tiny, text="BRC SELL")
+
+alertcondition(longEntry, title="BRC IBS Long Buy", message="BRC IBS Long Buy")
+alertcondition(longExit, title="BRC IBS Long Sell", message="BRC IBS Long Sell")

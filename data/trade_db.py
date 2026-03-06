@@ -320,7 +320,7 @@ def init_db(db_path: str = DB_PATH):
 
         CREATE TABLE IF NOT EXISTS broker_accounts (
             id TEXT PRIMARY KEY,
-            broker TEXT NOT NULL,                -- ig, ibkr, cityindex, paper
+            broker TEXT NOT NULL,                -- ig, ibkr, kraken, paper
             account_id TEXT NOT NULL,
             account_type TEXT NOT NULL,           -- ISA, SIPP, GIA, SPREADBET, PAPER
             currency TEXT NOT NULL DEFAULT 'GBP',
@@ -1401,6 +1401,20 @@ def get_research_events(
     rows = conn.execute(query, tuple(params)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_research_event(
+    event_id: str,
+    db_path: str = DB_PATH,
+) -> Optional[dict]:
+    """Get one research event by primary key."""
+    conn = get_conn(db_path)
+    row = conn.execute(
+        "SELECT * FROM research_events WHERE id=?",
+        (event_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
 
 
 # ─── Order action state machine (execution reliability) ──────────────────

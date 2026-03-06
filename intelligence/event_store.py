@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import Any, Optional
 
-from data.trade_db import DB_PATH, get_research_events, upsert_research_event
+from data.trade_db import DB_PATH, get_research_event, get_research_events, upsert_research_event
 
 
 def _canonical_json(value: Any) -> str:
@@ -34,6 +34,22 @@ def compute_provenance_hash(
         "descriptor": descriptor,
     }
     return hashlib.sha256(_canonical_json(envelope).encode("utf-8")).hexdigest()
+
+
+def compute_event_id(
+    event_type: str,
+    source: str,
+    descriptor: dict[str, Any],
+    source_ref: str = "",
+) -> str:
+    """Compute the deterministic research-event primary key."""
+    provenance_hash = compute_provenance_hash(
+        event_type=event_type,
+        source=source,
+        descriptor=descriptor,
+        source_ref=source_ref,
+    )
+    return _build_event_id(event_type.strip().lower(), source.strip().lower(), provenance_hash)
 
 
 @dataclass
@@ -102,6 +118,26 @@ class EventStore:
             "provenance_hash": provenance_hash,
             "provenance_descriptor": descriptor,
         }
+
+    def get_event(self, event_id: str) -> Optional[dict[str, Any]]:
+        """Fetch one persisted event by ID."""
+        row = get_research_event(event_id=event_id, db_path=self.db_path)
+        if not row:
+            return None
+
+        payload_text = row.get("payload")
+        descriptor_text = row.get("provenance_descriptor")
+        if isinstance(payload_text, str) and payload_text:
+            try:
+                row["payload"] = json.loads(payload_text)
+            except (TypeError, ValueError):
+                pass
+        if isinstance(descriptor_text, str) and descriptor_text:
+            try:
+                row["provenance_descriptor"] = json.loads(descriptor_text)
+            except (TypeError, ValueError):
+                pass
+        return row
 
     def list_events(
         self,

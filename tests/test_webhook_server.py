@@ -35,8 +35,11 @@ def test_validate_expected_token_rejects_invalid_values(expected: str, provided:
 
 
 from intelligence.webhook_server import (
+    TradingViewStrategySpec,
     parse_json_payload,
     extract_auth_token,
+    get_tradingview_strategy_registry,
+    normalize_tradingview_alert,
     summarize_payload,
     build_audit_detail,
     TradingViewSignal,
@@ -146,3 +149,119 @@ class TestBuildAuditDetail:
         parsed = _json.loads(detail)
         assert parsed["reason"] == "rejected"
         assert parsed["symbol"] is None
+
+
+class TestTradingViewRegistry:
+    def test_registry_reads_supported_slots_only(self):
+        registry = get_tradingview_strategy_registry(
+            slot_configs=[
+                {
+                    "id": "ibs_spreadbet_long",
+                    "strategy_version": "1.0",
+                    "sleeve": "sleeve_1_ibs",
+                    "account_type": "SPREADBET",
+                    "broker_target": "ig",
+                    "base_qty": 1.0,
+                    "risk_tags": ["mean_reversion", "ig"],
+                    "requirements": {"requires_spreadbet": True},
+                    "tickers": ["SPY", "QQQ"],
+                    "enabled": True,
+                },
+                {
+                    "id": "gtaa_isa",
+                    "strategy_version": "1.0",
+                    "sleeve": "rotation",
+                    "account_type": "ISA",
+                    "broker_target": "ibkr",
+                    "base_qty": 1.0,
+                    "risk_tags": ["trend"],
+                    "requirements": {"requires_spot_etf": True},
+                    "tickers": ["SPY"],
+                    "enabled": True,
+                },
+            ],
+            enabled_strategies=["ibs_spreadbet_long"],
+        )
+        assert list(registry.keys()) == ["ibs_spreadbet_long"]
+        assert registry["ibs_spreadbet_long"].allowed_actions == ("buy", "sell")
+        assert registry["ibs_spreadbet_long"].allowed_tickers == ("SPY", "QQQ")
+
+
+class TestNormalizeTradingViewAlert:
+    def _registry(self) -> dict[str, TradingViewStrategySpec]:
+        return {
+            "ibs_spreadbet_long": TradingViewStrategySpec(
+                strategy_id="ibs_spreadbet_long",
+                strategy_version="1.0",
+                sleeve="sleeve_1_ibs",
+                account_type="SPREADBET",
+                broker_target="ig",
+                base_qty=1.0,
+                risk_tags=("mean_reversion", "ig"),
+                requirements={"requires_spreadbet": True},
+                allowed_tickers=("SPY", "QQQ"),
+                allowed_actions=("buy", "sell"),
+                timeframe="1D",
+            ),
+        }
+
+    def test_tv_v1_payload_normalizes(self):
+        alert = normalize_tradingview_alert(
+            payload={
+                "schema_version": "tv.v1",
+                "alert_id": "spy-buy-1",
+                "strategy_id": "ibs_spreadbet_long",
+                "ticker": "spy",
+                "action": "buy",
+                "timeframe": "1D",
+                "event_timestamp": "2026-03-05T12:00:00Z",
+                "signal_price": "500.25",
+                "ibs": "0.21",
+                "rsi2": "17.4",
+            },
+            registry=self._registry(),
+            max_age_seconds=600,
+            now_utc=__import__("datetime").datetime(2026, 3, 5, 12, 5, tzinfo=__import__("datetime").timezone.utc),
+        )
+        assert alert.strategy_id == "ibs_spreadbet_long"
+        assert alert.ticker == "SPY"
+        assert alert.action == "buy"
+        assert alert.signal_price == 500.25
+        assert alert.indicators["ibs"] == 0.21
+        assert alert.source_ref == "tv://ibs_spreadbet_long/spy-buy-1"
+
+    def test_rejects_unsupported_ticker(self):
+        with pytest.raises(WebhookValidationError) as exc:
+            normalize_tradingview_alert(
+                payload={
+                    "schema_version": "tv.v1",
+                    "alert_id": "dia-buy-1",
+                    "strategy_id": "ibs_spreadbet_long",
+                    "ticker": "DIA",
+                    "action": "buy",
+                    "timeframe": "1D",
+                    "event_timestamp": "2026-03-05T12:00:00Z",
+                },
+                registry=self._registry(),
+                max_age_seconds=600,
+                now_utc=__import__("datetime").datetime(2026, 3, 5, 12, 5, tzinfo=__import__("datetime").timezone.utc),
+            )
+        assert exc.value.code == "unsupported_ticker"
+
+    def test_rejects_stale_signal(self):
+        with pytest.raises(WebhookValidationError) as exc:
+            normalize_tradingview_alert(
+                payload={
+                    "schema_version": "tv.v1",
+                    "alert_id": "spy-buy-old",
+                    "strategy_id": "ibs_spreadbet_long",
+                    "ticker": "SPY",
+                    "action": "buy",
+                    "timeframe": "1D",
+                    "event_timestamp": "2026-03-05T11:40:00Z",
+                },
+                registry=self._registry(),
+                max_age_seconds=600,
+                now_utc=__import__("datetime").datetime(2026, 3, 5, 12, 5, tzinfo=__import__("datetime").timezone.utc),
+            )
+        assert exc.value.code == "stale_signal"

@@ -554,6 +554,12 @@ class TestFullPipelineLoop:
 class TestOperatorAlerts:
     """Verify notification helpers for dispatch and pipeline events."""
 
+    @pytest.fixture(autouse=True)
+    def _disable_notifications_env(self, monkeypatch):
+        monkeypatch.setenv("NOTIFICATIONS_ENABLED", "false")
+        monkeypatch.delenv("TELEGRAM_TOKEN", raising=False)
+        monkeypatch.delenv("TELEGRAM_CHAT_ID", raising=False)
+
     def test_dispatch_alert_formats_correctly(self):
         """dispatch_alert formats a DispatchRunSummary into a message."""
         handler = NotificationHandler()  # disabled by default (no env vars)
