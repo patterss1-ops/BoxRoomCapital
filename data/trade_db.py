@@ -504,9 +504,121 @@ def init_db(db_path: str = DB_PATH):
 
         CREATE INDEX IF NOT EXISTS idx_risk_daily_snapshot_date
             ON risk_daily_snapshot(snapshot_date);
+
+        CREATE TABLE IF NOT EXISTS council_costs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            analysis_id TEXT NOT NULL,
+            model TEXT NOT NULL,
+            model_key TEXT NOT NULL,
+            round INTEGER NOT NULL DEFAULT 1,
+            input_tokens INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            cost_usd REAL NOT NULL DEFAULT 0,
+            duration_s REAL NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_council_costs_timestamp
+            ON council_costs(timestamp);
+        CREATE INDEX IF NOT EXISTS idx_council_costs_analysis
+            ON council_costs(analysis_id);
+
+        -- ── Idea Pipeline (trade ideas from LLM council) ──────────────
+        CREATE TABLE IF NOT EXISTS trade_ideas (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            analysis_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            conviction TEXT NOT NULL DEFAULT 'low',
+            timeframe TEXT,
+            thesis TEXT,
+            entry_trigger TEXT,
+            invalidation TEXT,
+            instrument TEXT,
+            source_model TEXT,
+            confidence REAL NOT NULL DEFAULT 0,
+            pipeline_stage TEXT NOT NULL DEFAULT 'idea',
+            rejection_reason TEXT,
+            user_notes TEXT,
+            score REAL,
+            backtest_job_id TEXT,
+            backtest_result_json TEXT,
+            paper_deal_id TEXT,
+            paper_entry_price REAL,
+            paper_entry_time TEXT,
+            paper_pnl REAL,
+            live_strategy_slot TEXT,
+            metadata_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trade_ideas_stage
+            ON trade_ideas(pipeline_stage);
+        CREATE INDEX IF NOT EXISTS idx_trade_ideas_ticker
+            ON trade_ideas(ticker);
+        CREATE INDEX IF NOT EXISTS idx_trade_ideas_analysis
+            ON trade_ideas(analysis_id);
+        CREATE INDEX IF NOT EXISTS idx_trade_ideas_updated
+            ON trade_ideas(updated_at);
+
+        CREATE TABLE IF NOT EXISTS idea_transitions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            idea_id TEXT NOT NULL,
+            from_stage TEXT NOT NULL,
+            to_stage TEXT NOT NULL,
+            actor TEXT NOT NULL DEFAULT 'operator',
+            reason TEXT,
+            metadata_json TEXT,
+            FOREIGN KEY (idea_id) REFERENCES trade_ideas(id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_idea_transitions_idea
+            ON idea_transitions(idea_id);
+        CREATE INDEX IF NOT EXISTS idx_idea_transitions_timestamp
+            ON idea_transitions(timestamp);
+
+        -- ── Idea Research Steps (automated research pipeline) ─────────
+        CREATE TABLE IF NOT EXISTS idea_research_steps (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            idea_id TEXT NOT NULL,
+            step_name TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            started_at TEXT,
+            completed_at TEXT,
+            model_used TEXT,
+            cost_usd REAL DEFAULT 0,
+            input_json TEXT,
+            output_json TEXT,
+            error TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_research_steps_idea
+            ON idea_research_steps(idea_id);
+        CREATE INDEX IF NOT EXISTS idx_research_steps_status
+            ON idea_research_steps(status);
     """)
+
+    # ── Migrations: add columns to trade_ideas if missing ────────────────
+    _migrate_add_columns(conn, "trade_ideas", {
+        "research_job_id": "TEXT",
+        "review_score": "REAL",
+        "review_verdict": "TEXT",
+        "strategy_spec_json": "TEXT",
+    })
+
     conn.commit()
     conn.close()
+
+
+def _migrate_add_columns(conn: sqlite3.Connection, table: str, columns: dict[str, str]):
+    """Safely add columns to an existing table (no-op if already present)."""
+    existing = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    for col_name, col_type in columns.items():
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}")
+
 
 
 # ─── Bot activity log ──────────────────────────────────────────────────────
@@ -1312,6 +1424,191 @@ def get_job(job_id: str, db_path: str = DB_PATH) -> Optional[dict]:
     ).fetchone()
     conn.close()
     return dict(row) if row else None
+
+
+# ─── Trade Idea Pipeline ──────────────────────────────────────────────────
+
+
+def create_trade_idea(
+    idea_id: str,
+    analysis_id: str,
+    ticker: str,
+    direction: str,
+    conviction: str = "low",
+    timeframe: Optional[str] = None,
+    thesis: Optional[str] = None,
+    entry_trigger: Optional[str] = None,
+    invalidation: Optional[str] = None,
+    instrument: Optional[str] = None,
+    source_model: Optional[str] = None,
+    confidence: float = 0.0,
+    pipeline_stage: str = "idea",
+    metadata_json: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> str:
+    """Create a new trade idea from council output. Returns the idea_id."""
+    now = datetime.now().isoformat()
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT OR IGNORE INTO trade_ideas
+           (id, created_at, updated_at, analysis_id, ticker, direction, conviction,
+            timeframe, thesis, entry_trigger, invalidation, instrument, source_model,
+            confidence, pipeline_stage, metadata_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (idea_id, now, now, analysis_id, ticker.upper(), direction, conviction,
+         timeframe, thesis, entry_trigger, invalidation, instrument, source_model,
+         confidence, pipeline_stage, metadata_json),
+    )
+    conn.commit()
+    conn.close()
+    return idea_id
+
+
+def update_trade_idea(idea_id: str, db_path: str = DB_PATH, **fields) -> bool:
+    """Update specific fields on a trade idea. Returns True if row existed."""
+    if not fields:
+        return False
+    now = datetime.now().isoformat()
+    fields["updated_at"] = now
+    set_clauses = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [idea_id]
+    conn = get_conn(db_path)
+    cur = conn.execute(
+        f"UPDATE trade_ideas SET {set_clauses} WHERE id=?", vals,
+    )
+    conn.commit()
+    changed = cur.rowcount > 0
+    conn.close()
+    return changed
+
+
+def get_trade_idea(idea_id: str, db_path: str = DB_PATH) -> Optional[dict]:
+    """Get a single trade idea by ID."""
+    conn = get_conn(db_path)
+    row = conn.execute("SELECT * FROM trade_ideas WHERE id=?", (idea_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_trade_ideas(
+    stage: Optional[str] = None,
+    ticker: Optional[str] = None,
+    limit: int = 50,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """List trade ideas with optional filters, newest first."""
+    clauses, params = [], []
+    if stage:
+        clauses.append("pipeline_stage=?")
+        params.append(stage)
+    if ticker:
+        clauses.append("ticker=?")
+        params.append(ticker.upper())
+    where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        f"SELECT * FROM trade_ideas {where} ORDER BY updated_at DESC LIMIT ?",
+        params,
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def get_trade_ideas_by_analysis(analysis_id: str, db_path: str = DB_PATH) -> list[dict]:
+    """All ideas from one council analysis."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM trade_ideas WHERE analysis_id=? ORDER BY created_at",
+        (analysis_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def record_idea_transition(
+    idea_id: str,
+    from_stage: str,
+    to_stage: str,
+    actor: str = "operator",
+    reason: Optional[str] = None,
+    metadata_json: Optional[str] = None,
+    db_path: str = DB_PATH,
+):
+    """Record an idea stage transition in the audit log."""
+    conn = get_conn(db_path)
+    conn.execute(
+        """INSERT INTO idea_transitions (timestamp, idea_id, from_stage, to_stage, actor, reason, metadata_json)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (datetime.now().isoformat(), idea_id, from_stage, to_stage, actor, reason, metadata_json),
+    )
+    conn.commit()
+    conn.close()
+
+
+def get_idea_transitions(idea_id: str, db_path: str = DB_PATH) -> list[dict]:
+    """Get the full transition history for an idea."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM idea_transitions WHERE idea_id=? ORDER BY timestamp",
+        (idea_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+# ─── Idea Research Steps CRUD ────────────────────────────────────────────────
+
+def create_research_step(
+    idea_id: str,
+    step_name: str,
+    status: str = "pending",
+    input_json: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> int:
+    """Create a research step row. Returns the row id."""
+    conn = get_conn(db_path)
+    cur = conn.execute(
+        """INSERT INTO idea_research_steps
+           (idea_id, step_name, status, input_json)
+           VALUES (?, ?, ?, ?)""",
+        (idea_id, step_name, status, input_json),
+    )
+    conn.commit()
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def update_research_step(
+    step_id: int,
+    db_path: str = DB_PATH,
+    **fields,
+) -> bool:
+    """Update fields on a research step row."""
+    if not fields:
+        return False
+    set_clauses = ", ".join(f"{k}=?" for k in fields)
+    vals = list(fields.values()) + [step_id]
+    conn = get_conn(db_path)
+    cur = conn.execute(
+        f"UPDATE idea_research_steps SET {set_clauses} WHERE id=?", vals,
+    )
+    conn.commit()
+    changed = cur.rowcount > 0
+    conn.close()
+    return changed
+
+
+def get_research_steps(idea_id: str, db_path: str = DB_PATH) -> list[dict]:
+    """Get all research steps for an idea, ordered by id."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM idea_research_steps WHERE idea_id=? ORDER BY id",
+        (idea_id,),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 # ─── Research event store (Phase C) ──────────────────────────────────────

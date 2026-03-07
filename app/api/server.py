@@ -72,6 +72,10 @@ from data.trade_db import (
     log_event,
     promote_strategy_parameter_set,
     update_job,
+    get_trade_idea,
+    get_trade_ideas,
+    get_trade_ideas_by_analysis,
+    get_idea_transitions,
 )
 from intelligence.webhook_server import (
     NormalizedTradingViewAlert,
@@ -108,6 +112,9 @@ from intelligence.sa_quant_client import score_sa_quant_snapshot
 from intelligence.scrapers.sa_adapter import (
     SA_BROWSER_CAPTURE_EVENT_TYPE,
     SA_BROWSER_CAPTURE_SOURCE,
+    SA_NETWORK_CAPTURE_SOURCE,
+    SA_SYMBOL_CAPTURE_EVENT_TYPE,
+    normalize_sa_symbol_snapshot,
     parse_sa_browser_payload,
 )
 
@@ -178,6 +185,21 @@ def _build_bookmarklet_href(js_source: str, endpoint: str) -> str:
     src = _re.sub(r"(?m)^\s*//.*$", "", src)
     src = _re.sub(r"\s+", " ", src).strip()
     return "javascript:" + src
+
+
+def _parse_debate_parts(debate_summary: str) -> list[dict[str, str]]:
+    """Parse the debate summary into per-model parts for display."""
+    if not debate_summary:
+        return []
+    parts = _re.split(r'\[(\w+)\]\s*', debate_summary)
+    result = []
+    i = 1
+    while i < len(parts) - 1:
+        result.append({"model": parts[i], "text": parts[i + 1].strip()})
+        i += 2
+    if not result and debate_summary:
+        result.append({"model": "council", "text": debate_summary})
+    return result
 
 
 def _extract_bookmarklet_version(js_source: str) -> str:
@@ -500,6 +522,99 @@ def create_app() -> FastAPI:
         StaticFiles(directory=str(PROJECT_ROOT / "app" / "web" / "static")),
         name="static",
     )
+
+    def _store_sa_browser_capture(
+        capture,
+        *,
+        retrieved_at: str,
+        capture_source: str,
+        log_strategy: str,
+    ) -> tuple[int, Optional[dict[str, Any]]]:
+        capture_source = str(capture_source or SA_BROWSER_CAPTURE_SOURCE).strip() or SA_BROWSER_CAPTURE_SOURCE
+        capture_payload = capture.to_payload()
+        store = EventStore()
+        store.write_event(
+            EventRecord(
+                event_type=SA_BROWSER_CAPTURE_EVENT_TYPE,
+                source=capture_source,
+                source_ref=capture.snapshot.source_ref,
+                retrieved_at=retrieved_at,
+                event_timestamp=capture.snapshot.updated_at or retrieved_at,
+                symbol=capture.ticker,
+                headline=f"Seeking Alpha browser capture: {capture.ticker}",
+                detail=(
+                    f"page_type={capture.page_type or 'unknown'}, "
+                    f"rating={capture.snapshot.rating or ''}, "
+                    f"grades={len(capture.factor_grades)}"
+                ),
+                confidence=0.99,
+                provenance_descriptor={
+                    "ticker": capture.ticker,
+                    "url": capture.url,
+                    "page_type": capture.page_type,
+                    "capture_source": capture_source,
+                },
+                payload=capture_payload,
+            )
+        )
+
+        stored_feature_count = 0
+        if capture.factor_grades:
+            features = normalize_factor_grades(capture.ticker, capture.factor_grades)
+            if features:
+                fs = FeatureStore(db_path=DB_PATH)
+                try:
+                    if store_factor_grades(capture.ticker, features, fs, as_of=retrieved_at):
+                        stored_feature_count = len(features)
+                finally:
+                    fs.close()
+
+        layer_score_payload: Optional[dict[str, Any]] = None
+        if capture.has_quant_signal:
+            layer_score = score_sa_quant_snapshot(
+                snapshot=capture.snapshot,
+                as_of=retrieved_at,
+                source="sa-browser-capture",
+            )
+            layer_score_payload = layer_score.to_dict()
+            store.write_event(
+                EventRecord(
+                    event_type="signal_layer",
+                    source="sa-browser-capture",
+                    source_ref=layer_score.provenance_ref or capture.snapshot.source_ref,
+                    retrieved_at=retrieved_at,
+                    event_timestamp=retrieved_at,
+                    symbol=capture.ticker,
+                    headline="L8 SA Quant score",
+                    detail=(
+                        f"ticker={capture.ticker}, score={layer_score.score}, "
+                        f"rating={layer_score.details.get('rating', '')}"
+                    ),
+                    confidence=layer_score.confidence,
+                    provenance_descriptor={
+                        "layer_id": layer_score.layer_id.value,
+                        "ticker": capture.ticker,
+                        "as_of": retrieved_at,
+                        "capture_source": capture_source,
+                    },
+                    payload=layer_score_payload,
+                )
+            )
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"SA capture received: {capture.ticker}",
+            detail=(
+                f"source={capture_source}, "
+                f"page_type={capture.page_type or 'unknown'}, "
+                f"has_quant={capture.has_quant_signal}, "
+                f"grades={len(capture.factor_grades)}"
+            ),
+            ticker=capture.ticker,
+            strategy=log_strategy,
+        )
+
+        return stored_feature_count, layer_score_payload
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -1683,6 +1798,14 @@ def create_app() -> FastAPI:
             _page_context(request=request, page_key="incidents", title="Incidents & Jobs | Trading Bot"),
         )
 
+    @app.get("/intel", response_class=HTMLResponse)
+    def intel_council_page(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "intel_council_page.html",
+            _page_context(request=request, page_key="intel", title="Intel Council | Trading Bot"),
+        )
+
     @app.get("/settings", response_class=HTMLResponse)
     def settings_page(request: Request):
         return TEMPLATES.TemplateResponse(
@@ -2101,6 +2224,602 @@ def create_app() -> FastAPI:
             },
         )
 
+    def _build_sa_symbol_capture_cards(limit: int = 5) -> list[dict[str, Any]]:
+        store = EventStore()
+        events = store.list_events(limit=max(1, limit), event_type=SA_SYMBOL_CAPTURE_EVENT_TYPE)
+        cards: list[dict[str, Any]] = []
+        for event in events:
+            payload = event.get("payload") if isinstance(event, dict) else {}
+            if not isinstance(payload, dict):
+                continue
+            summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+            raw_fields = summary.get("raw_fields") if isinstance(summary.get("raw_fields"), dict) else {}
+            normalized_sections = (
+                payload.get("normalized_sections")
+                if isinstance(payload.get("normalized_sections"), dict)
+                else {}
+            )
+            section_names = sorted(str(key) for key in normalized_sections.keys())
+            if not section_names and isinstance(raw_fields.get("normalized_section_names"), list):
+                section_names = sorted(str(key) for key in raw_fields.get("normalized_section_names"))
+            cards.append(
+                {
+                    "id": event.get("id", ""),
+                    "ticker": str(summary.get("ticker") or event.get("symbol") or "").upper(),
+                    "captured_at": str(summary.get("captured_at") or event.get("retrieved_at") or ""),
+                    "retrieved_at": str(event.get("retrieved_at") or ""),
+                    "rating": summary.get("rating") or "",
+                    "quant_score": summary.get("quant_score"),
+                    "author_rating": summary.get("author_rating") or "",
+                    "wall_st_rating": summary.get("wall_st_rating") or "",
+                    "sector_rank": summary.get("sector_rank"),
+                    "industry_rank": summary.get("industry_rank"),
+                    "primary_price": raw_fields.get("primary_price"),
+                    "overall_rank": raw_fields.get("overall_rank"),
+                    "sector_name": raw_fields.get("sector_name") or "",
+                    "industry_name": raw_fields.get("industry_name") or "",
+                    "grades": summary.get("grades") if isinstance(summary.get("grades"), dict) else {},
+                    "section_names": section_names,
+                    "normalized_sections": normalized_sections,
+                    "normalized_sections_json": json.dumps(normalized_sections, indent=2, sort_keys=True),
+                    "version": summary.get("bookmarklet_version") or payload.get("bookmarklet_version") or "",
+                    "source": event.get("source", ""),
+                    "url": summary.get("url") or payload.get("url") or "",
+                }
+            )
+        return cards
+
+    @app.get("/api/sa/snapshots")
+    def api_sa_symbol_snapshots(limit: int = 5):
+        cards = _build_sa_symbol_capture_cards(limit=min(max(limit, 1), 20))
+        return {"ok": True, "count": len(cards), "items": cards}
+
+    @app.get("/fragments/sa-symbol-captures", response_class=HTMLResponse)
+    def sa_symbol_captures_fragment(request: Request, limit: int = 5):
+        cards = _build_sa_symbol_capture_cards(limit=min(max(limit, 1), 10))
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_sa_symbol_captures.html",
+            {
+                "request": request,
+                "captures": cards,
+            },
+        )
+
+    @app.get("/fragments/intel-council", response_class=HTMLResponse)
+    def intel_council_fragment(request: Request):
+        """Render the LLM council analysis feed."""
+        from intelligence.event_store import EventStore
+        from datetime import datetime, timezone as tz
+
+        # Check for active council jobs
+        active_jobs = []
+        try:
+            from data.trade_db import get_conn, DB_PATH
+            conn = get_conn(DB_PATH)
+            running = conn.execute(
+                """SELECT id, status, detail, created_at FROM jobs
+                   WHERE job_type = 'intel_analysis' AND status IN ('queued', 'running')
+                   ORDER BY created_at DESC LIMIT 5"""
+            ).fetchall()
+            conn.close()
+            now = datetime.now(tz.utc)
+            for r in running:
+                created = r[3] or ""
+                elapsed = ""
+                if created:
+                    try:
+                        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=tz.utc)
+                        secs = (now - dt).total_seconds()
+                        elapsed = f"{int(secs)}s" if secs < 120 else f"{int(secs/60)}m{int(secs%60)}s"
+                    except Exception:
+                        pass
+                # Check which models have completed for this analysis
+                models_done = set()
+                analysis_round = 1
+                try:
+                    conn2 = get_conn(DB_PATH)
+                    # Match by timestamp proximity (within 5 min of job creation)
+                    cost_rows = conn2.execute(
+                        """SELECT model, round FROM council_costs
+                           WHERE timestamp > datetime(?, '-5 minutes')
+                           ORDER BY timestamp""",
+                        (created,),
+                    ).fetchall()
+                    conn2.close()
+                    for cr in cost_rows:
+                        base = cr[0].split("(")[0].strip().split()[0].lower()
+                        models_done.add(base)
+                        if cr[1] > analysis_round:
+                            analysis_round = cr[1]
+                except Exception:
+                    pass
+                active_jobs.append({
+                    "id": r[0], "status": r[1],
+                    "detail": (r[2] or "")[:120],
+                    "elapsed": elapsed,
+                    "models_done": models_done,
+                    "round": analysis_round,
+                })
+        except Exception:
+            pass
+
+        es = EventStore()
+        events = es.list_events(limit=30, event_type="intel_analysis")
+
+        analyses = []
+        for ev in events:
+            payload = ev.get("payload", {}) if isinstance(ev, dict) else {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    payload = {}
+
+            # Parse per-model summaries from the combined summary string
+            summary_raw = payload.get("summary", "")
+            summary_parts = []
+            if summary_raw:
+                import re as _summary_re
+                parts = _summary_re.split(r'\[(\w+)\]\s*', summary_raw)
+                # parts = ['', 'claude', 'text...', 'chatgpt', 'text...', ...]
+                i = 1
+                while i < len(parts) - 1:
+                    summary_parts.append({"model": parts[i], "text": parts[i + 1].strip()})
+                    i += 2
+                if not summary_parts and summary_raw:
+                    summary_parts.append({"model": "combined", "text": summary_raw})
+
+            # Enrich trade ideas with DB record IDs for pipeline actions
+            analysis_id = payload.get("analysis_id", ev.get("id", ""))
+            raw_ideas = payload.get("trade_ideas", [])
+            db_ideas = get_trade_ideas_by_analysis(analysis_id)
+            # Match DB ideas to raw ideas by ticker+direction
+            db_lookup = {}
+            for di in db_ideas:
+                key = (di.get("ticker", "").upper(), di.get("direction", ""))
+                db_lookup[key] = di
+            enriched_ideas = []
+            for ri in raw_ideas:
+                key = ((ri.get("ticker") or "").upper(), ri.get("direction", ""))
+                db_rec = db_lookup.get(key)
+                idea_out = dict(ri)
+                if db_rec:
+                    idea_out["idea_id"] = db_rec["id"]
+                    idea_out["pipeline_stage"] = db_rec.get("pipeline_stage", "idea")
+                enriched_ideas.append(idea_out)
+
+            analyses.append({
+                "analysis_id": analysis_id,
+                "analyzed_at": payload.get("analyzed_at", ev.get("created_at", "")),
+                "source": payload.get("source", ev.get("source", "")),
+                "title": payload.get("title", ev.get("headline", "")),
+                "url": payload.get("url", ""),
+                "confidence": payload.get("confidence", ev.get("confidence", 0)) or 0,
+                "models_used": payload.get("models_used", 0),
+                "summary_parts": summary_parts,
+                "trade_ideas": enriched_ideas,
+                "risk_factors": payload.get("risk_factors", []),
+                "tickers_identified": payload.get("tickers_identified", []),
+                "debate_summary": payload.get("debate_summary", ""),
+                "debate_parts": _parse_debate_parts(payload.get("debate_summary", "")),
+            })
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_intel_council.html",
+            {"request": request, "analyses": analyses, "active_jobs": active_jobs},
+        )
+
+    @app.get("/fragments/intel-costs", response_class=HTMLResponse)
+    def intel_costs_fragment(request: Request):
+        """Render council cost monitoring panel."""
+        from intelligence.intel_pipeline import get_council_cost_summary
+        costs = get_council_cost_summary()
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_intel_costs.html",
+            {"request": request, "costs": costs},
+        )
+
+    @app.get("/fragments/intel-pipeline-summary", response_class=HTMLResponse)
+    def intel_pipeline_summary_fragment(request: Request):
+        """Render pipeline summary sidebar with real DB stage counts."""
+        from intelligence.event_store import EventStore
+
+        # Get real stage counts from trade_ideas table
+        all_db_ideas = get_trade_ideas(limit=500)
+        stage_counts = {"idea": 0, "review": 0, "backtest": 0, "paper": 0, "live": 0}
+        ticker_set = set()
+        total_conf = 0.0
+        for idea in all_db_ideas:
+            stage = idea.get("pipeline_stage", "idea")
+            if stage in stage_counts:
+                stage_counts[stage] += 1
+            if idea.get("ticker"):
+                ticker_set.add(idea["ticker"])
+            total_conf += idea.get("confidence", 0) or 0
+
+        stages = [{"name": k, "count": v} for k, v in stage_counts.items()]
+
+        # Top ideas sorted by confidence
+        top_ideas = sorted(all_db_ideas, key=lambda x: x.get("confidence", 0), reverse=True)[:6]
+
+        # Fallback: if no DB ideas yet, count from events
+        total_analyses = 0
+        if not all_db_ideas:
+            try:
+                es = EventStore()
+                events = es.list_events(limit=100, event_type="intel_analysis")
+                total_analyses = len(events)
+                for ev in events:
+                    payload = ev.get("payload", {}) if isinstance(ev, dict) else {}
+                    if isinstance(payload, str):
+                        try:
+                            payload = json.loads(payload)
+                        except Exception:
+                            payload = {}
+                    for idea in payload.get("trade_ideas", []):
+                        if idea.get("ticker"):
+                            ticker_set.add(idea["ticker"])
+                            stage_counts["idea"] += 1
+                stages = [{"name": k, "count": v} for k, v in stage_counts.items()]
+            except Exception:
+                pass
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_intel_pipeline_summary.html",
+            {
+                "request": request,
+                "stages": stages,
+                "top_ideas": top_ideas,
+                "total_analyses": total_analyses or len(all_db_ideas),
+                "total_ideas": len(all_db_ideas) or sum(s["count"] for s in stages),
+                "avg_confidence": (total_conf / len(all_db_ideas)) if all_db_ideas else 0,
+                "unique_tickers": len(ticker_set),
+            },
+        )
+
+    @app.post("/api/intel/challenge", response_class=HTMLResponse)
+    async def intel_challenge(request: Request):
+        """User challenges/questions a council analysis — re-runs through LLM council with context."""
+        form = await request.form()
+        analysis_id = form.get("analysis_id", "")
+        challenge_text = form.get("challenge_text", "").strip()
+        if not challenge_text:
+            return HTMLResponse('<span class="text-[11px] text-red-400">Please enter a challenge or question.</span>')
+
+        # Find the original analysis
+        from intelligence.event_store import EventStore
+        es = EventStore()
+        events = es.list_events(limit=50, event_type="intel_analysis")
+
+        original = None
+        for ev in events:
+            payload = ev.get("payload", {}) if isinstance(ev, dict) else {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    continue
+            if payload.get("analysis_id") == analysis_id:
+                original = payload
+                break
+
+        if not original:
+            return HTMLResponse('<span class="text-[11px] text-red-400">Original analysis not found.</span>')
+
+        # Build challenge content with original context
+        challenge_content = (
+            f"ORIGINAL ANALYSIS:\n"
+            f"Source: {original.get('source', '')}\n"
+            f"Title: {original.get('title', '')}\n"
+            f"Summary: {original.get('summary', '')}\n"
+            f"Trade ideas: {json.dumps(original.get('trade_ideas', []))}\n"
+            f"Risk factors: {json.dumps(original.get('risk_factors', []))}\n\n"
+            f"USER CHALLENGE:\n{challenge_text}\n\n"
+            f"Please respond to the user's challenge. Re-evaluate the original analysis considering their point. "
+            f"If they raise valid concerns, adjust your assessment. Be specific about what changes and what doesn't."
+        )
+
+        submission = IntelSubmission(
+            source="challenge",
+            content=challenge_content,
+            url=original.get("url", ""),
+            title=f"Challenge: {original.get('title', '')[:60]}",
+        )
+
+        job_id = str(uuid.uuid4())
+        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
+                    detail=f"Challenge: {challenge_text[:80]}")
+        analyze_intel_async(submission, job_id)
+
+        return HTMLResponse(
+            f'<span class="text-[11px] text-emerald-400">Challenge sent to council (job {job_id[:8]}). '
+            f'Refresh in ~30s to see the response above.</span>'
+        )
+
+    @app.post("/api/intel/submit", response_class=HTMLResponse)
+    async def intel_submit(request: Request):
+        """Submit content directly from the UI for council analysis."""
+        form = await request.form()
+        content = form.get("content", "").strip()
+        if not content:
+            return HTMLResponse('<span class="text-[11px] text-red-400">Please enter some content.</span>')
+
+        # Detect if it's an X link
+        urls = _re.findall(r'https?://\S+', content)
+        url = urls[0] if urls else ""
+        is_x = any(d in content for d in ["twitter.com/", "x.com/", "nitter.", "vxtwitter.com/"])
+
+        # If X link, try to fetch the tweet
+        if is_x and url:
+            tweet_data = _fetch_tweet_from_url(url)
+            if tweet_data:
+                content = tweet_data["text"]
+                if tweet_data.get("author"):
+                    content = f"@{tweet_data['author']}: {content}"
+                if tweet_data.get("created_at"):
+                    content += f"\n\n[Posted: {tweet_data['created_at']}]"
+
+        submission = IntelSubmission(
+            source="x_twitter" if is_x else "manual",
+            content=content,
+            url=url,
+            title="Manual submission" if not is_x else "Forwarded via UI",
+        )
+
+        job_id = str(uuid.uuid4())
+        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
+                    detail=f"UI intel: {content[:80]}")
+        analyze_intel_async(submission, job_id)
+
+        return HTMLResponse(
+            f'<span class="text-[11px] text-emerald-400">Queued for analysis (job {job_id[:8]}). '
+            f'Results will appear in the feed.</span>'
+        )
+
+    # ── Idea Pipeline endpoints ──────────────────────────────────────────
+
+    @app.get("/api/ideas")
+    def list_ideas(stage: str = None, ticker: str = None, limit: int = 50):
+        """List trade ideas with optional filters."""
+        ideas = get_trade_ideas(stage=stage, ticker=ticker, limit=limit)
+        return {"ideas": ideas, "count": len(ideas)}
+
+    @app.get("/api/ideas/{idea_id}")
+    def get_idea_detail(idea_id: str):
+        """Get a single idea with its transition history."""
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return JSONResponse({"error": "Idea not found"}, status_code=404)
+        transitions = get_idea_transitions(idea_id)
+        return {"idea": idea, "transitions": transitions}
+
+    @app.post("/api/ideas/{idea_id}/promote")
+    async def promote_idea_endpoint(idea_id: str, request: Request):
+        """Promote an idea to the next pipeline stage."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        # Accept both form data (HTMX) and JSON
+        ct = request.headers.get("content-type", "")
+        if "json" in ct:
+            body = await request.json()
+        else:
+            form = await request.form()
+            body = dict(form)
+        target = body.get("target_stage", "")
+        reason = body.get("reason", "")
+        result = mgr.promote_idea(idea_id, target, actor="operator", reason=reason)
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.post("/api/ideas/{idea_id}/reject")
+    async def reject_idea_endpoint(idea_id: str, request: Request):
+        """Reject an idea."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        ct = request.headers.get("content-type", "")
+        if "json" in ct:
+            body = await request.json()
+        else:
+            form = await request.form()
+            body = dict(form)
+        reason = body.get("reason", "")
+        result = mgr.reject_idea(idea_id, reason=reason, actor="operator")
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.post("/api/ideas/{idea_id}/backtest")
+    def trigger_idea_backtest(idea_id: str):
+        """Promote to backtest stage (if needed) and trigger backtest."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return JSONResponse({"success": False, "reasons": ["IDEA_NOT_FOUND"]}, status_code=404)
+        # Auto-promote to backtest if still in review
+        if idea["pipeline_stage"] == "review":
+            promo = mgr.promote_idea(idea_id, "backtest", actor="operator", reason="Backtest requested")
+            if not promo.get("success"):
+                return JSONResponse(promo, status_code=400)
+        result = mgr.trigger_backtest(idea_id)
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.post("/api/ideas/{idea_id}/paper")
+    def start_idea_paper(idea_id: str):
+        """Start a paper trade for an idea."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        result = mgr.start_paper_trade(idea_id)
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.post("/api/ideas/{idea_id}/paper/close")
+    async def close_idea_paper(idea_id: str, request: Request):
+        """Close a paper trade."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        ct = request.headers.get("content-type", "")
+        if "json" in ct:
+            body = await request.json()
+        else:
+            form = await request.form()
+            body = dict(form)
+        reason = body.get("reason", "")
+        result = mgr.close_paper_trade(idea_id, reason=reason)
+        if not result.get("success"):
+            return JSONResponse(result, status_code=400)
+        return result
+
+    @app.get("/api/ideas/{idea_id}/paper/status")
+    def idea_paper_status(idea_id: str):
+        """Get paper trade P&L status."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        return mgr.get_paper_trade_status(idea_id)
+
+    @app.post("/api/ideas/{idea_id}/notes")
+    async def update_idea_notes(idea_id: str, request: Request):
+        """Add user notes to an idea."""
+        from data.trade_db import update_trade_idea
+        ct = request.headers.get("content-type", "")
+        if "json" in ct:
+            body = await request.json()
+        else:
+            form = await request.form()
+            body = dict(form)
+        notes = body.get("notes", "")
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return JSONResponse({"error": "Idea not found"}, status_code=404)
+        existing = idea.get("user_notes") or ""
+        new_notes = f"{existing}\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {notes}".strip()
+        update_trade_idea(idea_id, user_notes=new_notes)
+        return {"success": True}
+
+    @app.post("/api/ideas/backfill")
+    def backfill_ideas():
+        """Backfill trade ideas from existing council analyses."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        count = mgr.backfill_ideas_from_events()
+        return {"success": True, "created": count}
+
+    @app.get("/api/ideas/{idea_id}/research")
+    def get_idea_research(idea_id: str):
+        """Get research steps with outputs for an idea."""
+        from data.trade_db import get_research_steps
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return JSONResponse({"error": "Idea not found"}, status_code=404)
+        steps = get_research_steps(idea_id)
+        # Parse output_json for each step
+        for step in steps:
+            if step.get("output_json"):
+                try:
+                    step["output"] = json.loads(step["output_json"])
+                except (json.JSONDecodeError, TypeError):
+                    step["output"] = None
+        return {
+            "idea_id": idea_id,
+            "review_score": idea.get("review_score"),
+            "review_verdict": idea.get("review_verdict"),
+            "strategy_spec": json.loads(idea["strategy_spec_json"]) if idea.get("strategy_spec_json") else None,
+            "steps": steps,
+        }
+
+    @app.post("/api/ideas/{idea_id}/research/start")
+    def start_idea_research(idea_id: str):
+        """Manually trigger research for an idea."""
+        from intelligence.idea_research import IdeaResearcher
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return JSONResponse({"error": "Idea not found"}, status_code=404)
+        researcher = IdeaResearcher()
+        job_id = researcher.run_async(idea_id)
+        return {"success": True, "job_id": job_id, "idea_id": idea_id}
+
+    # ── Idea Pipeline HTMX fragments ────────────────────────────────────
+
+    @app.get("/fragments/idea-actions/{idea_id}", response_class=HTMLResponse)
+    def idea_actions_fragment(idea_id: str, request: Request):
+        """Render stage-appropriate action buttons for an idea."""
+        from data.trade_db import get_research_steps
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return HTMLResponse('<span class="text-[10px] text-red-400">Idea not found</span>')
+
+        stage = idea.get("pipeline_stage", "idea")
+        bt_result = None
+        if idea.get("backtest_result_json"):
+            try:
+                bt_result = json.loads(idea["backtest_result_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        research_steps = get_research_steps(idea_id)
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_idea_actions.html",
+            {"request": request, "idea": idea, "stage": stage,
+             "bt_result": bt_result, "research_steps": research_steps},
+        )
+
+    @app.get("/fragments/idea-detail/{idea_id}", response_class=HTMLResponse)
+    def idea_detail_fragment(idea_id: str, request: Request):
+        """Full idea detail card with backtest, paper, timeline."""
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return HTMLResponse('<span class="text-[10px] text-red-400">Idea not found</span>')
+
+        transitions = get_idea_transitions(idea_id)
+        bt_result = None
+        if idea.get("backtest_result_json"):
+            try:
+                bt_result = json.loads(idea["backtest_result_json"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        paper_status = None
+        if idea.get("paper_deal_id"):
+            from intelligence.idea_pipeline import IdeaPipelineManager
+            mgr = IdeaPipelineManager()
+            paper_status = mgr.get_paper_trade_status(idea_id)
+
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_idea_detail.html",
+            {
+                "request": request,
+                "idea": idea,
+                "transitions": transitions,
+                "bt_result": bt_result,
+                "paper_status": paper_status,
+            },
+        )
+
+    @app.get("/fragments/idea-pipeline-board", response_class=HTMLResponse)
+    def idea_pipeline_board_fragment(request: Request):
+        """Kanban-style board showing ideas grouped by stage."""
+        from intelligence.idea_pipeline import IdeaPipelineManager, STAGES
+        mgr = IdeaPipelineManager()
+        stats = mgr.get_pipeline_stats()
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_idea_pipeline_board.html",
+            {"request": request, "stats": stats, "stages": STAGES},
+        )
+
     @app.get("/fragments/pipeline-status", response_class=HTMLResponse)
     def pipeline_status_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
@@ -2409,60 +3128,6 @@ def create_app() -> FastAPI:
         )
         return Response(status_code=204)
 
-    @app.get("/api/debug/tweet_fetch")
-    async def debug_tweet_fetch(url: str = ""):
-        """Diagnostic: test X API tweet fetch from the live server process."""
-        if not url:
-            return {"ok": False, "error": "pass ?url=https://x.com/.../status/123"}
-        diag = {}
-        try:
-            # Step 1: credential check
-            diag["config_ck_len"] = len(config.X_CONSUMER_KEY or "")
-            diag["config_cs_len"] = len(config.X_CONSUMER_SECRET or "")
-            diag["config_at_len"] = len(config.X_ACCESS_TOKEN or "")
-            diag["config_ats_len"] = len(config.X_ACCESS_TOKEN_SECRET or "")
-            diag["config_ck_start"] = (config.X_CONSUMER_KEY or "")[:6]
-
-            # Step 2: extract tweet ID
-            match = _re.search(r'(?:twitter\.com|x\.com)/.+/status/(\d+)', url)
-            diag["tweet_id"] = match.group(1) if match else None
-            if not match:
-                return {"ok": False, "error": "no tweet ID in URL", **diag}
-            tweet_id = match.group(1)
-
-            # Step 3: get oauth via our function
-            oauth = _get_x_oauth()
-            diag["oauth_available"] = oauth is not None
-            # Re-check after lazy reload
-            diag["config_ck_len_after"] = len(config.X_CONSUMER_KEY or "")
-            if not oauth:
-                return {"ok": False, "error": "oauth is None", **diag}
-
-            # Step 4: raw API call with this oauth session
-            resp = oauth.get(
-                f"https://api.x.com/2/tweets/{tweet_id}",
-                params={"tweet.fields": "text,author_id,created_at",
-                        "expansions": "author_id", "user.fields": "username"},
-                timeout=10,
-            )
-            diag["api_status"] = resp.status_code
-            diag["api_body_preview"] = resp.text[:500]
-
-            if resp.status_code != 200:
-                return {"ok": False, "error": f"X API returned {resp.status_code}", **diag}
-
-            # Step 5: full fetch
-            result = _fetch_tweet_from_url(url)
-            if result:
-                return {"ok": True, "text_preview": result["text"][:500],
-                        "author": result.get("author"), **diag}
-            else:
-                return {"ok": False, "error": "fetch_tweet_from_url returned None despite raw API success", **diag}
-        except Exception as exc:
-            import traceback
-            diag["traceback"] = traceback.format_exc()
-            return {"ok": False, "error": str(exc), **diag}
-
     @app.post("/api/webhooks/sa_intel")
     async def sa_intel_webhook(request: Request):
         """Receive Seeking Alpha page data from browser bookmarklet.
@@ -2546,85 +3211,16 @@ def create_app() -> FastAPI:
             )
 
         retrieved_at = _utc_now_iso()
-        capture_payload = capture.to_payload()
-        store = EventStore()
-        store.write_event(
-            EventRecord(
-                event_type=SA_BROWSER_CAPTURE_EVENT_TYPE,
-                source=SA_BROWSER_CAPTURE_SOURCE,
-                source_ref=capture.snapshot.source_ref,
-                retrieved_at=retrieved_at,
-                event_timestamp=capture.snapshot.updated_at or retrieved_at,
-                symbol=capture.ticker,
-                headline=f"Seeking Alpha browser capture: {capture.ticker}",
-                detail=(
-                    f"page_type={capture.page_type or 'unknown'}, "
-                    f"rating={capture.snapshot.rating or ''}, "
-                    f"grades={len(capture.factor_grades)}"
-                ),
-                confidence=0.99,
-                provenance_descriptor={
-                    "ticker": capture.ticker,
-                    "url": capture.url,
-                    "page_type": capture.page_type,
-                },
-                payload=capture_payload,
-            )
-        )
-
-        stored_feature_count = 0
-        if capture.factor_grades:
-            features = normalize_factor_grades(capture.ticker, capture.factor_grades)
-            if features:
-                fs = FeatureStore(db_path=DB_PATH)
-                try:
-                    if store_factor_grades(capture.ticker, features, fs, as_of=retrieved_at):
-                        stored_feature_count = len(features)
-                finally:
-                    fs.close()
-
-        layer_score_payload: Optional[dict[str, Any]] = None
-        if capture.has_quant_signal:
-            layer_score = score_sa_quant_snapshot(
-                snapshot=capture.snapshot,
-                as_of=retrieved_at,
-                source="sa-browser-capture",
-            )
-            layer_score_payload = layer_score.to_dict()
-            store.write_event(
-                EventRecord(
-                    event_type="signal_layer",
-                    source="sa-browser-capture",
-                    source_ref=layer_score.provenance_ref or capture.snapshot.source_ref,
-                    retrieved_at=retrieved_at,
-                    event_timestamp=retrieved_at,
-                    symbol=capture.ticker,
-                    headline="L8 SA Quant score",
-                    detail=(
-                        f"ticker={capture.ticker}, score={layer_score.score}, "
-                        f"rating={layer_score.details.get('rating', '')}"
-                    ),
-                    confidence=layer_score.confidence,
-                    provenance_descriptor={
-                        "layer_id": layer_score.layer_id.value,
-                        "ticker": capture.ticker,
-                        "as_of": retrieved_at,
-                        "capture_source": SA_BROWSER_CAPTURE_SOURCE,
-                    },
-                    payload=layer_score_payload,
-                )
-            )
-
-        _safe_log_event(
-            category="SIGNAL",
-            headline=f"SA capture received: {capture.ticker}",
-            detail=(
-                f"page_type={capture.page_type or 'unknown'}, "
-                f"has_quant={capture.has_quant_signal}, "
-                f"grades={len(capture.factor_grades)}"
-            ),
-            ticker=capture.ticker,
-            strategy="sa_quant_capture",
+        capture_source = str(
+            capture.snapshot.raw_fields.get("source")
+            or payload.get("source")
+            or SA_BROWSER_CAPTURE_SOURCE
+        ).strip() or SA_BROWSER_CAPTURE_SOURCE
+        stored_feature_count, layer_score_payload = _store_sa_browser_capture(
+            capture,
+            retrieved_at=retrieved_at,
+            capture_source=capture_source,
+            log_strategy="sa_quant_capture",
         )
 
         return {
@@ -2636,6 +3232,202 @@ def create_app() -> FastAPI:
             "feature_count": stored_feature_count,
             "layer_score": layer_score_payload,
             "message": "SA browser capture stored.",
+        }
+
+    @app.post("/api/webhooks/sa_symbol_capture")
+    async def sa_symbol_capture_webhook(request: Request):
+        """Receive a full Seeking Alpha symbol snapshot captured in-browser."""
+        try:
+            body = await request.body()
+            if len(body) > 1_500_000:
+                return JSONResponse(
+                    {"ok": False, "error": "payload_too_large"},
+                    status_code=413,
+                )
+            payload = json.loads(body.decode("utf-8", errors="replace"))
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_payload"},
+                status_code=400,
+            )
+
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_capture", "detail": "payload must be an object"},
+                status_code=422,
+            )
+
+        summary_payload = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+        summary_payload = dict(summary_payload)
+        for key in (
+            "ticker",
+            "url",
+            "title",
+            "page_type",
+            "captured_at",
+            "source",
+            "source_ref",
+            "bookmarklet_version",
+            "rating",
+            "quant_score",
+            "author_rating",
+            "wall_st_rating",
+            "grades",
+            "sa_history",
+            "scan_debug",
+        ):
+            if key not in summary_payload and payload.get(key) not in (None, "", [], {}):
+                summary_payload[key] = payload.get(key)
+
+        capture_source = str(
+            summary_payload.get("source")
+            or payload.get("source")
+            or SA_NETWORK_CAPTURE_SOURCE
+        ).strip() or SA_NETWORK_CAPTURE_SOURCE
+        sections = payload.get("sections") if isinstance(payload.get("sections"), dict) else {}
+        raw_responses = payload.get("raw_responses") if isinstance(payload.get("raw_responses"), list) else []
+        raw_fields = (
+            dict(summary_payload.get("raw_fields"))
+            if isinstance(summary_payload.get("raw_fields"), dict)
+            else {}
+        )
+        raw_fields.setdefault("source", capture_source)
+        raw_fields.setdefault("section_names", sorted(str(key) for key in sections.keys()))
+        raw_fields.setdefault("raw_response_count", len(raw_responses))
+        summary_payload["raw_fields"] = raw_fields
+
+        normalized_snapshot = normalize_sa_symbol_snapshot(
+            {
+                **payload,
+                "summary": summary_payload,
+                "sections": sections,
+                "raw_responses": raw_responses,
+            }
+        )
+        summary_payload = (
+            dict(normalized_snapshot.get("summary"))
+            if isinstance(normalized_snapshot.get("summary"), dict)
+            else summary_payload
+        )
+        normalized_sections = (
+            dict(normalized_snapshot.get("normalized_sections"))
+            if isinstance(normalized_snapshot.get("normalized_sections"), dict)
+            else {}
+        )
+        if normalized_sections:
+            summary_payload["normalized_sections"] = normalized_sections
+            raw_fields = (
+                dict(summary_payload.get("raw_fields"))
+                if isinstance(summary_payload.get("raw_fields"), dict)
+                else {}
+            )
+            raw_fields["normalized_section_names"] = sorted(str(key) for key in normalized_sections.keys())
+            summary_payload["raw_fields"] = raw_fields
+
+        symbol = str(summary_payload.get("ticker") or payload.get("ticker") or "").strip().upper()
+        if not symbol:
+            match = _re.search(
+                r"/symbol/([A-Z.=\-]+)",
+                str(summary_payload.get("url") or payload.get("url") or ""),
+                _re.IGNORECASE,
+            )
+            if match:
+                symbol = match.group(1).upper()
+        if not symbol:
+            return JSONResponse(
+                {"ok": False, "error": "invalid_capture", "detail": "ticker is required"},
+                status_code=422,
+            )
+
+        retrieved_at = _utc_now_iso()
+        symbol_payload = dict(payload)
+        symbol_payload["summary"] = summary_payload
+        symbol_payload["normalized_sections"] = normalized_sections
+        store = EventStore()
+        store.write_event(
+            EventRecord(
+                event_type=SA_SYMBOL_CAPTURE_EVENT_TYPE,
+                source=capture_source,
+                source_ref=str(
+                    payload.get("source_ref")
+                    or summary_payload.get("source_ref")
+                    or summary_payload.get("url")
+                    or payload.get("url")
+                    or f"sa-symbol-{symbol}"
+                ).strip(),
+                retrieved_at=retrieved_at,
+                event_timestamp=str(
+                    payload.get("captured_at")
+                    or summary_payload.get("captured_at")
+                    or retrieved_at
+                ).strip()
+                or retrieved_at,
+                symbol=symbol,
+                headline=f"Seeking Alpha symbol capture: {symbol}",
+                detail=(
+                    f"sections={len(sections)}, "
+                    f"normalized_sections={len(normalized_sections)}, "
+                    f"raw_responses={len(raw_responses)}, "
+                    f"has_summary={bool(summary_payload)}"
+                ),
+                confidence=0.99,
+                provenance_descriptor={
+                    "ticker": symbol,
+                    "url": summary_payload.get("url") or payload.get("url") or "",
+                    "page_type": "symbol",
+                    "capture_source": capture_source,
+                    "section_names": sorted(
+                        {*(str(key) for key in sections.keys()), *(str(key) for key in normalized_sections.keys())}
+                    )[:20],
+                },
+                payload=symbol_payload,
+            )
+        )
+
+        capture = None
+        stored_feature_count = 0
+        layer_score_payload: Optional[dict[str, Any]] = None
+        try:
+            capture = parse_sa_browser_payload(summary_payload)
+        except ValueError:
+            capture = None
+
+        if capture is not None:
+            capture_source = str(
+                capture.snapshot.raw_fields.get("source") or capture_source
+            ).strip() or capture_source
+            stored_feature_count, layer_score_payload = _store_sa_browser_capture(
+                capture,
+                retrieved_at=retrieved_at,
+                capture_source=capture_source,
+                log_strategy="sa_symbol_capture",
+            )
+        else:
+            _safe_log_event(
+                category="SIGNAL",
+                headline=f"SA symbol snapshot received: {symbol}",
+                detail=(
+                    f"source={capture_source}, "
+                    f"sections={len(sections)}, "
+                    f"normalized_sections={len(normalized_sections)}, "
+                    f"raw_responses={len(raw_responses)}"
+                ),
+                ticker=symbol,
+                strategy="sa_symbol_capture",
+            )
+
+        return {
+            "ok": True,
+            "ticker": symbol,
+            "section_count": len(sections),
+            "normalized_section_count": len(normalized_sections),
+            "raw_response_count": len(raw_responses),
+            "rating": capture.snapshot.rating if capture is not None else "",
+            "quant_score": capture.snapshot.quant_score_raw if capture is not None else None,
+            "factor_grades": capture.factor_grades if capture is not None else {},
+            "feature_count": stored_feature_count,
+            "layer_score": layer_score_payload,
+            "message": "SA symbol capture stored.",
         }
 
     @app.post("/api/webhooks/x_intel")

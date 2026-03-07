@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>BRC SA Capture Options</title>
+    <style>
+      body { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; margin: 24px; color: #101828; }
+      label { display: block; font-weight: 600; margin-bottom: 8px; }
+      input { width: 100%; padding: 10px 12px; font: inherit; box-sizing: border-box; }
+      button { margin-top: 16px; padding: 10px 14px; font: inherit; }
+      .status { margin-top: 12px; color: #0b6b2f; min-height: 1.2em; }
+      .hint { color: #475467; margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>BRC SA Network Capture</h1>
+    <label for="endpoint">BoxRoomCapital endpoint</label>
+    <input id="endpoint" type="url" placeholder="https://your-replit-app.replit.dev">
+    <button id="save" type="button">Save</button>
+    <div id="status" class="status"></div>
+    <p class="hint">Use the base app URL only. Example: <code>https://your-replit-app.replit.dev</code></p>
+    <script src="options.js"></script>
+  </body>
+  </html>
