@@ -2,67 +2,67 @@
 {% include "_promotion_gate.html" %}
 
 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
     <div class="flex justify-between items-baseline gap-4 mb-3">
-      <h2 class="text-lg font-semibold text-slate-200">Option Discovery Summary</h2>
-      <p class="text-slate-500 text-sm">Coverage by index and expiry.</p>
+      <h2 class="text-lg font-semibold text-gray-800">Option Discovery Summary</h2>
+      <p class="text-gray-400 text-sm">Coverage by index and expiry.</p>
     </div>
     {% if option_summary %}
       <table class="w-full text-sm text-left">
         <thead>
           <tr>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Index</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Expiry Type</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Contracts</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Last Seen</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Index</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Expiry Type</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Contracts</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Last Seen</th>
           </tr>
         </thead>
         <tbody>
         {% for row in option_summary %}
           <tr>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.index_name or "-" }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.expiry_type or "-" }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.contracts }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ row.last_seen }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.index_name or "-" }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.expiry_type or "-" }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.contracts }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ row.last_seen }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="text-sm text-slate-500">No discovered contracts persisted yet.</p>
+      <p class="text-sm text-gray-400">No discovered contracts persisted yet.</p>
     {% endif %}
   </section>
 
-  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
     <div class="flex justify-between items-baseline gap-4 mb-3">
-      <h2 class="text-lg font-semibold text-slate-200">Calibration Runs</h2>
-      <p class="text-slate-500 text-sm">Recent model fit iterations.</p>
+      <h2 class="text-lg font-semibold text-gray-800">Calibration Runs</h2>
+      <p class="text-gray-400 text-sm">Recent model fit iterations.</p>
     </div>
     {% if calibration_runs %}
       <table class="w-full text-sm text-left">
         <thead>
           <tr>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Run ID</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Scope</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Samples</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Overall</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Created</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">View</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Run ID</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Scope</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Samples</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Overall</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Created</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">View</th>
           </tr>
         </thead>
         <tbody>
         {% for run in calibration_runs %}
           <tr>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ run.id[:8] }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if run.status in ['completed', 'ok', 'live'] %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif run.status in ['running', 'retrying', 'staged_live'] %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif run.status in ['failed', 'error', 'rejection'] %}bg-red-500/15 text-red-400 border-red-500/30{% elif run.status in ['queued', 'shadow'] %}bg-blue-500/15 text-blue-400 border-blue-500/30{% else %}bg-slate-500/15 text-slate-400 border-slate-500/30{% endif %}">{{ run.status }}</span></td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ run.scope or "-" }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ run.samples or 0 }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.3f"|format(run.overall_ratio) if run.overall_ratio is not none else "-" }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ run.created_at }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ run.id[:8] }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if run.status in ['completed', 'ok', 'live'] %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif run.status in ['running', 'retrying', 'staged_live'] %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif run.status in ['failed', 'error', 'rejection'] %}bg-red-500/15 text-red-400 border-red-500/30{% elif run.status in ['queued', 'shadow'] %}bg-blue-500/15 text-blue-400 border-blue-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ run.status }}</span></td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ run.scope or "-" }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ run.samples or 0 }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.3f"|format(run.overall_ratio) if run.overall_ratio is not none else "-" }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ run.created_at }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">
               <button
-                class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors"
+                class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors"
                 hx-get="/fragments/calibration-run?run_id={{ run.id }}"
                 hx-target="#calibration-run-detail"
                 hx-swap="innerHTML"
@@ -73,45 +73,45 @@
       </tbody>
     </table>
     {% else %}
-      <p class="text-sm text-slate-500">No calibration runs yet.</p>
+      <p class="text-sm text-gray-400">No calibration runs yet.</p>
     {% endif %}
   </section>
 </section>
 
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-slate-200">Calibration Run Detail</h2>
-    <p class="text-slate-500 text-sm">Filter points and inspect pricing fit.</p>
+    <h2 class="text-lg font-semibold text-gray-800">Calibration Run Detail</h2>
+    <p class="text-gray-400 text-sm">Filter points and inspect pricing fit.</p>
   </div>
   <form class="grid grid-cols-1 lg:grid-cols-2 gap-3" hx-get="/fragments/calibration-run" hx-target="#calibration-run-detail" hx-swap="innerHTML">
-    <label class="text-slate-500 text-sm">Run ID
-      <input class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="text" name="run_id" value="{{ latest_calibration_run_id }}" />
+    <label class="text-gray-400 text-sm">Run ID
+      <input class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="text" name="run_id" value="{{ latest_calibration_run_id }}" />
     </label>
-    <label class="text-slate-500 text-sm">Index
-      <input class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="text" name="index_name" placeholder="US 500" />
+    <label class="text-gray-400 text-sm">Index
+      <input class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="text" name="index_name" placeholder="US 500" />
     </label>
-    <label class="text-slate-500 text-sm">Ticker
-      <input class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="text" name="ticker" placeholder="SPY" />
+    <label class="text-gray-400 text-sm">Ticker
+      <input class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="text" name="ticker" placeholder="SPY" />
     </label>
-    <label class="text-slate-500 text-sm">Expiry Type
-      <select class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" name="expiry_type">
+    <label class="text-gray-400 text-sm">Expiry Type
+      <select class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" name="expiry_type">
         <option value="" selected>all</option>
         <option value="daily">daily</option>
         <option value="weekly">weekly</option>
         <option value="monthly">monthly</option>
       </select>
     </label>
-    <label class="text-slate-500 text-sm">Strike Min
-      <input class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="number" name="strike_min" step="1" />
+    <label class="text-gray-400 text-sm">Strike Min
+      <input class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="number" name="strike_min" step="1" />
     </label>
-    <label class="text-slate-500 text-sm">Strike Max
-      <input class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="number" name="strike_max" step="1" />
+    <label class="text-gray-400 text-sm">Strike Max
+      <input class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="number" name="strike_max" step="1" />
     </label>
-    <label class="text-slate-500 text-sm">Limit
-      <input class="mt-1 w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="number" name="limit" value="200" min="1" max="1000" />
+    <label class="text-gray-400 text-sm">Limit
+      <input class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" type="number" name="limit" value="200" min="1" max="1000" />
     </label>
     <div class="flex items-end">
-      <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors">Filter</button>
+      <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors">Filter</button>
     </div>
   </form>
   <div
@@ -123,158 +123,158 @@
   ></div>
 </section>
 
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-slate-200">Recent Option Contracts</h2>
-    <p class="text-slate-500 text-sm">Latest discovered tradeable options.</p>
+    <h2 class="text-lg font-semibold text-gray-800">Recent Option Contracts</h2>
+    <p class="text-gray-400 text-sm">Latest discovered tradeable options.</p>
   </div>
   {% if option_contracts %}
     <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Index</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">EPIC</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Type</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Strike</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Expiry</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Bid</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Offer</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Source</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Index</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">EPIC</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Type</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Strike</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Expiry</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Bid</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Offer</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Source</th>
         </tr>
       </thead>
       <tbody>
       {% for c in option_contracts %}
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.index_name or "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ c.epic }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.option_type or "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.0f"|format(c.strike) if c.strike is not none else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.expiry or "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.bid if c.bid is not none else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.offer if c.offer is not none else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.status or "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ c.source or "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.index_name or "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ c.epic }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.option_type or "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.0f"|format(c.strike) if c.strike is not none else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.expiry or "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.bid if c.bid is not none else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.offer if c.offer is not none else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.status or "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ c.source or "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="text-sm text-slate-500">No contracts to display.</p>
+    <p class="text-sm text-gray-400">No contracts to display.</p>
   {% endif %}
 </section>
 
 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
     <div class="flex justify-between items-baseline gap-4 mb-3">
-      <h2 class="text-lg font-semibold text-slate-200">Active Parameter Sets</h2>
-      <p class="text-slate-500 text-sm">Current sets by promotion lane.</p>
+      <h2 class="text-lg font-semibold text-gray-800">Active Parameter Sets</h2>
+      <p class="text-gray-400 text-sm">Current sets by promotion lane.</p>
     </div>
     <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Set ID</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Version</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Name</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Updated</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Set ID</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Version</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Name</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Updated</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">shadow</span></td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ active_shadow_set.id[:8] if active_shadow_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ active_shadow_set.version if active_shadow_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ active_shadow_set.name if active_shadow_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ active_shadow_set.updated_at if active_shadow_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">shadow</span></td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ active_shadow_set.id[:8] if active_shadow_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ active_shadow_set.version if active_shadow_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ active_shadow_set.name if active_shadow_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ active_shadow_set.updated_at if active_shadow_set else "-" }}</td>
         </tr>
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">staged_live</span></td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ active_staged_set.id[:8] if active_staged_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ active_staged_set.version if active_staged_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ active_staged_set.name if active_staged_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ active_staged_set.updated_at if active_staged_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">staged_live</span></td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ active_staged_set.id[:8] if active_staged_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ active_staged_set.version if active_staged_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ active_staged_set.name if active_staged_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ active_staged_set.updated_at if active_staged_set else "-" }}</td>
         </tr>
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">live</span></td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ active_live_set.id[:8] if active_live_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ active_live_set.version if active_live_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ active_live_set.name if active_live_set else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ active_live_set.updated_at if active_live_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">live</span></td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ active_live_set.id[:8] if active_live_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ active_live_set.version if active_live_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ active_live_set.name if active_live_set else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ active_live_set.updated_at if active_live_set else "-" }}</td>
         </tr>
       </tbody>
     </table>
   </section>
 
-  <section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+  <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
     <div class="flex justify-between items-baseline gap-4 mb-3">
-      <h2 class="text-lg font-semibold text-slate-200">Promotion Audit</h2>
-      <p class="text-slate-500 text-sm">Recent lane transitions and approvals.</p>
+      <h2 class="text-lg font-semibold text-gray-800">Promotion Audit</h2>
+      <p class="text-gray-400 text-sm">Recent lane transitions and approvals.</p>
     </div>
     {% if strategy_promotions %}
       <table class="w-full text-sm text-left">
         <thead>
           <tr>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Time</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Set</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">From</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">To</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Actor</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ack</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Time</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Set</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">From</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">To</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Actor</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Ack</th>
           </tr>
         </thead>
         <tbody>
         {% for row in strategy_promotions %}
           <tr>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ row.timestamp }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ row.set_id[:8] }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.from_status or "-" }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.to_status }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.actor }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.acknowledgement }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ row.timestamp }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.set_id[:8] }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.from_status or "-" }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.to_status }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.actor }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.acknowledgement }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="text-sm text-slate-500">No promotion actions yet.</p>
+      <p class="text-sm text-gray-400">No promotion actions yet.</p>
     {% endif %}
   </section>
 </section>
 
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-slate-200">Parameter Set Versions</h2>
-    <p class="text-slate-500 text-sm">Version history and source lineage.</p>
+    <h2 class="text-lg font-semibold text-gray-800">Parameter Set Versions</h2>
+    <p class="text-gray-400 text-sm">Version history and source lineage.</p>
   </div>
   {% if strategy_sets %}
     <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">ID</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Version</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Name</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Source Run</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Created</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Notes</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">ID</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Version</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Name</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Source Run</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Created</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Notes</th>
         </tr>
       </thead>
       <tbody>
       {% for row in strategy_sets %}
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ row.id[:8] }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.version }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if row.status in ['completed', 'ok', 'live'] %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif row.status in ['running', 'retrying', 'staged_live'] %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif row.status in ['failed', 'error', 'rejection'] %}bg-red-500/15 text-red-400 border-red-500/30{% elif row.status in ['queued', 'shadow'] %}bg-blue-500/15 text-blue-400 border-blue-500/30{% else %}bg-slate-500/15 text-slate-400 border-slate-500/30{% endif %}">{{ row.status }}</span></td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.name }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ row.source_run_id[:8] if row.source_run_id else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ row.created_at }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.notes or "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.id[:8] }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.version }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200"><span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if row.status in ['completed', 'ok', 'live'] %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif row.status in ['running', 'retrying', 'staged_live'] %}bg-amber-500/15 text-amber-400 border-amber-500/30{% elif row.status in ['failed', 'error', 'rejection'] %}bg-red-500/15 text-red-400 border-red-500/30{% elif row.status in ['queued', 'shadow'] %}bg-blue-500/15 text-blue-400 border-blue-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ row.status }}</span></td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.name }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.source_run_id[:8] if row.source_run_id else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ row.created_at }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.notes or "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
   {% else %}
-    <p class="text-sm text-slate-500">No strategy parameter sets yet.</p>
+    <p class="text-sm text-gray-400">No strategy parameter sets yet.</p>
   {% endif %}
 </section>

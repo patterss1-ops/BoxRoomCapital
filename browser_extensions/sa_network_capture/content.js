@@ -1,5 +1,6 @@
 (function () {
   var lastEndpoint = "";
+  var handledRequestIds = Object.create(null);
 
   function injectHook() {
     var parent = document.documentElement || document.head;
@@ -24,17 +25,52 @@
     parent.dispatchEvent(new CustomEvent("brc-sa-endpoint", {
       detail: { endpoint: lastEndpoint }
     }));
+    try {
+      window.postMessage(
+        {
+          __brc_sa_endpoint: true,
+          endpoint: lastEndpoint
+        },
+        window.location.origin
+      );
+    } catch (err) {
+      window.postMessage(
+        {
+          __brc_sa_endpoint: true,
+          endpoint: lastEndpoint
+        },
+        "*"
+      );
+    }
   }
 
   function dispatchResponse(detail) {
     var parent = document.documentElement || document;
     if (!parent) return;
     parent.dispatchEvent(new CustomEvent("brc-sa-response", { detail: detail || {} }));
+    try {
+      window.postMessage(
+        {
+          __brc_sa_response: true,
+          detail: detail || {}
+        },
+        window.location.origin
+      );
+    } catch (err) {
+      window.postMessage(
+        {
+          __brc_sa_response: true,
+          detail: detail || {}
+        },
+        "*"
+      );
+    }
   }
 
-  function handlePageRequest(event) {
-    var detail = event && event.detail;
+  function forwardRequest(detail) {
     if (!detail || !detail.requestId || !detail.kind) return;
+    if (handledRequestIds[detail.requestId]) return;
+    handledRequestIds[detail.requestId] = Date.now();
     chrome.runtime.sendMessage(
       {
         type: detail.kind,
@@ -58,12 +94,27 @@
           status: response && response.status ? response.status : 0,
           body: response && response.body ? response.body : ""
         });
+        setTimeout(function () {
+          delete handledRequestIds[detail.requestId];
+        }, 30000);
       }
     );
   }
 
+  function handlePageRequest(event) {
+    forwardRequest(event && event.detail);
+  }
+
+  function handlePageMessage(event) {
+    if (event.source !== window) return;
+    var data = event.data;
+    if (!data || !data.__brc_sa_request) return;
+    forwardRequest(data.detail || {});
+  }
+
   injectHook();
   (document.documentElement || document).addEventListener("brc-sa-request", handlePageRequest);
+  window.addEventListener("message", handlePageMessage, false);
 
   chrome.storage.sync.get({ endpoint: "" }, function (data) {
     dispatchEndpoint(data.endpoint || "");

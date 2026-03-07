@@ -6,17 +6,18 @@ from contextlib import asynccontextmanager
 import html
 import logging
 import os
+import time
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 import json
 import threading
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
+from urllib.parse import urlparse
 
 import re as _re
 
-import requests as _requests
 
 from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -132,6 +133,21 @@ _TRADINGVIEW_RISK_LIMITS = RiskLimits(
 
 # ─── Shared broker session (independent of engine) ─────────────────────────
 _broker: Optional[IGBroker] = None
+_UI_BROKER_TIMEOUT_SECONDS = 3.0
+_UI_BROKER_MARKET_TIMEOUT_SECONDS = 1.5
+_STATUS_CACHE_TTL_SECONDS = 2.0
+_BROKER_SNAPSHOT_CACHE_TTL_SECONDS = 10.0
+_BROKER_HEALTH_CACHE_TTL_SECONDS = 10.0
+_MARKET_BROWSER_CACHE_TTL_SECONDS = 45.0
+_RISK_BRIEFING_CACHE_TTL_SECONDS = 15.0
+_INTELLIGENCE_FEED_CACHE_TTL_SECONDS = 15.0
+_PORTFOLIO_ANALYTICS_CACHE_TTL_SECONDS = 30.0
+_RESEARCH_CACHE_TTL_SECONDS = 15.0
+_LEDGER_CACHE_TTL_SECONDS = 15.0
+_EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
+_FRAGMENT_CACHE: dict[str, dict[str, Any]] = {}
+_FRAGMENT_CACHE_LOCK = threading.Lock()
+_FRAGMENT_CACHE_REFRESH_LOCKS: dict[str, threading.Lock] = {}
 
 
 def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
@@ -174,8 +190,236 @@ def _run_preflight_checks(logger: logging.Logger) -> dict[str, str]:
     return checks
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+from utils.datetime_utils import utc_now_iso as _utc_now_iso
+
+
+def _get_cached_value(
+    key: str,
+    ttl_seconds: float,
+    loader: Callable[[], Any],
+    *,
+    stale_on_error: bool = True,
+) -> Any:
+    now = time.monotonic()
+    entry: Optional[dict[str, Any]] = None
+    with _FRAGMENT_CACHE_LOCK:
+        entry = _FRAGMENT_CACHE.get(key)
+        if entry and now < entry["expires_at"]:
+            return entry["value"]
+        refresh_lock = _FRAGMENT_CACHE_REFRESH_LOCKS.setdefault(key, threading.Lock())
+
+    if not refresh_lock.acquire(blocking=False):
+        if entry is not None:
+            return entry["value"]
+        with refresh_lock:
+            pass
+        with _FRAGMENT_CACHE_LOCK:
+            refreshed = _FRAGMENT_CACHE.get(key)
+            if refreshed is not None:
+                return refreshed["value"]
+        return loader()
+
+    try:
+        value = loader()
+    except Exception as exc:
+        if stale_on_error and entry is not None:
+            logger.warning("Using stale cached payload for %s after refresh failed: %s", key, exc)
+            return entry["value"]
+        raise
+    finally:
+        refresh_lock.release()
+
+    with _FRAGMENT_CACHE_LOCK:
+        _FRAGMENT_CACHE[key] = {
+            "value": value,
+            "expires_at": time.monotonic() + max(0.1, float(ttl_seconds)),
+        }
+        # Evict expired entries to prevent unbounded growth
+        if len(_FRAGMENT_CACHE) > 50:
+            expired = [k for k, v in _FRAGMENT_CACHE.items() if time.monotonic() >= v["expires_at"]]
+            for k in expired:
+                del _FRAGMENT_CACHE[k]
+                _FRAGMENT_CACHE_REFRESH_LOCKS.pop(k, None)
+    return value
+
+
+def _get_broker_snapshot() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        connected = _broker is not None and _broker.is_connected()
+        info = None
+        positions = []
+        if connected and _broker is not None:
+            info = _broker.get_account_info(timeout=_UI_BROKER_TIMEOUT_SECONDS)
+            positions = _broker.get_positions(timeout=_UI_BROKER_TIMEOUT_SECONDS)
+        return {
+            "connected": connected,
+            "info": info,
+            "positions": positions,
+        }
+
+    return _get_cached_value(
+        "broker-snapshot",
+        _BROKER_SNAPSHOT_CACHE_TTL_SECONDS,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_market_browser_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        connected = _broker is not None and _broker.is_connected()
+        markets = []
+        for ticker, info in config.MARKET_MAP.items():
+            entry = {
+                "ticker": ticker,
+                "epic": info["epic"],
+                "ig_name": info.get("ig_name", ticker),
+                "status": None,
+                "bid": None,
+                "offer": None,
+            }
+            if connected and _broker is not None:
+                mkt = _broker.get_market_info(
+                    info["epic"],
+                    timeout=_UI_BROKER_MARKET_TIMEOUT_SECONDS,
+                )
+                if mkt:
+                    snap = mkt.get("snapshot", {})
+                    entry["status"] = snap.get("marketStatus")
+                    entry["bid"] = snap.get("bid")
+                    entry["offer"] = snap.get("offer")
+            markets.append(entry)
+        return {"connected": connected, "markets": markets}
+
+    return _get_cached_value(
+        "market-browser",
+        _MARKET_BROWSER_CACHE_TTL_SECONDS,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_fragment_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        calibration_runs = get_calibration_runs(limit=20)
+        latest_calibration_run_id = calibration_runs[0]["id"] if calibration_runs else ""
+        return {
+            "option_summary": get_option_contract_summary(),
+            "option_contracts": get_option_contracts(limit=40),
+            "calibration_runs": calibration_runs,
+            "latest_calibration_run_id": latest_calibration_run_id,
+            "strategy_sets": get_strategy_parameter_sets(
+                limit=20,
+                strategy_key=config.DEFAULT_STRATEGY_KEY,
+            ),
+            "strategy_promotions": get_strategy_promotions(
+                limit=20,
+                strategy_key=config.DEFAULT_STRATEGY_KEY,
+            ),
+            "active_shadow_set": get_active_strategy_parameter_set(
+                config.DEFAULT_STRATEGY_KEY, status="shadow"
+            ),
+            "active_staged_set": get_active_strategy_parameter_set(
+                config.DEFAULT_STRATEGY_KEY, status="staged_live"
+            ),
+            "active_live_set": get_active_strategy_parameter_set(
+                config.DEFAULT_STRATEGY_KEY, status="live"
+            ),
+            "promotion_gate": build_promotion_gate_report(config.DEFAULT_STRATEGY_KEY),
+        }
+
+    return _get_cached_value(
+        "research-fragment",
+        _RESEARCH_CACHE_TTL_SECONDS,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_ledger_fragment_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        return {
+            "ledger": get_unified_ledger_snapshot(nav_limit=25),
+            "reconcile": get_ledger_reconcile_report(stale_after_minutes=30),
+        }
+
+    return _get_cached_value(
+        "ledger-fragment",
+        _LEDGER_CACHE_TTL_SECONDS,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_risk_briefing_context() -> dict[str, Any]:
+    return _get_cached_value(
+        "risk-briefing",
+        _RISK_BRIEFING_CACHE_TTL_SECONDS,
+        build_risk_briefing_payload,
+        stale_on_error=True,
+    )
+
+
+def _get_intelligence_feed_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        from datetime import datetime, timezone as tz
+
+        macro_regime = ""
+        try:
+            from intelligence.feature_store import FeatureStore
+            from intelligence.macro_regime import MacroRegimeClassifier
+
+            fs = FeatureStore()
+            try:
+                result = MacroRegimeClassifier(feature_store=fs).classify()
+                macro_regime = result.regime.value if result else ""
+            finally:
+                fs.close()
+        except Exception:
+            pass
+
+        layers = []
+        try:
+            from app.signal.types import LayerId
+            from intelligence.event_store import EventStore
+
+            es = EventStore()
+            try:
+                for lid in LayerId:
+                    latest = es.get_latest_by_layer(lid.value)
+                    fresh = latest is not None
+                    layers.append({"id": lid.value, "fresh": fresh, "stale": False})
+            except Exception:
+                pass
+            finally:
+                es.close()
+        except Exception:
+            pass
+
+        return {
+            "as_of": datetime.now(tz.utc).isoformat(),
+            "macro_regime": macro_regime,
+            "layers": layers,
+            "candidates": [],
+            "ai_verdicts": {},
+        }
+
+    return _get_cached_value(
+        "intelligence-feed",
+        _INTELLIGENCE_FEED_CACHE_TTL_SECONDS,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_portfolio_analytics_context(days: int) -> dict[str, Any]:
+    bounded_days = max(7, min(int(days), int(config.PORTFOLIO_ANALYTICS_MAX_DAYS)))
+    return _get_cached_value(
+        f"portfolio-analytics:{bounded_days}",
+        _PORTFOLIO_ANALYTICS_CACHE_TTL_SECONDS,
+        lambda: build_portfolio_analytics_payload(days=bounded_days),
+        stale_on_error=True,
+    )
 
 
 def _build_bookmarklet_href(js_source: str, endpoint: str) -> str:
@@ -951,7 +1195,7 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/strategy/active")
-    def api_strategy_active(strategy_key: str = "ibs_credit_spreads"):
+    def api_strategy_active(strategy_key: str = config.DEFAULT_STRATEGY_KEY):
         return {
             "shadow": get_active_strategy_parameter_set(strategy_key, status="shadow"),
             "staged_live": get_active_strategy_parameter_set(strategy_key, status="staged_live"),
@@ -960,7 +1204,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/strategy/promotion-gate")
     def api_strategy_promotion_gate(
-        strategy_key: str = "ibs_credit_spreads",
+        strategy_key: str = config.DEFAULT_STRATEGY_KEY,
         cooldown_hours: int = 24,
     ):
         return build_promotion_gate_report(
@@ -1317,65 +1561,36 @@ def create_app() -> FastAPI:
             "lane": lane,
         }
 
-    @app.post("/api/actions/start", response_class=HTMLResponse)
-    def start_bot(mode: str = Form(default=config.TRADING_MODE)):
+    def _execute_control_action(job_type: str, fn: Callable, label: str, **job_kwargs) -> str:
+        """Run a control action with job tracking and return an HTML action message."""
         job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="start_bot", status="running", mode=mode)
+        create_job(job_id=job_id, job_type=job_type, status="running", **job_kwargs)
         try:
-            result = control.start(mode=mode)
+            result = fn()
         except Exception as exc:
             update_job(job_id, status="failed", error=str(exc))
-            return action_message(f"Start failed: {exc}", ok=False)
+            return action_message(f"{label} failed: {exc}", ok=False)
         if result["ok"]:
             update_job(job_id, status="completed", result=result["message"])
             return action_message(result["message"], ok=True)
         update_job(job_id, status="failed", error=result["message"])
         return action_message(result["message"], ok=False)
+
+    @app.post("/api/actions/start", response_class=HTMLResponse)
+    def start_bot(mode: str = Form(default=config.TRADING_MODE)):
+        return _execute_control_action("start_bot", lambda: control.start(mode=mode), "Start", mode=mode)
 
     @app.post("/api/actions/stop", response_class=HTMLResponse)
     def stop_bot():
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="stop_bot", status="running")
-        try:
-            result = control.stop()
-        except Exception as exc:
-            update_job(job_id, status="failed", error=str(exc))
-            return action_message(f"Stop failed: {exc}", ok=False)
-        if result["ok"]:
-            update_job(job_id, status="completed", result=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
+        return _execute_control_action("stop_bot", control.stop, "Stop")
 
     @app.post("/api/actions/pause", response_class=HTMLResponse)
     def pause_bot():
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="pause_bot", status="running")
-        try:
-            result = control.pause()
-        except Exception as exc:
-            update_job(job_id, status="failed", error=str(exc))
-            return action_message(f"Pause failed: {exc}", ok=False)
-        if result["ok"]:
-            update_job(job_id, status="completed", result=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
+        return _execute_control_action("pause_bot", control.pause, "Pause")
 
     @app.post("/api/actions/resume", response_class=HTMLResponse)
     def resume_bot():
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="resume_bot", status="running")
-        try:
-            result = control.resume()
-        except Exception as exc:
-            update_job(job_id, status="failed", error=str(exc))
-            return action_message(f"Resume failed: {exc}", ok=False)
-        if result["ok"]:
-            update_job(job_id, status="completed", result=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
+        return _execute_control_action("resume_bot", control.resume, "Resume")
 
     @app.post("/api/actions/scan-now", response_class=HTMLResponse)
     def scan_now(mode: str = Form(default=config.TRADING_MODE)):
@@ -1458,25 +1673,19 @@ def create_app() -> FastAPI:
 
     @app.post("/api/actions/kill-switch-enable", response_class=HTMLResponse)
     def kill_switch_enable(reason: str = Form(default="Manual operator kill switch")):
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="kill_switch_enable", status="running", detail=reason)
-        result = control.set_kill_switch(active=True, reason=reason, actor="operator")
-        if result["ok"]:
-            update_job(job_id, status="completed", detail=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
+        return _execute_control_action(
+            "kill_switch_enable",
+            lambda: control.set_kill_switch(active=True, reason=reason, actor="operator"),
+            "Kill switch enable", detail=reason,
+        )
 
     @app.post("/api/actions/kill-switch-disable", response_class=HTMLResponse)
     def kill_switch_disable(reason: str = Form(default="Manual clear from control plane")):
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="kill_switch_disable", status="running", detail=reason)
-        result = control.set_kill_switch(active=False, reason=reason, actor="operator")
-        if result["ok"]:
-            update_job(job_id, status="completed", detail=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
+        return _execute_control_action(
+            "kill_switch_disable",
+            lambda: control.set_kill_switch(active=False, reason=reason, actor="operator"),
+            "Kill switch disable", detail=reason,
+        )
 
     @app.post("/api/actions/risk-throttle", response_class=HTMLResponse)
     def risk_throttle(
@@ -1485,15 +1694,12 @@ def create_app() -> FastAPI:
     ):
         clamped = min(100.0, max(10.0, float(throttle_pct)))
         pct = clamped / 100.0
-        job_id = str(uuid.uuid4())
         detail = f"{clamped:.0f}% ({reason})"
-        create_job(job_id=job_id, job_type="risk_throttle", status="running", detail=detail)
-        result = control.set_risk_throttle(pct=pct, reason=reason, actor="operator")
-        if result["ok"]:
-            update_job(job_id, status="completed", detail=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
+        return _execute_control_action(
+            "risk_throttle",
+            lambda: control.set_risk_throttle(pct=pct, reason=reason, actor="operator"),
+            "Risk throttle", detail=detail,
+        )
 
     @app.post("/api/actions/cooldown-set", response_class=HTMLResponse)
     def cooldown_set(
@@ -1505,17 +1711,12 @@ def create_app() -> FastAPI:
         if not clean_ticker:
             return action_message("Ticker is required for cooldown.", ok=False)
         duration = max(1, int(minutes))
-        job_id = str(uuid.uuid4())
         detail = f"{clean_ticker} {duration}m ({reason})"
-        create_job(job_id=job_id, job_type="cooldown_set", status="running", detail=detail)
-        result = control.set_market_cooldown(
-            ticker=clean_ticker, minutes=duration, reason=reason, actor="operator"
+        return _execute_control_action(
+            "cooldown_set",
+            lambda: control.set_market_cooldown(ticker=clean_ticker, minutes=duration, reason=reason, actor="operator"),
+            "Cooldown set", detail=detail,
         )
-        if result["ok"]:
-            update_job(job_id, status="completed", detail=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
 
     @app.post("/api/actions/cooldown-clear", response_class=HTMLResponse)
     def cooldown_clear(
@@ -1525,17 +1726,12 @@ def create_app() -> FastAPI:
         clean_ticker = ticker.strip().upper()
         if not clean_ticker:
             return action_message("Ticker is required to clear cooldown.", ok=False)
-        job_id = str(uuid.uuid4())
         detail = f"{clean_ticker} ({reason})"
-        create_job(job_id=job_id, job_type="cooldown_clear", status="running", detail=detail)
-        result = control.clear_market_cooldown(
-            ticker=clean_ticker, reason=reason, actor="operator"
+        return _execute_control_action(
+            "cooldown_clear",
+            lambda: control.clear_market_cooldown(ticker=clean_ticker, reason=reason, actor="operator"),
+            "Cooldown clear", detail=detail,
         )
-        if result["ok"]:
-            update_job(job_id, status="completed", detail=result["message"])
-            return action_message(result["message"], ok=True)
-        update_job(job_id, status="failed", error=result["message"])
-        return action_message(result["message"], ok=False)
 
     # ─── Pipeline control endpoints ──────────────────────────────────────
 
@@ -1618,7 +1814,7 @@ def create_app() -> FastAPI:
 
     @app.post("/api/actions/strategy-params/create", response_class=HTMLResponse)
     def strategy_params_create_action(
-        strategy_key: str = Form(default="ibs_credit_spreads"),
+        strategy_key: str = Form(default=config.DEFAULT_STRATEGY_KEY),
         name: str = Form(default=""),
         status: str = Form(default="shadow"),
         source_run_id: str = Form(default=""),
@@ -1632,7 +1828,7 @@ def create_app() -> FastAPI:
         clean_name = name.strip()
         clean_status = status.strip().lower() or "shadow"
 
-        if clean_strategy != "ibs_credit_spreads":
+        if clean_strategy != config.DEFAULT_STRATEGY_KEY:
             msg = f"Unsupported strategy '{strategy_key}'."
             update_job(job_id, status="failed", error=msg)
             return action_message(msg, ok=False)
@@ -1715,7 +1911,7 @@ def create_app() -> FastAPI:
 
         if clean_target in {"staged_live", "live"}:
             gate = build_promotion_gate_report(
-                strategy_key=str(set_item.get("strategy_key") or "ibs_credit_spreads"),
+                strategy_key=str(set_item.get("strategy_key") or config.DEFAULT_STRATEGY_KEY),
             )
             expected_action = (
                 "PROMOTE_SHADOW_TO_STAGED"
@@ -1956,17 +2152,23 @@ def create_app() -> FastAPI:
             "_broker_health.html",
             {
                 "request": request,
-                "broker_health": build_broker_health_payload(),
+                "broker_health": _get_cached_value(
+                    "broker-health",
+                    _BROKER_HEALTH_CACHE_TTL_SECONDS,
+                    build_broker_health_payload,
+                    stale_on_error=True,
+                ),
             },
         )
 
     @app.get("/fragments/broker-panel", response_class=HTMLResponse)
     def broker_panel_fragment(request: Request):
-        connected = _broker is not None and _broker.is_connected()
+        snapshot = _get_broker_snapshot()
+        connected = bool(snapshot.get("connected"))
         ctx: dict[str, Any] = {"request": request, "connected": connected}
         if connected:
-            info = _broker.get_account_info()
-            positions = _broker.get_positions()
+            info = snapshot.get("info")
+            positions = snapshot.get("positions", [])
             ctx["account"] = config.IG_ACC_NUMBER
             ctx["mode"] = "DEMO" if _broker.is_demo else "LIVE"
             ctx["balance"] = info.balance
@@ -1978,37 +2180,24 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/market-browser", response_class=HTMLResponse)
     def market_browser_fragment(request: Request):
-        connected = _broker is not None and _broker.is_connected()
-        markets = []
-        for ticker, info in config.MARKET_MAP.items():
-            entry = {
-                "ticker": ticker,
-                "epic": info["epic"],
-                "ig_name": info.get("ig_name", ticker),
-                "status": None,
-                "bid": None,
-                "offer": None,
-            }
-            if connected:
-                mkt = _broker.get_market_info(info["epic"])
-                if mkt:
-                    snap = mkt.get("snapshot", {})
-                    entry["status"] = snap.get("marketStatus")
-                    entry["bid"] = snap.get("bid")
-                    entry["offer"] = snap.get("offer")
-            markets.append(entry)
+        context = _get_market_browser_context()
         return TEMPLATES.TemplateResponse(
             request,
             "_market_browser.html",
-            {"request": request, "connected": connected, "markets": markets},
+            {
+                "request": request,
+                "connected": context["connected"],
+                "markets": context["markets"],
+            },
         )
 
     @app.get("/fragments/open-positions", response_class=HTMLResponse)
     def open_positions_fragment(request: Request):
-        connected = _broker is not None and _broker.is_connected()
+        snapshot = _get_broker_snapshot()
+        connected = bool(snapshot.get("connected"))
         positions = []
         if connected:
-            for p in _broker.get_positions():
+            for p in snapshot.get("positions", []):
                 positions.append({
                     "deal_id": p.deal_id,
                     "ticker": p.ticker,
@@ -2130,15 +2319,14 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/ledger", response_class=HTMLResponse)
     def ledger_fragment(request: Request):
-        snapshot = get_unified_ledger_snapshot(nav_limit=25)
-        reconcile = get_ledger_reconcile_report(stale_after_minutes=30)
+        context = _get_ledger_fragment_context()
         return TEMPLATES.TemplateResponse(
             request,
             "_ledger_snapshot.html",
             {
                 "request": request,
-                "ledger": snapshot,
-                "reconcile": reconcile,
+                "ledger": context["ledger"],
+                "reconcile": context["reconcile"],
             },
         )
 
@@ -2149,7 +2337,7 @@ def create_app() -> FastAPI:
             "_risk_briefing.html",
             {
                 "request": request,
-                "risk_briefing": build_risk_briefing_payload(),
+                "risk_briefing": _get_risk_briefing_context(),
             },
         )
 
@@ -2171,56 +2359,14 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/intelligence-feed", response_class=HTMLResponse)
     def intelligence_feed_fragment(request: Request):
-        from datetime import datetime, timezone as tz
-
-        # Macro regime
-        macro_regime = ""
-        try:
-            from intelligence.feature_store import FeatureStore
-            from intelligence.macro_regime import MacroRegimeClassifier
-            fs = FeatureStore()
-            try:
-                result = MacroRegimeClassifier(feature_store=fs).classify()
-                macro_regime = result.regime.value if result else ""
-            finally:
-                fs.close()
-        except Exception:
-            pass
-
-        # Signal layer freshness
-        layers = []
-        try:
-            from app.signal.types import LayerId
-            from intelligence.event_store import EventStore
-            es = EventStore()
-            try:
-                for lid in LayerId:
-                    latest = es.get_latest_by_layer(lid.value)
-                    fresh = latest is not None
-                    layers.append({"id": lid.value, "fresh": fresh, "stale": False})
-            except Exception:
-                pass
-            finally:
-                es.close()
-        except Exception:
-            pass
-
-        # Top candidates from latest composite
-        candidates = []
-
-        # AI verdicts (if any)
-        ai_verdicts = {}
+        context = _get_intelligence_feed_context()
 
         return TEMPLATES.TemplateResponse(
             request,
             "_intelligence_feed.html",
             {
                 "request": request,
-                "as_of": datetime.now(tz.utc).isoformat(),
-                "macro_regime": macro_regime,
-                "layers": layers,
-                "candidates": candidates,
-                "ai_verdicts": ai_verdicts,
+                **context,
             },
         )
 
@@ -2362,8 +2508,7 @@ def create_app() -> FastAPI:
             summary_raw = payload.get("summary", "")
             summary_parts = []
             if summary_raw:
-                import re as _summary_re
-                parts = _summary_re.split(r'\[(\w+)\]\s*', summary_raw)
+                parts = _re.split(r'\[(\w+)\]\s*', summary_raw)
                 # parts = ['', 'claude', 'text...', 'chatgpt', 'text...', ...]
                 i = 1
                 while i < len(parts) - 1:
@@ -2839,35 +2984,13 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/research", response_class=HTMLResponse)
     def research_fragment(request: Request):
-        calibration_runs = get_calibration_runs(limit=20)
-        latest_calibration_run_id = calibration_runs[0]["id"] if calibration_runs else ""
+        context = _get_research_fragment_context()
         return TEMPLATES.TemplateResponse(
             request,
             "_research.html",
             {
                 "request": request,
-                "option_summary": get_option_contract_summary(),
-                "option_contracts": get_option_contracts(limit=40),
-                "calibration_runs": calibration_runs,
-                "latest_calibration_run_id": latest_calibration_run_id,
-                "strategy_sets": get_strategy_parameter_sets(
-                    limit=20,
-                    strategy_key="ibs_credit_spreads",
-                ),
-                "strategy_promotions": get_strategy_promotions(
-                    limit=20,
-                    strategy_key="ibs_credit_spreads",
-                ),
-                "active_shadow_set": get_active_strategy_parameter_set(
-                    "ibs_credit_spreads", status="shadow"
-                ),
-                "active_staged_set": get_active_strategy_parameter_set(
-                    "ibs_credit_spreads", status="staged_live"
-                ),
-                "active_live_set": get_active_strategy_parameter_set(
-                    "ibs_credit_spreads", status="live"
-                ),
-                "promotion_gate": build_promotion_gate_report("ibs_credit_spreads"),
+                **context,
             },
         )
 
@@ -2900,14 +3023,14 @@ def create_app() -> FastAPI:
             "_portfolio_analytics.html",
             {
                 "request": request,
-                "analytics": build_portfolio_analytics_payload(days=days),
+                "analytics": _get_portfolio_analytics_context(days=days),
             },
         )
 
     @app.get("/fragments/promotion-gate", response_class=HTMLResponse)
     def promotion_gate_fragment(
         request: Request,
-        strategy_key: str = "ibs_credit_spreads",
+        strategy_key: str = config.DEFAULT_STRATEGY_KEY,
         cooldown_hours: int = 24,
     ):
         return TEMPLATES.TemplateResponse(
@@ -2993,21 +3116,41 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/api/stream/events")
-    async def events_stream():
+    async def events_stream(request: Request):
         async def event_generator():
             last_id = None
-            while True:
-                latest = get_bot_events(limit=1)
-                if latest:
-                    event = latest[0]
-                    event_id = event.get("id")
-                    if event_id != last_id:
-                        last_id = event_id
-                        payload = json.dumps(event)
-                        yield f"event: bot_event\ndata: {payload}\n\n"
-                await asyncio.sleep(2)
+            last_heartbeat = time.monotonic()
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
 
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+                    latest = get_bot_events(limit=1)
+                    if latest:
+                        event = latest[0]
+                        event_id = event.get("id")
+                        if event_id != last_id:
+                            last_id = event_id
+                            payload = json.dumps(event)
+                            yield f"event: bot_event\ndata: {payload}\n\n"
+                            last_heartbeat = time.monotonic()
+                    elif time.monotonic() - last_heartbeat >= _EVENT_STREAM_HEARTBEAT_SECONDS:
+                        yield ": keep-alive\n\n"
+                        last_heartbeat = time.monotonic()
+
+                    await asyncio.sleep(2)
+            except asyncio.CancelledError:
+                raise
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # ── O-008: Backtester control-plane surface ──────────────────────────────
 
@@ -3107,37 +3250,10 @@ def create_app() -> FastAPI:
 
     # ─── Intelligence webhooks ─────────────────────────────────────────
 
-    @app.get("/api/webhooks/sa_debug_ping")
-    async def sa_debug_ping(
-        stage: str = "",
-        v: str = "",
-        href: str = "",
-        host: str = "",
-        page_type: str = "",
-    ):
-        """Lightweight debug beacon for bookmarklet execution tracing."""
-        _safe_log_event(
-            category="DEBUG",
-            headline=f"SA bookmarklet ping: {stage or 'unknown'}",
-            detail=(
-                f"v={v or '-'}, host={host or '-'}, page_type={page_type or '-'}, "
-                f"url={href or '-'}"
-            )[:500],
-            ticker=None,
-            strategy="sa_debug_ping",
-        )
-        return Response(status_code=204)
-
-    @app.post("/api/webhooks/sa_intel")
-    async def sa_intel_webhook(request: Request):
-        """Receive Seeking Alpha page data from browser bookmarklet.
-
-        Expects JSON with: title, content, url, tickers (optional), author (optional).
-        Runs LLM council analysis in background and returns job ID.
-        """
+    async def _decode_json_request(request: Request, *, max_bytes: int) -> dict[str, Any] | JSONResponse:
         try:
             body = await request.body()
-            if len(body) > 256_000:
+            if len(body) > max_bytes:
                 return JSONResponse(
                     {"ok": False, "error": "payload_too_large"},
                     status_code=413,
@@ -3148,7 +3264,115 @@ def create_app() -> FastAPI:
                 {"ok": False, "error": "invalid_payload"},
                 status_code=400,
             )
+        if not isinstance(payload, dict):
+            return JSONResponse(
+                {"ok": False, "error": "invalid_capture", "detail": "payload must be an object"},
+                status_code=422,
+            )
+        return payload
 
+    def _normalize_sa_ticker_list(raw_value: Any) -> list[str]:
+        if isinstance(raw_value, str):
+            raw_value = [part.strip() for part in raw_value.split(",") if part.strip()]
+        if not isinstance(raw_value, list):
+            return []
+        out: list[str] = []
+        seen: set[str] = set()
+        for item in raw_value:
+            clean = _re.sub(r"[^A-Z0-9.=\-]", "", str(item or "").upper()).strip()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            out.append(clean)
+        return out
+
+    def _normalize_sa_capture_url(payload: dict[str, Any], raw_fields: dict[str, Any]) -> str:
+        for candidate in (
+            payload.get("canonical_url"),
+            raw_fields.get("canonical_url"),
+            payload.get("source_ref"),
+            payload.get("url"),
+        ):
+            clean = str(candidate or "").strip()
+            if clean:
+                return clean
+        return ""
+
+    def _normalize_sa_capture_path(url: str) -> str:
+        clean = str(url or "").strip()
+        if not clean:
+            return ""
+        try:
+            path = urlparse(clean).path or ""
+        except Exception:
+            return ""
+        path = "/" + path.lstrip("/")
+        path = _re.sub(r"/{2,}", "/", path)
+        if path != "/":
+            path = path.rstrip("/")
+        return path.lower()
+
+    def _classify_sa_intel_url(url: str) -> str:
+        path = _normalize_sa_capture_path(url)
+        if _re.match(r"^/symbol/[^/]+", path):
+            return "symbol"
+        if _re.match(r"^/article/[^/]+", path):
+            return "article"
+        if _re.match(r"^/news/[^/]+", path):
+            return "news"
+        return ""
+
+    def _sa_intel_ignore_reason(page_type: str, url: str) -> str:
+        path = _normalize_sa_capture_path(url)
+        if not path:
+            return "missing_url"
+        if _re.match(r"^/market-news(?:/|$)", path) or path in {"/news", "/latest-news"}:
+            return "hub_page"
+        if page_type not in {"article", "news"}:
+            return "unsupported_page"
+        if _classify_sa_intel_url(url) not in {"article", "news"}:
+            return "unsupported_page"
+        return ""
+
+    def _find_existing_sa_intel_result(source_ref: str) -> str:
+        clean_ref = str(source_ref or "").strip()
+        if not clean_ref:
+            return ""
+        conn = get_conn(DB_PATH)
+        try:
+            completed = conn.execute(
+                """SELECT id FROM research_events
+                   WHERE event_type = 'intel_analysis'
+                     AND source = 'intel_seeking_alpha'
+                     AND source_ref = ?
+                   LIMIT 1""",
+                (clean_ref,),
+            ).fetchone()
+            if completed:
+                return "duplicate_url"
+
+            active = conn.execute(
+                """SELECT id FROM jobs
+                   WHERE job_type = 'intel_analysis'
+                     AND status IN ('queued', 'running')
+                     AND detail LIKE ?
+                   ORDER BY created_at DESC
+                   LIMIT 1""",
+                (f"SA intel: {clean_ref}%",),
+            ).fetchone()
+            if active:
+                return "duplicate_inflight"
+        finally:
+            conn.close()
+        return ""
+
+    def _queue_sa_intel_payload(
+        payload: dict[str, Any],
+        *,
+        capture_source: str,
+        log_strategy: str,
+        store_page_capture_event: bool,
+    ):
         content = str(payload.get("content") or payload.get("text") or "").strip()
         if not content:
             return JSONResponse(
@@ -3156,107 +3380,127 @@ def create_app() -> FastAPI:
                 status_code=422,
             )
 
-        tickers_raw = payload.get("tickers") or []
-        if isinstance(tickers_raw, str):
-            tickers_raw = [t.strip() for t in tickers_raw.split(",") if t.strip()]
+        page_type = str(payload.get("page_type") or "article").strip().lower() or "article"
+        tickers = _normalize_sa_ticker_list(payload.get("tickers") or payload.get("ticker") or [])
+        raw_fields = dict(payload.get("raw_fields")) if isinstance(payload.get("raw_fields"), dict) else {}
+        url = _normalize_sa_capture_url(payload, raw_fields)
+        classified_page_type = _classify_sa_intel_url(url)
+        if classified_page_type in {"article", "news"}:
+            page_type = classified_page_type
+        title = str(payload.get("title") or "").strip()
+        author = str(payload.get("author") or "").strip()
+        ignore_reason = _sa_intel_ignore_reason(page_type, url)
+        if ignore_reason:
+            return {
+                "ok": True,
+                "ignored": True,
+                "reason": ignore_reason,
+                "page_type": page_type,
+                "tickers": tickers,
+                "message": f"SA page capture ignored ({ignore_reason}).",
+            }
+
+        metadata = {
+            "sa_rating": payload.get("rating"),
+            "sa_grades": payload.get("grades"),
+            "sa_page_type": page_type,
+            "sa_excerpt": payload.get("summary") or payload.get("excerpt") or payload.get("description"),
+            "sa_published_at": payload.get("published_at") or raw_fields.get("published_at"),
+            "sa_canonical_url": payload.get("canonical_url") or raw_fields.get("canonical_url"),
+            "sa_capture_source": capture_source,
+        }
+        metadata = {key: value for key, value in metadata.items() if value not in (None, "", [], {})}
 
         submission = IntelSubmission(
             source="seeking_alpha",
             content=content,
-            url=str(payload.get("url", "")),
-            title=str(payload.get("title", "")),
-            author=str(payload.get("author", "")),
-            tickers=tickers_raw,
-            metadata={"sa_rating": payload.get("rating"), "sa_grades": payload.get("grades")},
+            url=url,
+            title=title,
+            author=author,
+            tickers=tickers,
+            metadata=metadata,
         )
 
+        if store_page_capture_event:
+            retrieved_at = _utc_now_iso()
+            EventStore(db_path=DB_PATH).write_event(
+                EventRecord(
+                    event_type="sa_page_capture",
+                    source=capture_source,
+                    source_ref=str(
+                        payload.get("source_ref")
+                        or raw_fields.get("canonical_url")
+                        or url
+                        or f"sa-page-{uuid.uuid4()}"
+                    ).strip(),
+                    retrieved_at=retrieved_at,
+                    event_timestamp=str(payload.get("captured_at") or retrieved_at).strip() or retrieved_at,
+                    symbol=tickers[0] if tickers else None,
+                    headline=f"Seeking Alpha {page_type} capture: {(title or url)[:80]}",
+                    detail=(
+                        f"tickers={','.join(tickers[:5]) or '-'}, "
+                        f"content_length={len(content)}, "
+                        f"author={(author or '-')[:80]}"
+                    ),
+                    confidence=0.9,
+                    provenance_descriptor={
+                        "page_type": page_type,
+                        "url": url,
+                        "tickers": tickers[:10],
+                        "capture_source": capture_source,
+                    },
+                    payload=dict(payload),
+                )
+            )
+
+        duplicate_reason = _find_existing_sa_intel_result(submission.url or url)
+        if duplicate_reason:
+            duplicate_message = (
+                f"SA {page_type} already queued for LLM analysis."
+                if duplicate_reason == "duplicate_inflight"
+                else f"SA {page_type} already analyzed."
+            )
+            return {
+                "ok": True,
+                "ignored": True,
+                "reason": duplicate_reason,
+                "page_type": page_type,
+                "tickers": tickers,
+                "message": duplicate_message,
+            }
+
         job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
-                    detail=f"SA intel: {submission.title[:80]}")
+        job_detail_ref = submission.url or url or title or f"sa-{page_type}"
+        create_job(
+            job_id=job_id,
+            job_type="intel_analysis",
+            status="queued",
+            detail=f"SA intel: {job_detail_ref} | {(title or url)[:80]}",
+        )
         analyze_intel_async(submission, job_id)
 
         _safe_log_event(
             category="SIGNAL",
-            headline=f"SA intel received: {submission.title[:60]}",
-            detail=f"url={submission.url}, tickers={','.join(submission.tickers[:5])}",
-            ticker=submission.tickers[0] if submission.tickers else None,
-            strategy="sa_intel",
-        )
-
-        return {"ok": True, "job_id": job_id, "message": "SA intel queued for LLM analysis."}
-
-    @app.post("/api/webhooks/sa_quant_capture")
-    async def sa_quant_capture_webhook(request: Request):
-        """Receive structured SA quant data captured from the user's browser."""
-        try:
-            body = await request.body()
-            if len(body) > 128_000:
-                return JSONResponse(
-                    {"ok": False, "error": "payload_too_large"},
-                    status_code=413,
-                )
-            payload = json.loads(body.decode("utf-8", errors="replace"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return JSONResponse(
-                {"ok": False, "error": "invalid_payload"},
-                status_code=400,
-            )
-
-        try:
-            capture = parse_sa_browser_payload(payload)
-        except ValueError as exc:
-            return JSONResponse(
-                {"ok": False, "error": "invalid_capture", "detail": str(exc)},
-                status_code=422,
-            )
-
-        retrieved_at = _utc_now_iso()
-        capture_source = str(
-            capture.snapshot.raw_fields.get("source")
-            or payload.get("source")
-            or SA_BROWSER_CAPTURE_SOURCE
-        ).strip() or SA_BROWSER_CAPTURE_SOURCE
-        stored_feature_count, layer_score_payload = _store_sa_browser_capture(
-            capture,
-            retrieved_at=retrieved_at,
-            capture_source=capture_source,
-            log_strategy="sa_quant_capture",
+            headline=f"SA intel received: {(title or url)[:60]}",
+            detail=(
+                f"page_type={page_type}, "
+                f"url={url or '-'}, "
+                f"tickers={','.join(tickers[:5]) or '-'}"
+            )[:500],
+            ticker=tickers[0] if tickers else None,
+            strategy=log_strategy,
         )
 
         return {
             "ok": True,
-            "ticker": capture.ticker,
-            "rating": capture.snapshot.rating,
-            "quant_score": capture.snapshot.quant_score_raw,
-            "factor_grades": capture.factor_grades,
-            "feature_count": stored_feature_count,
-            "layer_score": layer_score_payload,
-            "message": "SA browser capture stored.",
+            "job_id": job_id,
+            "page_type": page_type,
+            "tickers": tickers,
+            "message": f"SA {page_type} queued for LLM analysis.",
         }
 
-    @app.post("/api/webhooks/sa_symbol_capture")
-    async def sa_symbol_capture_webhook(request: Request):
+    def _handle_sa_symbol_capture_payload(payload: dict[str, Any]):
         """Receive a full Seeking Alpha symbol snapshot captured in-browser."""
-        try:
-            body = await request.body()
-            if len(body) > 1_500_000:
-                return JSONResponse(
-                    {"ok": False, "error": "payload_too_large"},
-                    status_code=413,
-                )
-            payload = json.loads(body.decode("utf-8", errors="replace"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return JSONResponse(
-                {"ok": False, "error": "invalid_payload"},
-                status_code=400,
-            )
-
-        if not isinstance(payload, dict):
-            return JSONResponse(
-                {"ok": False, "error": "invalid_capture", "detail": "payload must be an object"},
-                status_code=422,
-            )
-
         summary_payload = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
         summary_payload = dict(summary_payload)
         for key in (
@@ -3430,6 +3674,117 @@ def create_app() -> FastAPI:
             "message": "SA symbol capture stored.",
         }
 
+    @app.get("/api/webhooks/sa_debug_ping")
+    async def sa_debug_ping(
+        stage: str = "",
+        v: str = "",
+        href: str = "",
+        host: str = "",
+        page_type: str = "",
+    ):
+        """Lightweight debug beacon for bookmarklet execution tracing."""
+        _safe_log_event(
+            category="DEBUG",
+            headline=f"SA bookmarklet ping: {stage or 'unknown'}",
+            detail=(
+                f"v={v or '-'}, host={host or '-'}, page_type={page_type or '-'}, "
+                f"url={href or '-'}"
+            )[:500],
+            ticker=None,
+            strategy="sa_debug_ping",
+        )
+        return Response(status_code=204)
+
+    @app.post("/api/webhooks/sa_intel")
+    async def sa_intel_webhook(request: Request):
+        """Receive Seeking Alpha page data from browser bookmarklet.
+
+        Expects JSON with: title, content, url, tickers (optional), author (optional).
+        Runs LLM council analysis in background and returns job ID.
+        """
+        payload = await _decode_json_request(request, max_bytes=256_000)
+        if isinstance(payload, JSONResponse):
+            return payload
+        return _queue_sa_intel_payload(
+            payload,
+            capture_source=str(payload.get("source") or SA_BROWSER_CAPTURE_SOURCE).strip() or SA_BROWSER_CAPTURE_SOURCE,
+            log_strategy="sa_intel",
+            store_page_capture_event=False,
+        )
+
+    @app.post("/api/webhooks/sa_quant_capture")
+    async def sa_quant_capture_webhook(request: Request):
+        """Receive structured SA quant data captured from the user's browser."""
+        payload = await _decode_json_request(request, max_bytes=128_000)
+        if isinstance(payload, JSONResponse):
+            return payload
+
+        try:
+            capture = parse_sa_browser_payload(payload)
+        except ValueError as exc:
+            return JSONResponse(
+                {"ok": False, "error": "invalid_capture", "detail": str(exc)},
+                status_code=422,
+            )
+
+        retrieved_at = _utc_now_iso()
+        capture_source = str(
+            capture.snapshot.raw_fields.get("source")
+            or payload.get("source")
+            or SA_BROWSER_CAPTURE_SOURCE
+        ).strip() or SA_BROWSER_CAPTURE_SOURCE
+        stored_feature_count, layer_score_payload = _store_sa_browser_capture(
+            capture,
+            retrieved_at=retrieved_at,
+            capture_source=capture_source,
+            log_strategy="sa_quant_capture",
+        )
+
+        return {
+            "ok": True,
+            "ticker": capture.ticker,
+            "rating": capture.snapshot.rating,
+            "quant_score": capture.snapshot.quant_score_raw,
+            "factor_grades": capture.factor_grades,
+            "feature_count": stored_feature_count,
+            "layer_score": layer_score_payload,
+            "message": "SA browser capture stored.",
+        }
+
+    @app.post("/api/webhooks/sa_symbol_capture")
+    async def sa_symbol_capture_webhook(request: Request):
+        payload = await _decode_json_request(request, max_bytes=1_500_000)
+        if isinstance(payload, JSONResponse):
+            return payload
+        return _handle_sa_symbol_capture_payload(payload)
+
+    @app.post("/api/webhooks/sa_page_capture")
+    async def sa_page_capture_webhook(request: Request):
+        """Universal Seeking Alpha capture endpoint for symbols, analysis, and news pages."""
+        payload = await _decode_json_request(request, max_bytes=1_500_000)
+        if isinstance(payload, JSONResponse):
+            return payload
+
+        page_type = str(payload.get("page_type") or "").strip().lower()
+        if page_type == "symbol" or payload.get("sections") or payload.get("raw_responses"):
+            return _handle_sa_symbol_capture_payload(payload)
+
+        capture_source = str(
+            payload.get("source")
+            or (
+                payload.get("summary", {}).get("source")
+                if isinstance(payload.get("summary"), dict)
+                else ""
+            )
+            or SA_NETWORK_CAPTURE_SOURCE
+        ).strip() or SA_NETWORK_CAPTURE_SOURCE
+        return _queue_sa_intel_payload(
+            payload,
+            capture_source=capture_source,
+            log_strategy="sa_page_capture",
+            store_page_capture_event=True,
+        )
+
     @app.post("/api/webhooks/x_intel")
     async def x_intel_webhook(request: Request):
         """Receive X/Twitter content for LLM analysis.
@@ -3437,19 +3792,9 @@ def create_app() -> FastAPI:
         Expects JSON with: content (tweet/thread text), url (optional),
         author (optional), tickers (optional).
         """
-        try:
-            body = await request.body()
-            if len(body) > 256_000:
-                return JSONResponse(
-                    {"ok": False, "error": "payload_too_large"},
-                    status_code=413,
-                )
-            payload = json.loads(body.decode("utf-8", errors="replace"))
-        except (json.JSONDecodeError, UnicodeDecodeError):
-            return JSONResponse(
-                {"ok": False, "error": "invalid_payload"},
-                status_code=400,
-            )
+        payload = await _decode_json_request(request, max_bytes=256_000)
+        if isinstance(payload, JSONResponse):
+            return payload
 
         content = str(payload.get("content") or payload.get("text") or "").strip()
         if not content:
@@ -3881,11 +4226,16 @@ def _safe_log_event(**kwargs: Any) -> None:
 
 
 def build_status_payload() -> dict[str, Any]:
-    return {
-        "engine": control.status(),
-        "summary": get_summary(),
-        "open_option_positions": get_open_option_positions(),
-    }
+    return _get_cached_value(
+        "status-payload",
+        _STATUS_CACHE_TTL_SECONDS,
+        lambda: {
+            "engine": control.status(),
+            "summary": get_summary(),
+            "open_option_positions": get_open_option_positions(),
+        },
+        stale_on_error=True,
+    )
 
 
 def _unavailable_risk_briefing_payload(
@@ -4540,6 +4890,17 @@ def _get_editable_settings() -> dict[str, Any]:
             "notifications_email_to": overrides.get("notifications_email_to", config.NOTIFICATIONS["email_to"]),
             "notifications_telegram_chat_id": overrides.get("notifications_telegram_chat_id", config.NOTIFICATIONS["telegram_chat_id"]),
         },
+        "council_research": {
+            "council_model_timeout": overrides.get("council_model_timeout", config.COUNCIL_MODEL_TIMEOUT),
+            "council_round_timeout": overrides.get("council_round_timeout", config.COUNCIL_ROUND_TIMEOUT),
+            "idea_research_auto": overrides.get("idea_research_auto", config.IDEA_RESEARCH_AUTO),
+            "idea_review_min_score": overrides.get("idea_review_min_score", config.IDEA_REVIEW_MIN_SCORE),
+            "idea_auto_promote_backtest": overrides.get("idea_auto_promote_backtest", config.IDEA_AUTO_PROMOTE_BACKTEST),
+            "idea_auto_promote_paper": overrides.get("idea_auto_promote_paper", config.IDEA_AUTO_PROMOTE_PAPER),
+            "idea_dynamic_bt_min_sharpe": overrides.get("idea_dynamic_bt_min_sharpe", config.IDEA_DYNAMIC_BT_MIN_SHARPE),
+            "idea_dynamic_bt_min_pf": overrides.get("idea_dynamic_bt_min_pf", config.IDEA_DYNAMIC_BT_MIN_PF),
+            "idea_dynamic_bt_min_trades": overrides.get("idea_dynamic_bt_min_trades", config.IDEA_DYNAMIC_BT_MIN_TRADES),
+        },
     }
 
 
@@ -4557,6 +4918,9 @@ def _validate_settings(data: dict[str, Any]) -> list[str]:
         "ibs_exit_thresh": (0.01, 0.99),
         "ibs_rsi_entry_thresh": (1, 99),
         "ibs_rsi_exit_thresh": (1, 99),
+        "idea_review_min_score": (0, 10),
+        "idea_dynamic_bt_min_sharpe": (-5, 10),
+        "idea_dynamic_bt_min_pf": (0, 10),
     }
     for field, (lo, hi) in float_fields.items():
         if field in data:
@@ -4570,6 +4934,9 @@ def _validate_settings(data: dict[str, Any]) -> list[str]:
         "portfolio_max_positions": (1, 100),
         "ibs_rsi_period": (1, 50),
         "ibs_ema_period": (10, 500),
+        "council_model_timeout": (15, 300),
+        "council_round_timeout": (20, 600),
+        "idea_dynamic_bt_min_trades": (1, 1000),
     }
     for field, (lo, hi) in int_fields.items():
         if field in data:
@@ -4597,6 +4964,15 @@ def _save_settings_overrides(data: dict[str, Any]) -> None:
         "ibs_rsi_exit_thresh": float,
         "ibs_ema_period": int,
         "notifications_enabled": lambda v: v if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes", "on"),
+        "council_model_timeout": int,
+        "council_round_timeout": int,
+        "idea_research_auto": lambda v: v if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes", "on"),
+        "idea_review_min_score": float,
+        "idea_auto_promote_backtest": lambda v: v if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes", "on"),
+        "idea_auto_promote_paper": lambda v: v if isinstance(v, bool) else str(v).lower() in ("true", "1", "yes", "on"),
+        "idea_dynamic_bt_min_sharpe": float,
+        "idea_dynamic_bt_min_pf": float,
+        "idea_dynamic_bt_min_trades": int,
     }
     for key, value in data.items():
         if key in type_casts:

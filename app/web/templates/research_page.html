@@ -4,54 +4,54 @@
 
   <!-- Research Workflows — full width -->
   <div class="md:col-span-12">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
       <div class="flex justify-between items-baseline gap-4 mb-3">
-        <h2 class="text-lg font-semibold text-slate-200">Research Workflows</h2>
-        <p class="text-slate-500 text-sm">Discovery, calibration, and strategy parameter promotion.</p>
+        <h2 class="text-lg font-semibold text-gray-800">Research Workflows</h2>
+        <p class="text-gray-400 text-sm">Discovery, calibration, and strategy parameter promotion.</p>
       </div>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-        <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-1">Option Discovery</p>
+        <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Option Discovery</p>
           <div class="grid grid-cols-3 gap-2">
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Mode</label>
-              <select name="mode" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Mode</label>
+              <select name="mode" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="search" selected>Search</option>
                 <option value="nav">Navigation</option>
                 <option value="both">Both</option>
               </select>
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Details</label>
-              <select name="include_details" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Details</label>
+              <select name="include_details" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="on" selected>Yes</option>
                 <option value="off">No</option>
               </select>
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Strikes</label>
-              <input type="text" name="strikes" placeholder="US 500" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Strikes</label>
+              <input type="text" name="strikes" placeholder="US 500" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
           </div>
-          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Run Discovery</button>
+          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Discovery</button>
         </form>
 
-        <form hx-post="/api/actions/calibrate-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-1">Calibration Run</p>
+        <form hx-post="/api/actions/calibrate-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Calibration Run</p>
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Index</label>
-              <input type="text" name="index_filter" placeholder="US 500" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Index</label>
+              <input type="text" name="index_filter" placeholder="US 500" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Verbose</label>
-              <select name="verbose" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Verbose</label>
+              <select name="verbose" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="off" selected>No</option>
                 <option value="on">Yes</option>
               </select>
             </div>
           </div>
-          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Run Calibration</button>
+          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Calibration</button>
         </form>
       </div>
     </div>
@@ -59,74 +59,74 @@
 
   <!-- Strategy Parameter Lab — full width collapsible -->
   <div class="md:col-span-12">
-    <details class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg" open>
-      <summary class="font-semibold text-slate-200 cursor-pointer">Strategy Parameter Lab</summary>
+    <details class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg" open>
+      <summary class="font-semibold text-gray-800 cursor-pointer">Strategy Parameter Lab</summary>
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
-        <form hx-post="/api/actions/strategy-params/create" hx-target="#action-result" hx-swap="innerHTML" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-1">Create Parameter Set</p>
+        <form hx-post="/api/actions/strategy-params/create" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Create Parameter Set</p>
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Strategy</label>
-              <select name="strategy_key" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Strategy</label>
+              <select name="strategy_key" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="ibs_credit_spreads" selected>ibs_credit_spreads</option>
               </select>
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Set Name</label>
-              <input type="text" name="name" placeholder="ibs-shadow-candidate" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Set Name</label>
+              <input type="text" name="name" placeholder="ibs-shadow-candidate" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Status</label>
-              <select name="status" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Status</label>
+              <select name="status" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="shadow" selected>shadow</option>
                 <option value="staged_live">staged_live</option>
               </select>
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Calibration Run ID</label>
-              <input type="text" name="source_run_id" placeholder="optional run id" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Calibration Run ID</label>
+              <input type="text" name="source_run_id" placeholder="optional run id" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
           </div>
           <div>
-            <label class="text-slate-500 text-xs uppercase tracking-wide">Overrides JSON</label>
-            <textarea name="overrides_json" rows="2" placeholder='{"min_credit_pct": 2.8}' class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Overrides JSON</label>
+            <textarea name="overrides_json" rows="2" placeholder='{"min_credit_pct": 2.8}' class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm font-mono placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
           </div>
           <div>
-            <label class="text-slate-500 text-xs uppercase tracking-wide">Notes</label>
-            <input type="text" name="notes" placeholder="why this set exists" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Notes</label>
+            <input type="text" name="notes" placeholder="why this set exists" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
           </div>
-          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Save Param Set</button>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Save Param Set</button>
         </form>
 
-        <form hx-post="/api/actions/strategy-params/promote" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Promote selected parameter set?" class="bg-slate-800/50 border border-slate-700 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-1">Promote Parameter Set</p>
+        <form hx-post="/api/actions/strategy-params/promote" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Promote selected parameter set?" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Promote Parameter Set</p>
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Set ID</label>
-              <input type="text" name="set_id" placeholder="parameter set id" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Set ID</label>
+              <input type="text" name="set_id" placeholder="parameter set id" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Target Status</label>
-              <select name="target_status" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Target Status</label>
+              <select name="target_status" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="staged_live" selected>staged_live</option>
                 <option value="live">live</option>
                 <option value="archived">archived</option>
               </select>
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Actor</label>
-              <input type="text" name="actor" value="operator" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Actor</label>
+              <input type="text" name="actor" value="operator" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
             <div>
-              <label class="text-slate-500 text-xs uppercase tracking-wide">Acknowledgement</label>
-              <input type="text" name="acknowledgement" value="Manual promotion approved" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Acknowledgement</label>
+              <input type="text" name="acknowledgement" value="Manual promotion approved" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
           </div>
           <div>
-            <label class="text-slate-500 text-xs uppercase tracking-wide">Note</label>
-            <input type="text" name="note" value="promoted from control plane" class="w-full bg-slate-800 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-sm placeholder-slate-500 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Note</label>
+            <input type="text" name="note" value="promoted from control plane" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
           </div>
-          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors text-sm">Promote Set</button>
+          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Promote Set</button>
         </form>
       </div>
     </details>

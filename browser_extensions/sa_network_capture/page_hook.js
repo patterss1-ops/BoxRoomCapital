@@ -1,12 +1,24 @@
 (function () {
-  var EXT_VERSION = (document.currentScript && document.currentScript.dataset.extensionVersion) || "0.3.0";
+  var EXT_VERSION = (document.currentScript && document.currentScript.dataset.extensionVersion) || "0.4.5";
   var CAPTURE_SOURCE = "sa-network-extension";
   var TAB_WAIT_MS = 1800;
   var FLUSH_IDLE_MS = 1500;
   var API_FETCH_TIMEOUT_MS = 12000;
+  var EXTENSION_TRANSPORT_TIMEOUT_MS = 45000;
   var MAX_RAW_RESPONSES = 48;
+  var INTEL_CAPTURE_DELAY_MS = 1400;
+  var INTEL_RETRY_DELAY_MS = 3200;
+  var HUB_INTEL_WATCH_TIMEOUT_MS = 180000;
+  var MAX_INTEL_CONTENT_CHARS = 30000;
   var endpoint = "";
+  var endpointAnnounced = false;
   var captureState = null;
+  var intelCaptureTimer = 0;
+  var intelCaptureStarted = false;
+  var intelCaptureInFlight = false;
+  var intelCaptureFingerprint = "";
+  var intelCaptureSeen = {};
+  var intelObserver = null;
   var requestSeq = 0;
   var nativeFetch = window.fetch;
   var GRADE_MAP = {
@@ -121,21 +133,43 @@
         }
       }
 
-      document.documentElement.addEventListener("brc-sa-response", onResponse);
-      document.documentElement.dispatchEvent(new CustomEvent("brc-sa-request", {
-        detail: {
-          requestId: requestId,
-          kind: kind,
-          payload: payload || {}
+      function onWindowMessage(event) {
+        if (event.source !== window) return;
+        var data = event && event.data;
+        if (!data || !data.__brc_sa_response || !data.detail || data.detail.requestId !== requestId) return;
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        document.documentElement.removeEventListener("brc-sa-response", onResponse);
+        window.removeEventListener("message", onWindowMessage);
+        if (data.detail.ok) {
+          resolve(data.detail);
+        } else {
+          reject(new Error(data.detail.error || "extension transport failed"));
         }
-      }));
+      }
+
+      document.documentElement.addEventListener("brc-sa-response", onResponse);
+      window.addEventListener("message", onWindowMessage, false);
+      var detail = {
+        requestId: requestId,
+        kind: kind,
+        payload: payload || {}
+      };
+      document.documentElement.dispatchEvent(new CustomEvent("brc-sa-request", { detail: detail }));
+      try {
+        window.postMessage({ __brc_sa_request: true, detail: detail }, window.location.origin);
+      } catch (err) {
+        window.postMessage({ __brc_sa_request: true, detail: detail }, "*");
+      }
 
       timeoutId = setTimeout(function () {
         if (settled) return;
         settled = true;
         document.documentElement.removeEventListener("brc-sa-response", onResponse);
+        window.removeEventListener("message", onWindowMessage);
         reject(new Error("extension transport timeout"));
-      }, 15000);
+      }, EXTENSION_TRANSPORT_TIMEOUT_MS);
     });
   }
 
@@ -233,6 +267,393 @@
     } catch (err) {
       return null;
     }
+  }
+
+  function textOf(selectors, root) {
+    var scope = root || document;
+    for (var i = 0; i < selectors.length; i++) {
+      var el = scope.querySelector(selectors[i]);
+      if (!el) continue;
+      var text = cleanText(el.textContent || el.getAttribute("content") || "");
+      if (text) return text;
+    }
+    return "";
+  }
+
+  function hrefOf(selectors, root) {
+    var scope = root || document;
+    for (var i = 0; i < selectors.length; i++) {
+      var el = scope.querySelector(selectors[i]);
+      if (!el) continue;
+      var href = cleanText(el.getAttribute("href") || el.getAttribute("content") || "");
+      if (href) return normalizeHref(href, window.location.href);
+    }
+    return "";
+  }
+
+  function metaContent(attribute, name) {
+    var selector = "meta[" + attribute + "=\"" + name.replace(/"/g, '\\"') + "\"]";
+    var el = document.querySelector(selector);
+    return cleanText(el && el.getAttribute("content"));
+  }
+
+  function normalizePathname(href) {
+    try {
+      var url = new URL(href, window.location.href);
+      var path = cleanText(url.pathname).toLowerCase();
+      if (!path) return "/";
+      path = path.replace(/\/{2,}/g, "/");
+      if (path.length > 1) path = path.replace(/\/+$/, "");
+      return path || "/";
+    } catch (err) {
+      return "";
+    }
+  }
+
+  function resolvePageUrl() {
+    return cleanText(
+      hrefOf(['link[rel="canonical"]'], document) ||
+      metaContent("property", "og:url") ||
+      metaContent("name", "twitter:url") ||
+      normalizeHref(window.location.href)
+    );
+  }
+
+  function classifySaPath(path) {
+    if (/^\/symbol\/[^/]+/.test(path)) return "symbol";
+    if (/^\/article\/[^/]+/.test(path)) return "article";
+    if (/^\/news\/[^/]+/.test(path)) return "news";
+    return "";
+  }
+
+  function isHubPagePath(path) {
+    return /^\/market-news(?:\/|$)/.test(path) || path === "/news" || path === "/latest-news";
+  }
+
+  function isArticleRootElement(el) {
+    return !!(
+      el &&
+      typeof el.matches === "function" &&
+      (
+        el.matches('[data-test-id="article-content"]') ||
+        el.matches('[itemprop="articleBody"]') ||
+        el.matches("article") ||
+        el.matches(".paywall-full-content") ||
+        el.matches("#content-area") ||
+        el.matches(".main-content")
+      )
+    );
+  }
+
+  function findArticleRoot(root, allowLayoutFallback) {
+    var scope = root || document;
+    if (scope !== document && isArticleRootElement(scope)) return scope;
+    var articleRoot = (
+      scope.querySelector('[data-test-id="article-content"]') ||
+      scope.querySelector('[itemprop="articleBody"]') ||
+      scope.querySelector("article") ||
+      scope.querySelector(".paywall-full-content")
+    );
+    if (articleRoot) return articleRoot;
+    if (allowLayoutFallback) {
+      return scope.querySelector("#content-area") || scope.querySelector(".main-content");
+    }
+    return null;
+  }
+
+  function isLikelyTickerSymbol(value) {
+    var clean = cleanText(value).replace(/[^A-Z0-9.=\-]/g, "");
+    if (!clean) return false;
+    if (!/^[A-Z][A-Z0-9.=\-]{0,9}$/.test(clean)) return false;
+    if (clean.length > 6 && clean.indexOf(".") === -1 && clean.indexOf("=") === -1 && clean.indexOf("-") === -1) {
+      return false;
+    }
+    return !/^(NEWS|ETF|CFA|USD|EUR)$/i.test(clean);
+  }
+
+  function pushTicker(out, seen, symbol, maxCount) {
+    var clean = cleanText(symbol).replace(/[^A-Z0-9.=\-]/g, "");
+    if (!isLikelyTickerSymbol(clean) || seen[clean]) return;
+    seen[clean] = true;
+    out.push(clean);
+    return out.length >= (maxCount || 8);
+  }
+
+  function collectTickersFromKeywords(out, seen, maxCount) {
+    var keywordSources = [
+      metaContent("name", "keywords"),
+      metaContent("property", "article:tag"),
+      metaContent("name", "news_keywords")
+    ];
+    keywordSources.forEach(function (raw) {
+      cleanText(raw).split(",").forEach(function (part) {
+        var matches = cleanText(part).match(/\b[A-Z][A-Z0-9.=\-]{0,9}\b/g) || [];
+        matches.forEach(function (candidate) {
+          pushTicker(out, seen, candidate, maxCount);
+        });
+      });
+    });
+  }
+
+  function extractContentText(articleEl) {
+    if (!articleEl) return "";
+    var clone = articleEl.cloneNode(true);
+    clone.querySelectorAll("script, style, iframe, img, video, figure, .ad-container, [data-ad]").forEach(function (el) {
+      el.remove();
+    });
+    return cleanText(clone.textContent).slice(0, MAX_INTEL_CONTENT_CHARS);
+  }
+
+  function resolveExpandedNewsStoryUrl(root) {
+    var scope = root || document;
+    var direct = hrefOf([
+      '[data-test-id="post-title"] a[href*="/news/"]',
+      'h1 a[href*="/news/"]',
+      'h2 a[href*="/news/"]',
+      'a[href*="/news/"][aria-current="page"]'
+    ], scope);
+    if (classifySaPath(normalizePathname(direct)) === "news") return direct;
+
+    var links = scope.querySelectorAll('a[href*="/news/"]');
+    for (var i = 0; i < links.length; i++) {
+      var href = normalizeHref(links[i].getAttribute("href"), window.location.href);
+      if (classifySaPath(normalizePathname(href)) !== "news") continue;
+      var label = cleanText(links[i].textContent);
+      if (label.length >= 20 || i === 0) return href;
+    }
+    return "";
+  }
+
+  function extractExpandedNewsTitle(root) {
+    var scope = root || document;
+    var title = cleanText(
+      textOf([
+        '[data-test-id="post-title"]',
+        'h1[data-test-id="post-title"]',
+        "h1",
+        "h2"
+      ], scope)
+    );
+    if (title && title.toLowerCase() !== "news") return title;
+    var link = scope.querySelector('a[href*="/news/"]');
+    return cleanText(link && link.textContent);
+  }
+
+  function findExpandedNewsRoot() {
+    var best = null;
+    var bestScore = 0;
+    var selectors = '[data-test-id="article-content"], [itemprop="articleBody"], .paywall-full-content, article';
+    document.querySelectorAll(selectors).forEach(function (el) {
+      if (!isVisibleElement(el)) return;
+      var storyUrl = resolveExpandedNewsStoryUrl(el);
+      if (classifySaPath(normalizePathname(storyUrl)) !== "news") return;
+      var textLength = cleanText(el.textContent).length;
+      if (textLength < 280) return;
+      var score = textLength;
+      if (el.matches('[data-test-id="article-content"], [itemprop="articleBody"], .paywall-full-content')) {
+        score += 2000;
+      }
+      if (score > bestScore) {
+        best = el;
+        bestScore = score;
+      }
+    });
+    return best;
+  }
+
+  function bodyText(root) {
+    var scope = root || document;
+    var body = scope.body || scope.documentElement || scope;
+    return cleanText((body && (body.innerText || body.textContent)) || "");
+  }
+
+  function detectPageType() {
+    var path = normalizePathname(resolvePageUrl() || window.location.href);
+    var pageType = classifySaPath(path);
+    if (pageType) return pageType;
+    if (isHubPagePath(path) && findExpandedNewsRoot()) return "news";
+    return "";
+  }
+
+  function shouldWatchIntelTransitions() {
+    if (isIntelPageType(detectPageType())) return true;
+    return isHubPagePath(normalizePathname(window.location.href));
+  }
+
+  function isIntelPageType(pageType) {
+    return pageType === "article" || pageType === "news";
+  }
+
+  function extractPageTickers(root, url, pageType) {
+    var scope = root || document;
+    var seen = {};
+    var out = [];
+    var maxTickers = 8;
+    if (pageType === "symbol") {
+      var symbol = symbolFromHref(url || window.location.href);
+      return symbol ? [symbol] : [];
+    }
+    if (scope === document) {
+      collectTickersFromKeywords(out, seen, maxTickers);
+    }
+
+    var articleRoot = findArticleRoot(scope, true) || scope.querySelector("main") || scope;
+    articleRoot.querySelectorAll(
+      'a[href*="/symbol/"], span[data-test-id="ticker-symbol"], .ticker-hover, [data-test-id*="ticker"]'
+    ).forEach(function (el) {
+      if (out.length >= maxTickers) return;
+      var hrefSymbol = symbolFromHref(el.href || "");
+      var labelSymbol = cleanText(el.textContent).replace(/[^A-Z0-9.=\-]/g, "");
+      pushTicker(out, seen, hrefSymbol || labelSymbol, maxTickers);
+    });
+    return out;
+  }
+
+  function parseJsonLdNodes() {
+    var items = [];
+    document.querySelectorAll('script[type="application/ld+json"]').forEach(function (el) {
+      var text = cleanText(el.textContent || "");
+      if (!text) return;
+      try {
+        var parsed = JSON.parse(text);
+        if (Array.isArray(parsed)) {
+          parsed.forEach(function (item) {
+            if (item && typeof item === "object") items.push(item);
+          });
+        } else if (parsed && typeof parsed === "object") {
+          items.push(parsed);
+        }
+      } catch (err) {
+        // ignore invalid JSON-LD
+      }
+    });
+    return items;
+  }
+
+  function firstJsonLdValue(keys) {
+    var nodes = parseJsonLdNodes();
+    for (var i = 0; i < nodes.length; i++) {
+      for (var j = 0; j < keys.length; j++) {
+        var value = nodes[i] && nodes[i][keys[j]];
+        if (Array.isArray(value)) value = value[0];
+        if (value && typeof value === "object" && value.name) value = value.name;
+        value = cleanText(value);
+        if (value) return value;
+      }
+    }
+    return "";
+  }
+
+  function extractArticleContent(root) {
+    var scope = root || document;
+    var articleEl = findArticleRoot(scope, true);
+    if (!articleEl && scope !== document && scope.nodeType === 1) {
+      articleEl = scope;
+    }
+    if (!articleEl) {
+      return bodyText(scope).slice(0, MAX_INTEL_CONTENT_CHARS);
+    }
+    return extractContentText(articleEl);
+  }
+
+  function buildIntelPagePayload() {
+    var pageUrl = resolvePageUrl();
+    var currentPath = normalizePathname(window.location.href);
+    var pathType = classifySaPath(normalizePathname(pageUrl || window.location.href));
+    var expandedNewsRoot = null;
+    var pageType = detectPageType();
+    if (!pathType && isHubPagePath(currentPath)) {
+      expandedNewsRoot = findExpandedNewsRoot();
+      if (expandedNewsRoot) {
+        pageType = "news";
+        pageUrl = resolveExpandedNewsStoryUrl(expandedNewsRoot) || pageUrl;
+      }
+    }
+    if (!isIntelPageType(pageType)) return null;
+
+    var canonicalUrl = pageUrl;
+    if (!expandedNewsRoot && !isIntelPageType(classifySaPath(normalizePathname(canonicalUrl || window.location.href)))) {
+      return null;
+    }
+    var title = cleanText(
+      textOf(['h1[data-test-id="post-title"]', '[data-test-id="post-title"]', "h1"], expandedNewsRoot || document) ||
+      metaContent("property", "og:title") ||
+      firstJsonLdValue(["headline", "name"]) ||
+      document.title
+    );
+    if ((!title || title.toLowerCase() === "news") && expandedNewsRoot) {
+      title = extractExpandedNewsTitle(expandedNewsRoot);
+    }
+    var author = cleanText(
+      textOf([
+        '[data-test-id="post-author"] a',
+        '[data-test-id="author-name"]',
+        '.author-name',
+        '[rel="author"]',
+        '[itemprop="author"]'
+      ], expandedNewsRoot || document) ||
+      metaContent("name", "author") ||
+      firstJsonLdValue(["author", "creator"])
+    );
+    var content = extractArticleContent(expandedNewsRoot || document);
+    var description = cleanText(
+      metaContent("name", "description") ||
+      metaContent("property", "og:description") ||
+      firstJsonLdValue(["description"])
+    );
+    var tickers = extractPageTickers(expandedNewsRoot || document, canonicalUrl || window.location.href, pageType);
+    var publishedAt = cleanText(
+      textOf(["time[datetime]"], expandedNewsRoot || document) ||
+      metaContent("property", "article:published_time") ||
+      metaContent("name", "article:published_time") ||
+      firstJsonLdValue(["datePublished"])
+    );
+    var modifiedAt = cleanText(
+      metaContent("property", "article:modified_time") ||
+      metaContent("name", "article:modified_time") ||
+      firstJsonLdValue(["dateModified"])
+    );
+    var sectionName = cleanText(
+      metaContent("property", "article:section") ||
+      metaContent("name", "article:section")
+    );
+    var keywords = cleanText(metaContent("name", "keywords"))
+      .split(",")
+      .map(function (part) { return cleanText(part); })
+      .filter(Boolean)
+      .slice(0, 20);
+    var contentForIntel = content || description;
+    if (!title || !contentForIntel) return null;
+
+    return {
+      page_type: pageType,
+      url: canonicalUrl || normalizeHref(window.location.href),
+      canonical_url: canonicalUrl || normalizeHref(window.location.href),
+      title: title,
+      author: author,
+      ticker: tickers[0] || "",
+      tickers: tickers,
+      content: contentForIntel,
+      summary: description,
+      description: description,
+      published_at: publishedAt,
+      modified_at: modifiedAt,
+      captured_at: new Date().toISOString(),
+      bookmarklet_version: debugVersion(),
+      source: CAPTURE_SOURCE,
+      source_ref: canonicalUrl || normalizeHref(window.location.href),
+      raw_fields: {
+        source: CAPTURE_SOURCE,
+        extension_version: EXT_VERSION,
+        canonical_url: canonicalUrl || normalizeHref(window.location.href),
+        page_url: normalizeHref(window.location.href),
+        published_at: publishedAt,
+        modified_at: modifiedAt,
+        section: sectionName,
+        keywords: keywords,
+        content_length: contentForIntel.length
+      }
+    };
   }
 
   function isVisibleElement(el) {
@@ -432,7 +853,7 @@
       version: debugVersion(),
       href: normalizeHref(window.location.href),
       host: window.location.host || "",
-      page_type: "symbol",
+      page_type: cleanText((extra && extra.page_type) || detectPageType() || "unknown"),
       extra: extra || {}
     }).catch(function () {
       // ignore debug ping errors
@@ -639,6 +1060,11 @@
     return emitToExtension("post_snapshot", payload);
   }
 
+  function postPageCapture(payload) {
+    if (!endpoint) return Promise.reject(new Error("BRC endpoint not configured"));
+    return emitToExtension("post_page_capture", payload);
+  }
+
   function flushSnapshot() {
     var state = ensureCaptureState();
     if (!state || state.pendingRoutes > 0 || !endpoint) return;
@@ -685,6 +1111,131 @@
       state.flushTimer = 0;
       flushSnapshot();
     }, FLUSH_IDLE_MS);
+  }
+
+  function buildIntelFingerprint(payload) {
+    return JSON.stringify({
+      page_type: payload.page_type,
+      url: payload.url,
+      title: payload.title,
+      tickers: payload.tickers || [],
+      content_length: (payload.content || "").length,
+      published_at: payload.published_at || ""
+    });
+  }
+
+  function flushIntelCapture() {
+    if (!endpoint) return;
+    var payload = buildIntelPagePayload();
+    if (!payload) return;
+    var fingerprint = buildIntelFingerprint(payload);
+    if (intelCaptureSeen[fingerprint]) return;
+    if (intelCaptureInFlight) {
+      scheduleIntelCapture(700);
+      return;
+    }
+
+    intelCaptureInFlight = true;
+    intelCaptureFingerprint = fingerprint;
+    console.log("[BRC SA] posting page capture", payload.page_type, payload.ticker || payload.title, debugVersion());
+    sendDebugPing("pre_post", {
+      page_type: payload.page_type,
+      content_length: (payload.content || "").length,
+      tickers: (payload.tickers || []).join(",")
+    });
+    postPageCapture(payload).then(function () {
+      intelCaptureSeen[fingerprint] = true;
+      intelCaptureInFlight = false;
+      console.log("[BRC SA] page capture stored", payload.page_type, payload.ticker || payload.title);
+      sendDebugPing("post_ok", {
+        page_type: payload.page_type,
+        tickers: (payload.tickers || []).join(",")
+      });
+      if (shouldWatchIntelTransitions()) {
+        scheduleIntelCapture(600);
+      }
+    }).catch(function (err) {
+      intelCaptureInFlight = false;
+      console.warn("[BRC SA] page capture failed", err && err.message ? err.message : err);
+      sendDebugPing("post_fail", {
+        page_type: payload.page_type,
+        message: err && err.message ? err.message : String(err || "")
+      });
+      if (shouldWatchIntelTransitions()) {
+        scheduleIntelCapture(1200);
+      }
+    });
+  }
+
+  function scheduleIntelCapture(delayMs) {
+    if (!isTopFrame()) return;
+    if (intelCaptureTimer) clearTimeout(intelCaptureTimer);
+    intelCaptureTimer = setTimeout(function () {
+      intelCaptureTimer = 0;
+      flushIntelCapture();
+    }, delayMs || INTEL_CAPTURE_DELAY_MS);
+  }
+
+  function startIntelCapture() {
+    var keepWatchingHubPage = isHubPagePath(normalizePathname(window.location.href));
+    if (intelCaptureStarted || (!keepWatchingHubPage && !isIntelPageType(detectPageType()))) return;
+    intelCaptureStarted = true;
+    scheduleIntelCapture(INTEL_CAPTURE_DELAY_MS);
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () {
+        scheduleIntelCapture(INTEL_CAPTURE_DELAY_MS);
+      }, { once: true });
+    }
+    window.addEventListener("load", function () {
+      scheduleIntelCapture(INTEL_RETRY_DELAY_MS);
+    }, { once: true });
+    if (document.documentElement && typeof MutationObserver !== "undefined") {
+      intelObserver = new MutationObserver(function () {
+        if (intelCaptureInFlight) return;
+        scheduleIntelCapture(900);
+      });
+      intelObserver.observe(document.documentElement, {
+        childList: true,
+        subtree: true,
+        characterData: true
+      });
+      setTimeout(function () {
+        if (intelObserver) {
+          intelObserver.disconnect();
+          intelObserver = null;
+        }
+      }, keepWatchingHubPage ? HUB_INTEL_WATCH_TIMEOUT_MS : 12000);
+    }
+  }
+
+  function startCaptureForCurrentPage() {
+    var pageType = detectPageType();
+    if (pageType === "symbol") {
+      startCapture();
+      return;
+    }
+    if (isIntelPageType(pageType) || shouldWatchIntelTransitions()) {
+      startIntelCapture();
+    }
+  }
+
+  function applyEndpoint(nextEndpoint) {
+    var cleanEndpoint = cleanText(nextEndpoint);
+    var changed = cleanEndpoint !== endpoint;
+    endpoint = cleanEndpoint;
+    if (!changed && endpointAnnounced) {
+      return;
+    }
+    endpointAnnounced = true;
+    console.log("[BRC SA] endpoint", endpoint ? "set" : "missing", debugVersion());
+    if (endpoint) {
+      sendDebugPing("endpoint_set");
+    }
+    scheduleFlush();
+    scheduleIntelCapture(INTEL_CAPTURE_DELAY_MS);
+    if (isTopFrame()) {
+      setTimeout(startCaptureForCurrentPage, 400);
+    }
   }
 
   function buildUrl(pathname, configure) {
@@ -978,16 +1529,15 @@
   }
 
   document.documentElement.addEventListener("brc-sa-endpoint", function (event) {
-    endpoint = cleanText(event && event.detail && event.detail.endpoint);
-    console.log("[BRC SA] endpoint", endpoint ? "set" : "missing", debugVersion());
-    if (endpoint) {
-      sendDebugPing("endpoint_set");
-    }
-    scheduleFlush();
-    if (isTopFrame()) {
-      setTimeout(startCapture, 400);
-    }
+    applyEndpoint(event && event.detail && event.detail.endpoint);
   });
+
+  window.addEventListener("message", function (event) {
+    if (event.source !== window) return;
+    var data = event && event.data;
+    if (!data || !data.__brc_sa_endpoint) return;
+    applyEndpoint(data.endpoint);
+  }, false);
 
   if (isTopFrame()) {
     console.log("[BRC SA] hook active", debugVersion(), normalizeHref(window.location.href));
@@ -999,7 +1549,11 @@
     }, false);
 
     ensureCaptureState();
-    setTimeout(startCapture, 900);
+    document.addEventListener("click", function () {
+      if (!shouldWatchIntelTransitions()) return;
+      scheduleIntelCapture(intelCaptureInFlight ? 900 : 500);
+    }, true);
+    setTimeout(startCaptureForCurrentPage, 900);
   }
 
   if (typeof nativeFetch === "function") {

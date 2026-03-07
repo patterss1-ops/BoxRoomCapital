@@ -4,14 +4,42 @@ Used by both the bot (writes) and the Streamlit dashboard (reads).
 """
 import sqlite3
 import os
-from datetime import datetime, date, timedelta
+import threading
+from datetime import datetime, date, timedelta, timezone
 from typing import Any, Optional
 import uuid
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "trades.db")
 
+_thread_local = threading.local()
+
 
 def get_conn(db_path: str = DB_PATH) -> sqlite3.Connection:
+    """Return a thread-local cached connection for the default DB path.
+
+    Connections to the default trades.db are cached per-thread to avoid
+    creating (and leaking) a new SQLite connection on every DB call.
+    Non-default paths (e.g. test tmp_path DBs) always get a fresh connection
+    to avoid cross-test contamination.
+    """
+    if db_path == DB_PATH:
+        cache = getattr(_thread_local, "conns", None)
+        if cache is None:
+            cache = {}
+            _thread_local.conns = cache
+        conn = cache.get(db_path)
+        if conn is not None:
+            try:
+                conn.execute("SELECT 1")
+                return conn
+            except sqlite3.ProgrammingError:
+                cache.pop(db_path, None)
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        cache[db_path] = conn
+        return conn
+    # Non-default path: fresh connection (test isolation)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -132,6 +160,10 @@ def init_db(db_path: str = DB_PATH):
 
         CREATE INDEX IF NOT EXISTS idx_option_positions_status ON option_positions(status);
         CREATE INDEX IF NOT EXISTS idx_option_positions_ticker ON option_positions(ticker);
+        CREATE INDEX IF NOT EXISTS idx_option_positions_entry_date ON option_positions(entry_date);
+        CREATE INDEX IF NOT EXISTS idx_option_positions_exit_date ON option_positions(exit_date);
+        CREATE INDEX IF NOT EXISTS idx_positions_ticker ON positions(ticker);
+        CREATE INDEX IF NOT EXISTS idx_positions_strategy ON positions(strategy);
         CREATE INDEX IF NOT EXISTS idx_shadow_trades_timestamp ON shadow_trades(timestamp);
 
         CREATE TABLE IF NOT EXISTS jobs (
@@ -660,7 +692,7 @@ def log_event(
     conn.execute(
         """INSERT INTO bot_events (timestamp, category, icon, headline, detail, ticker, strategy)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), category, icon, headline, detail, ticker, strategy),
+        (datetime.now(timezone.utc).isoformat(), category, icon, headline, detail, ticker, strategy),
     )
     conn.commit()
     conn.close()
@@ -692,7 +724,7 @@ def save_strategy_state(key: str, value: str, db_path: str = DB_PATH):
     conn.execute(
         """INSERT INTO strategy_state (key, value, updated) VALUES (?, ?, ?)
            ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated=excluded.updated""",
-        (key, value, datetime.now().isoformat()),
+        (key, value, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
     conn.close()
@@ -734,7 +766,7 @@ def log_trade(
     conn.execute(
         """INSERT INTO trades (timestamp, ticker, strategy, direction, action, size, price, deal_id, deal_ref, pnl, notes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), ticker, strategy, direction, action, size, price, deal_id, deal_ref, pnl, notes),
+        (datetime.now(timezone.utc).isoformat(), ticker, strategy, direction, action, size, price, deal_id, deal_ref, pnl, notes),
     )
     conn.commit()
     conn.close()
@@ -752,7 +784,7 @@ def upsert_position(deal_id: str, ticker: str, strategy: str, direction: str,
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(deal_id) DO UPDATE SET
              current_price=excluded.current_price, unrealised_pnl=excluded.unrealised_pnl, last_updated=excluded.last_updated""",
-        (deal_id, ticker, strategy, direction, size, entry_price, entry_time, datetime.now().isoformat()),
+        (deal_id, ticker, strategy, direction, size, entry_price, entry_time, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
     conn.close()
@@ -772,7 +804,7 @@ def update_position_price(deal_id: str, current_price: float, unrealised_pnl: fl
     conn = get_conn(db_path)
     conn.execute(
         """UPDATE positions SET current_price=?, unrealised_pnl=?, last_updated=? WHERE deal_id=?""",
-        (current_price, unrealised_pnl, datetime.now().isoformat(), deal_id),
+        (current_price, unrealised_pnl, datetime.now(timezone.utc).isoformat(), deal_id),
     )
     conn.commit()
     conn.close()
@@ -830,10 +862,10 @@ def upsert_option_position(
              current_value=excluded.current_value, unrealised_pnl=excluded.unrealised_pnl,
              last_updated=excluded.last_updated""",
         (spread_id, ticker, strategy, trade_type,
-         datetime.now().isoformat(), expiry_date,
+         datetime.now(timezone.utc).isoformat(), expiry_date,
          short_deal_id, long_deal_id, short_strike, long_strike,
          short_epic, long_epic, spread_width, premium_collected, max_loss,
-         size, datetime.now().isoformat()),
+         size, datetime.now(timezone.utc).isoformat()),
     )
     conn.commit()
     conn.close()
@@ -846,8 +878,8 @@ def close_option_position(spread_id: str, exit_pnl: float, exit_reason: str,
     conn.execute(
         """UPDATE option_positions SET status='closed', exit_date=?, exit_pnl=?, exit_reason=?,
            last_updated=? WHERE spread_id=?""",
-        (datetime.now().isoformat(), exit_pnl, exit_reason,
-         datetime.now().isoformat(), spread_id),
+        (datetime.now(timezone.utc).isoformat(), exit_pnl, exit_reason,
+         datetime.now(timezone.utc).isoformat(), spread_id),
     )
     conn.commit()
     conn.close()
@@ -900,7 +932,7 @@ def log_shadow_trade(
            (timestamp, ticker, strategy, action, short_strike, long_strike,
             spread_width, estimated_premium, max_loss, size, reason)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), ticker, strategy, action,
+        (datetime.now(timezone.utc).isoformat(), ticker, strategy, action,
          short_strike, long_strike, spread_width, estimated_premium,
          max_loss, size, reason),
     )
@@ -926,7 +958,7 @@ def upsert_option_contracts(contracts: list[dict], db_path: str = DB_PATH) -> in
     if not contracts:
         return 0
 
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     count = 0
     for c in contracts:
@@ -1031,7 +1063,7 @@ def create_calibration_run(
     db_path: str = DB_PATH,
 ):
     """Create a calibration run record."""
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO calibration_runs
@@ -1058,7 +1090,7 @@ def complete_calibration_run(
         """UPDATE calibration_runs
            SET updated_at=?, status=?, samples=?, overall_ratio=?, summary_payload=?, error=?
            WHERE id=?""",
-        (datetime.now().isoformat(), status, samples, overall_ratio, summary_payload, error, run_id),
+        (datetime.now(timezone.utc).isoformat(), status, samples, overall_ratio, summary_payload, error, run_id),
     )
     conn.commit()
     conn.close()
@@ -1068,7 +1100,7 @@ def insert_calibration_points(run_id: str, points: list[dict], db_path: str = DB
     """Persist quote-level calibration points for a run."""
     if not points:
         return 0
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     count = 0
     for p in points:
@@ -1192,7 +1224,7 @@ def create_strategy_parameter_set(
     if not clean_name:
         raise ValueError("name is required")
 
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     set_id = str(uuid.uuid4())
     conn = get_conn(db_path)
     version_row = conn.execute(
@@ -1313,7 +1345,7 @@ def promote_strategy_parameter_set(
     current_item = dict(current)
     from_status = current_item.get("status")
     strategy_key = current_item.get("strategy_key")
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
 
     if target in {"staged_live", "live"}:
         conn.execute(
@@ -1377,7 +1409,7 @@ def create_job(job_id: str, job_type: str, status: str = "queued",
                mode: Optional[str] = None, detail: Optional[str] = None,
                db_path: str = DB_PATH):
     """Create a new job record."""
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO jobs (id, created_at, updated_at, job_type, status, mode, detail)
@@ -1398,7 +1430,7 @@ def update_job(job_id: str, status: str, detail: Optional[str] = None,
            SET updated_at=?, status=?, detail=COALESCE(?, detail),
                result=COALESCE(?, result), error=COALESCE(?, error)
            WHERE id=?""",
-        (datetime.now().isoformat(), status, detail, result, error, job_id),
+        (datetime.now(timezone.utc).isoformat(), status, detail, result, error, job_id),
     )
     conn.commit()
     conn.close()
@@ -1447,7 +1479,7 @@ def create_trade_idea(
     db_path: str = DB_PATH,
 ) -> str:
     """Create a new trade idea from council output. Returns the idea_id."""
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT OR IGNORE INTO trade_ideas
@@ -1468,7 +1500,7 @@ def update_trade_idea(idea_id: str, db_path: str = DB_PATH, **fields) -> bool:
     """Update specific fields on a trade idea. Returns True if row existed."""
     if not fields:
         return False
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     fields["updated_at"] = now
     set_clauses = ", ".join(f"{k}=?" for k in fields)
     vals = list(fields.values()) + [idea_id]
@@ -1540,7 +1572,7 @@ def record_idea_transition(
     conn.execute(
         """INSERT INTO idea_transitions (timestamp, idea_id, from_stage, to_stage, actor, reason, metadata_json)
            VALUES (?, ?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), idea_id, from_stage, to_stage, actor, reason, metadata_json),
+        (datetime.now(timezone.utc).isoformat(), idea_id, from_stage, to_stage, actor, reason, metadata_json),
     )
     conn.commit()
     conn.close()
@@ -1630,7 +1662,7 @@ def upsert_research_event(
     db_path: str = DB_PATH,
 ):
     """Insert or update one normalized research event row."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO research_events
@@ -1727,7 +1759,7 @@ def create_order_action(
     db_path: str = DB_PATH,
 ):
     """Create an order action record."""
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO order_actions
@@ -1763,7 +1795,7 @@ def update_order_action(
                result_payload=COALESCE(?, result_payload)
            WHERE id=?""",
         (
-            datetime.now().isoformat(),
+            datetime.now(timezone.utc).isoformat(),
             status,
             attempt,
             int(recoverable) if recoverable is not None else None,
@@ -1824,7 +1856,7 @@ def log_control_action(
     conn.execute(
         """INSERT INTO control_actions (timestamp, action, value, reason, actor, metadata)
            VALUES (?, ?, ?, ?, ?, ?)""",
-        (datetime.now().isoformat(), action, value, reason, actor, metadata),
+        (datetime.now(timezone.utc).isoformat(), action, value, reason, actor, metadata),
     )
     conn.commit()
     conn.close()
@@ -1994,16 +2026,6 @@ def get_summary(db_path: str = DB_PATH) -> dict:
     }
 
 
-def _resolve_broker_account_id(
-    conn, broker: str, account_id: str
-) -> Optional[str]:
-    """Look up the surrogate id for a (broker, account_id) pair."""
-    row = conn.execute(
-        "SELECT id FROM broker_accounts WHERE broker=? AND account_id=?",
-        (broker.strip().lower(), account_id.strip()),
-    ).fetchone()
-    return row["id"] if row else None
-
 
 def upsert_broker_account(
     broker: str,
@@ -2015,7 +2037,7 @@ def upsert_broker_account(
     db_path: str = DB_PATH,
 ):
     """Upsert a broker account identity record (Claude schema)."""
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     acct_id = f"{broker.strip().lower()}_{account_id.strip()}"
     is_active = 1 if status != "inactive" else 0
     conn = get_conn(db_path)
@@ -2061,7 +2083,7 @@ def upsert_broker_position(
     db_path: str = DB_PATH,
 ):
     """Upsert one broker position row (adapted to Claude schema)."""
-    stamp = as_of or datetime.now().isoformat()
+    stamp = as_of or datetime.now(timezone.utc).isoformat()
     broker_account_id = f"{broker.strip().lower()}_{account_id.strip()}"
     conn = get_conn(db_path)
     conn.execute(
@@ -2099,7 +2121,7 @@ def replace_broker_positions(
 ) -> int:
     """Replace all positions for one broker/account snapshot (Claude schema)."""
     broker_account_id = f"{broker.strip().lower()}_{account_id.strip()}"
-    stamp = as_of or datetime.now().isoformat()
+    stamp = as_of or datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         "DELETE FROM broker_positions WHERE broker_account_id=?",
@@ -2142,7 +2164,7 @@ def upsert_broker_cash_balance(
     db_path: str = DB_PATH,
 ):
     """Upsert broker cash/equity snapshot (Claude schema)."""
-    stamp = as_of or datetime.now().isoformat()
+    stamp = as_of or datetime.now(timezone.utc).isoformat()
     broker_account_id = f"{broker.strip().lower()}_{account_id.strip()}"
     buying_power = available or 0
     conn = get_conn(db_path)
@@ -2176,7 +2198,7 @@ def insert_nav_snapshot(
     db_path: str = DB_PATH,
 ):
     """Insert or update one NAV snapshot row (Claude schema)."""
-    now = datetime.now().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     level_id = sleeve
     conn = get_conn(db_path)
     conn.execute(
@@ -2473,7 +2495,7 @@ def save_fund_daily_report(
     db_path: str = DB_PATH,
 ):
     """Persist a daily fund-level report row (upsert by report_date)."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO fund_daily_report
@@ -2522,7 +2544,7 @@ def save_sleeve_daily_report(
     db_path: str = DB_PATH,
 ):
     """Persist a daily sleeve-level report row (upsert by report_date + sleeve)."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO sleeve_daily_report
@@ -2593,7 +2615,7 @@ def save_risk_daily_snapshot(
     db_path: str = DB_PATH,
 ):
     """Persist a daily risk metrics snapshot (upsert by snapshot_date)."""
-    now = datetime.utcnow().isoformat()
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO risk_daily_snapshot

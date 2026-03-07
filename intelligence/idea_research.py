@@ -33,7 +33,6 @@ from data.trade_db import (
 from intelligence.intel_pipeline import (
     FUND_CONTEXT,
     _calc_cost,
-    _extract_json_from_text,
     _query_anthropic,
     _query_grok,
     _query_openai,
@@ -283,6 +282,11 @@ class IdeaResearcher:
                     error=result.get("error"),
                     db_path=self.db_path,
                 )
+
+                # Auto-promote or auto-reject based on verdict
+                if result.get("success"):
+                    self._auto_transition(idea_id, result)
+
             except Exception as exc:
                 logger.error("Research job %s failed: %s", job_id, exc)
                 update_job(job_id, status="failed", error=str(exc), db_path=self.db_path)
@@ -657,3 +661,38 @@ class IdeaResearcher:
             "output_tokens": output_tokens,
             "duration_s": round(duration, 2),
         }
+
+    # ── Auto-transition after research ───────────────────────────────────
+
+    def _auto_transition(self, idea_id: str, result: dict):
+        """Auto-promote to backtest or auto-reject based on research verdict."""
+        from intelligence.idea_pipeline import IdeaPipelineManager
+
+        verdict = result.get("verdict", "reject")
+        score = result.get("review_score", 0)
+        mgr = IdeaPipelineManager(db_path=self.db_path)
+
+        if verdict == "reject":
+            reason = f"Research rejected (score {score:.1f}/10)"
+            rej = mgr.reject_idea(idea_id, reason=reason, actor="research_pipeline")
+            if rej.get("success"):
+                logger.info("Auto-rejected idea %s: %s", idea_id[:12], reason)
+            else:
+                logger.warning("Auto-reject failed for %s: %s", idea_id[:12], rej.get("reasons"))
+
+        elif verdict == "proceed" and config.IDEA_AUTO_PROMOTE_BACKTEST:
+            # Promote review -> backtest, then trigger backtest
+            promo = mgr.promote_idea(idea_id, "backtest", actor="research_pipeline",
+                                     reason=f"Research passed (score {score:.1f}/10)")
+            if promo.get("success"):
+                logger.info("Auto-promoted idea %s to backtest", idea_id[:12])
+                bt = mgr.trigger_backtest(idea_id, actor="research_pipeline")
+                if bt.get("success"):
+                    logger.info("Auto-triggered backtest for idea %s (job %s)",
+                                idea_id[:12], bt.get("job_id"))
+                else:
+                    logger.warning("Auto-backtest trigger failed for %s: %s",
+                                   idea_id[:12], bt.get("reasons"))
+            else:
+                logger.warning("Auto-promote to backtest failed for %s: %s",
+                               idea_id[:12], promo.get("reasons"))

@@ -121,15 +121,29 @@ class IGBroker(BaseBroker):
             return {}
         return {**self.session.headers, "Version": version}
 
+    def _resolve_timeout(self, timeout: Optional[float]) -> float:
+        """Allow UI/control-plane callers to use shorter timeouts than trading flows."""
+        if timeout is None:
+            return self._TIMEOUT
+        try:
+            return max(0.25, float(timeout))
+        except (TypeError, ValueError):
+            return self._TIMEOUT
+
     # ─── Account info ────────────────────────────────────────────────────
 
-    def get_account_info(self) -> AccountInfo:
+    def get_account_info(self, timeout: Optional[float] = None) -> AccountInfo:
         """Get account balance and margin info."""
         if not self.session:
             return AccountInfo(balance=0, equity=0, unrealised_pnl=0, open_positions=0)
 
+        timeout_value = self._resolve_timeout(timeout)
         try:
-            r = self.session.get(f"{self.base_url}/accounts", headers=self._headers("1"), timeout=self._TIMEOUT)
+            r = self.session.get(
+                f"{self.base_url}/accounts",
+                headers=self._headers("1"),
+                timeout=timeout_value,
+            )
             if r.status_code != 200:
                 logger.error(f"Account fetch failed: {r.status_code}")
                 return AccountInfo(balance=0, equity=0, unrealised_pnl=0, open_positions=0)
@@ -154,13 +168,18 @@ class IGBroker(BaseBroker):
 
     # ─── Positions ───────────────────────────────────────────────────────
 
-    def get_positions(self) -> list[Position]:
+    def get_positions(self, timeout: Optional[float] = None) -> list[Position]:
         """Get all open positions from IG."""
         if not self.session:
             return []
 
+        timeout_value = self._resolve_timeout(timeout)
         try:
-            r = self.session.get(f"{self.base_url}/positions", headers=self._headers("2"), timeout=self._TIMEOUT)
+            r = self.session.get(
+                f"{self.base_url}/positions",
+                headers=self._headers("2"),
+                timeout=timeout_value,
+            )
             if r.status_code != 200:
                 logger.error(f"Positions fetch failed: {r.status_code}")
                 return []
@@ -213,14 +232,19 @@ class IGBroker(BaseBroker):
 
     # ─── Market info ─────────────────────────────────────────────────────
 
-    def get_market_info(self, epic: str) -> Optional[dict]:
+    def get_market_info(self, epic: str, timeout: Optional[float] = None) -> Optional[dict]:
         """Get market details including min deal size and stop distance."""
         if not self.session:
             return None
         if epic in self._blocked_epics:
             return None
+        timeout_value = self._resolve_timeout(timeout)
         try:
-            r = self.session.get(f"{self.base_url}/markets/{epic}", headers=self._headers("3"), timeout=self._TIMEOUT)
+            r = self.session.get(
+                f"{self.base_url}/markets/{epic}",
+                headers=self._headers("3"),
+                timeout=timeout_value,
+            )
             if r.status_code == 200:
                 return r.json()
             elif r.status_code == 403:

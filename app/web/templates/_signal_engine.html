@@ -1,15 +1,15 @@
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg" id="signal-engine-panel">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg" id="signal-engine-panel">
   <div class="flex justify-between items-baseline gap-4 mb-3">
     <div>
-      <h2 class="text-lg font-semibold text-slate-200">Signal Engine Shadow Run</h2>
-      <p class="text-slate-500 text-sm">Composite scoring only. No live auto-execution in this workflow.</p>
+      <h2 class="text-lg font-semibold text-gray-800">Signal Engine Shadow Run</h2>
+      <p class="text-gray-400 text-sm">Composite scoring only. No live auto-execution in this workflow.</p>
     </div>
     <div class="flex gap-2 flex-wrap">
       <form hx-post="/api/actions/signal-shadow-run" hx-target="#action-result" hx-swap="innerHTML">
-        <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-4 py-1.5 rounded-lg border border-slate-600 transition-colors">Run Shadow Cycle</button>
+        <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors">Run Shadow Cycle</button>
       </form>
       <form hx-post="/api/actions/signal-tier1-run" hx-target="#action-result" hx-swap="innerHTML">
-        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors">Run Tier-1 Jobs + Rank</button>
+        <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors">Run Tier-1 Jobs + Rank</button>
       </form>
     </div>
   </div>
@@ -17,15 +17,15 @@
   {% if signal_shadow.has_report and signal_shadow.report %}
     {% set report = signal_shadow.report %}
     {% set summary = report.summary %}
-    <p class="text-slate-300 text-sm">
-      <span class="font-mono text-slate-300">run {{ report.run_id }}</span>
-      <span class="font-mono text-xs text-slate-500"> · {{ report.run_at }}</span>
+    <p class="text-gray-700 text-sm">
+      <span class="font-mono text-gray-700">run {{ report.run_id }}</span>
+      <span class="font-mono text-xs text-gray-400"> · {{ report.run_at }}</span>
     </p>
     <div class="flex flex-wrap gap-2 mt-2 mb-3">
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">Scored {{ summary.tickers_scored or 0 }}/{{ summary.tickers_total or 0 }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">Review {{ (summary.action_counts or {}).get("flag_for_review", 0) }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">Auto Buy {{ (summary.action_counts or {}).get("auto_execute_buy", 0) }}</span>
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-slate-500/15 text-slate-400 border-slate-500/30">No Action {{ (summary.action_counts or {}).get("no_action", 0) }}</span>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">No Action {{ (summary.action_counts or {}).get("no_action", 0) }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-red-500/15 text-red-400 border-red-500/30">Short {{ (summary.action_counts or {}).get("short_candidate", 0) }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">Blocked Missing {{ summary.tickers_blocked_missing_required_layers or 0 }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">Blocked Stale {{ summary.tickers_blocked_stale_layers or 0 }}</span>
@@ -34,12 +34,12 @@
     <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ticker</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Final</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Action</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Layers</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Missing Required</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Ticker</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Final</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Action</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Layers</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Missing Required</th>
         </tr>
       </thead>
       <tbody>
@@ -47,41 +47,41 @@
         {% set status_text = row.status or "" %}
         {% set is_scored = status_text.startswith("scored") %}
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ row.ticker }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.ticker }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">
             <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if is_scored %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% else %}bg-blue-500/15 text-blue-400 border-blue-500/30{% endif %}">{{ row.status }}</span>
           </td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(row.final_score) if is_scored else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.action if is_scored else "-" }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.layer_count or 0 }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ (row.missing_required_layers or [])|join(", ") if row.missing_required_layers else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.final_score) if is_scored else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.action if is_scored else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.layer_count or 0 }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ (row.missing_required_layers or [])|join(", ") if row.missing_required_layers else "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
     </table>
 
     {% if report.ranked_candidates %}
-      <h3 class="text-slate-200 font-semibold mt-4 mb-2">Ranked Candidates</h3>
+      <h3 class="text-gray-800 font-semibold mt-4 mb-2">Ranked Candidates</h3>
       <table class="w-full text-sm text-left">
         <thead>
           <tr>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Rank</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Ticker</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Action</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Final</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Rank Score</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Freshness</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Rank</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Ticker</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Action</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Final</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Rank Score</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Freshness</th>
           </tr>
         </thead>
         <tbody>
         {% for row in report.ranked_candidates %}
           <tr>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.rank }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ row.ticker }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.action }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(row.final_score) }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ "%.2f"|format(row.rank_score) }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.rank }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.ticker }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.action }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.final_score) }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.rank_score) }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">
               warn={{ (row.warning_layers or [])|length }},
               stale={{ (row.stale_layers or [])|length }}
             </td>
@@ -93,7 +93,7 @@
 
     {% if signal_shadow.freshness_diagnostics %}
       {% set fd = signal_shadow.freshness_diagnostics %}
-      <p class="text-sm text-slate-500 mt-3">
+      <p class="text-sm text-gray-400 mt-3">
         Freshness diagnostics:
         warnings={{ fd.tickers_with_warnings or 0 }},
         stale={{ fd.tickers_with_stale or 0 }},
@@ -102,28 +102,28 @@
       </p>
     {% endif %}
   {% else %}
-    <p class="text-sm text-slate-500">No shadow report yet. Seed layer events and run a cycle.</p>
+    <p class="text-sm text-gray-400">No shadow report yet. Seed layer events and run a cycle.</p>
   {% endif %}
 
   {% if signal_shadow.event_stats %}
     {% set stats = signal_shadow.event_stats %}
-    <h3 class="text-slate-200 font-semibold mt-4 mb-2">Layer Event Coverage</h3>
-    <p class="text-sm text-slate-500">
+    <h3 class="text-gray-800 font-semibold mt-4 mb-2">Layer Event Coverage</h3>
+    <p class="text-sm text-gray-400">
       Tickers with layer data: {{ stats.tickers_with_layers or 0 }}
       {% if stats.latest_layer_as_of %} · Latest layer as_of: {{ stats.latest_layer_as_of }}{% endif %}
     </p>
     <table class="w-full text-sm text-left">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Layer</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Tickers Covered</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Layer</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Tickers Covered</th>
         </tr>
       </thead>
       <tbody>
       {% for layer_id, count in (stats.layer_coverage or {}).items() %}
         <tr>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ layer_id }}</td>
-          <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ count }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ layer_id }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ count }}</td>
         </tr>
       {% endfor %}
       </tbody>

@@ -21,8 +21,7 @@ from data.trade_db import DB_PATH
 from intelligence.jobs.sa_quant_job import SAQuantJobRunner
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+from utils.datetime_utils import utc_now_iso as _utc_now_iso
 
 
 @dataclass(frozen=True)

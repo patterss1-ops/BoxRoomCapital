@@ -74,7 +74,7 @@ def _run_dispatch() -> None:
         logger.info("Dispatcher disabled or dry_run — skipping intent dispatch")
         return
 
-    from execution.intent_dispatcher import IntentDispatcher
+    from execution.dispatcher import IntentDispatcher
 
     dispatcher = IntentDispatcher()
     result = dispatcher.run_once()

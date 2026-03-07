@@ -1,23 +1,23 @@
-<section class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg" id="promotion-gate-panel">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg" id="promotion-gate-panel">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-slate-200">Promotion Gate Report</h2>
-    <p class="text-slate-500 text-sm">Shadow/staged/live promotion recommendations.</p>
+    <h2 class="text-lg font-semibold text-gray-800">Promotion Gate Report</h2>
+    <p class="text-gray-400 text-sm">Shadow/staged/live promotion recommendations.</p>
   </div>
   {% if report %}
     {% set recommendation = report.recommendation %}
-    <p class="text-slate-300 text-sm">
-      <strong class="text-slate-200">Action:</strong>
-      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if recommendation.action == 'PROMOTE_STAGED_TO_LIVE' %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif recommendation.action == 'PROMOTE_SHADOW_TO_STAGED' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% else %}bg-slate-500/15 text-slate-400 border-slate-500/30{% endif %}">
+    <p class="text-gray-700 text-sm">
+      <strong class="text-gray-800">Action:</strong>
+      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if recommendation.action == 'PROMOTE_STAGED_TO_LIVE' %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif recommendation.action == 'PROMOTE_SHADOW_TO_STAGED' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">
         {{ recommendation.action }}
       </span>
-      <span class="font-mono text-xs text-slate-500">target {{ recommendation.target_set_id[:8] if recommendation.target_set_id else '-' }}</span>
+      <span class="font-mono text-xs text-gray-400">target {{ recommendation.target_set_id[:8] if recommendation.target_set_id else '-' }}</span>
     </p>
-    <p class="text-sm text-slate-500 mt-1">Generated {{ report.generated_at }} · Cooldown {{ report.cooldown_hours }}h · Active {{ 'yes' if report.cooldown_active else 'no' }}</p>
+    <p class="text-sm text-gray-400 mt-1">Generated {{ report.generated_at }} · Cooldown {{ report.cooldown_hours }}h · Active {{ 'yes' if report.cooldown_active else 'no' }}</p>
 
     {% if recommendation.reason_codes %}
       <div class="flex flex-wrap gap-2 mt-3">
         {% for code in recommendation.reason_codes %}
-          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-slate-800/50 text-slate-300 border-slate-700">{{ code }}</span>
+          <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border bg-gray-100 text-gray-700 border-gray-300">{{ code }}</span>
         {% endfor %}
       </div>
     {% endif %}
@@ -25,52 +25,52 @@
     <table class="w-full text-sm text-left mt-3">
       <thead>
         <tr>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Lane</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Status</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Set</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Version</th>
-          <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Updated</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Lane</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Set</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Version</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Updated</th>
         </tr>
       </thead>
       <tbody>
         {% for lane_key, lane in report.lanes.items() %}
           <tr>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ lane_key }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ lane.status }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ lane.set_id[:8] if lane.set_id else '-' }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ lane.version if lane.version is not none else '-' }}</td>
-            <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ lane.updated_at or '-' }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ lane_key }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ lane.status }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ lane.set_id[:8] if lane.set_id else '-' }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ lane.version if lane.version is not none else '-' }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ lane.updated_at or '-' }}</td>
           </tr>
         {% endfor %}
       </tbody>
     </table>
 
     {% if report.recent_promotions %}
-      <h3 class="text-slate-200 font-semibold mt-4 mb-2">Recent Promotion Actions</h3>
+      <h3 class="text-gray-800 font-semibold mt-4 mb-2">Recent Promotion Actions</h3>
       <table class="w-full text-sm text-left">
         <thead>
           <tr>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Time</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Set</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">From</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">To</th>
-            <th class="text-slate-500 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-slate-800">Actor</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Time</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Set</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">From</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">To</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Actor</th>
           </tr>
         </thead>
         <tbody>
           {% for row in report.recent_promotions[:5] %}
             <tr>
-              <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono text-xs">{{ row.timestamp }}</td>
-              <td class="text-slate-300 px-2 py-2 border-b border-slate-800 font-mono">{{ row.set_id[:8] if row.set_id else '-' }}</td>
-              <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.from_status or '-' }}</td>
-              <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.to_status or '-' }}</td>
-              <td class="text-slate-300 px-2 py-2 border-b border-slate-800">{{ row.actor or '-' }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ row.timestamp }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.set_id[:8] if row.set_id else '-' }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.from_status or '-' }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.to_status or '-' }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.actor or '-' }}</td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
     {% endif %}
   {% else %}
-    <p class="text-sm text-slate-500">Promotion gate data unavailable.</p>
+    <p class="text-sm text-gray-400">Promotion gate data unavailable.</p>
   {% endif %}
 </section>

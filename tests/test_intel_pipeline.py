@@ -51,8 +51,14 @@ def test_intel_analysis_generates_id():
 # ─── Webhook endpoint tests ──────────────────────────────────────────
 
 @pytest.fixture(autouse=True)
-def _stub_side_effects(monkeypatch):
-    """Prevent real job creation and LLM calls during tests."""
+def _stub_side_effects(monkeypatch, tmp_path):
+    """Prevent real job creation, LLM calls, and DB pollution during tests."""
+    from data import trade_db
+
+    test_db = str(tmp_path / "test_intel.db")
+    trade_db.init_db(test_db)
+    monkeypatch.setattr(server, "DB_PATH", test_db)
+    monkeypatch.setattr(server, "get_conn", lambda path=None: trade_db.get_conn(test_db))
     monkeypatch.setattr(server, "create_job", lambda **kw: None)
     monkeypatch.setattr(server, "log_event", lambda **kw: None)
     monkeypatch.setattr(

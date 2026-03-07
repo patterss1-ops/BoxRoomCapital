@@ -1,0 +1,45 @@
+{# Shared UI macros — import with {% from "_macros.html" import badge, section_header %} #}
+
+{# ── Badge ────────────────────────────────────────────────────────── #}
+{% macro badge(label, variant="info", extra_class="") -%}
+{%- set base = "inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border" -%}
+{%- if variant == "ok" or variant == "completed" or variant == "live" -%}
+  {%- set colors = "bg-emerald-500/15 text-emerald-400 border-emerald-500/30" -%}
+{%- elif variant == "error" or variant == "failed" or variant == "danger" or variant == "rejection" -%}
+  {%- set colors = "bg-red-500/15 text-red-400 border-red-500/30" -%}
+{%- elif variant == "warning" or variant == "running" or variant == "retrying" or variant == "staged_live" -%}
+  {%- set colors = "bg-amber-500/15 text-amber-400 border-amber-500/30" -%}
+{%- elif variant == "info" or variant == "queued" or variant == "shadow" -%}
+  {%- set colors = "bg-blue-500/15 text-blue-400 border-blue-500/30" -%}
+{%- elif variant == "neutral" or variant == "archived" -%}
+  {%- set colors = "bg-gray-100 text-gray-500 border-gray-300" -%}
+{%- else -%}
+  {%- set colors = "bg-blue-500/15 text-blue-400 border-blue-500/30" -%}
+{%- endif -%}
+<span class="{{ base }} {{ colors }} {{ extra_class }}">{{ label }}</span>
+{%- endmacro %}
+
+{# ── Section Header ───────────────────────────────────────────────── #}
+{% macro section_header(title, subtitle="") -%}
+<div class="flex justify-between items-baseline gap-2 mb-1.5">
+  <h3 class="text-xs font-semibold text-gray-800 uppercase tracking-wide">{{ title }}</h3>
+  {%- if subtitle %}
+  <span class="text-[10px] text-gray-400">{{ subtitle }}</span>
+  {%- endif %}
+</div>
+{%- endmacro %}
+
+{# ── Panel wrapper ────────────────────────────────────────────────── #}
+{% macro panel(id="", extra_class="") -%}
+<div{% if id %} id="{{ id }}"{% endif %} class="bg-white border border-gray-200 rounded-md p-1.5 overflow-y-auto {{ extra_class }}">
+  {{ caller() }}
+</div>
+{%- endmacro %}
+
+{# ── KV row ───────────────────────────────────────────────────────── #}
+{% macro kv_row(label, value) -%}
+<div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5">
+  <span class="text-[11px] text-gray-400">{{ label }}</span>
+  <span class="text-[11px] text-gray-700 font-mono">{{ value }}</span>
+</div>
+{%- endmacro %}

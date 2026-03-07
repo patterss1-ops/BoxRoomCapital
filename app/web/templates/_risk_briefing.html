@@ -1,6 +1,6 @@
-<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
+<section class="bg-white border border-gray-200 rounded-md p-1.5">
   <div class="flex justify-between items-baseline gap-2 mb-1.5">
-    <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Risk</h3>
+    <h3 class="text-xs font-semibold text-gray-800 uppercase tracking-wide">Risk</h3>
     {% set state = (risk_briefing.state or "unavailable")|lower %}
     <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border {% if state == 'ok' %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% elif state == 'attention' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">{{ state|upper }}</span>
   </div>
@@ -8,35 +8,35 @@
   <table class="w-full text-[11px] text-left font-mono">
     <thead>
       <tr>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">NAV</th>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Day P&amp;L</th>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">DD%</th>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Gross</th>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Net</th>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Cash</th>
-        <th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Risk</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">NAV</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Day P&amp;L</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">DD%</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Gross</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Net</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Cash</th>
+        <th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Risk</th>
       </tr>
     </thead>
     <tbody>
       <tr>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.0f"|format(risk_briefing.summary.fund_nav) if risk_briefing.summary.fund_nav is not none else "-" }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.2f"|format(risk_briefing.summary.day_pnl) if risk_briefing.summary.day_pnl is not none else "-" }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.1f"|format(risk_briefing.summary.drawdown_pct) if risk_briefing.summary.drawdown_pct is not none else "-" }}%</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.1f"|format(risk_briefing.summary.gross_exposure_pct) if risk_briefing.summary.gross_exposure_pct is not none else "-" }}%</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.1f"|format(risk_briefing.summary.net_exposure_pct) if risk_briefing.summary.net_exposure_pct is not none else "-" }}%</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.1f"|format(risk_briefing.summary.cash_buffer_pct) if risk_briefing.summary.cash_buffer_pct is not none else "-" }}%</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.1f"|format(risk_briefing.summary.open_risk_pct) if risk_briefing.summary.open_risk_pct is not none else "-" }}%</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.0f"|format(risk_briefing.summary.fund_nav) if risk_briefing.summary.fund_nav is not none else "-" }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(risk_briefing.summary.day_pnl) if risk_briefing.summary.day_pnl is not none else "-" }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.1f"|format(risk_briefing.summary.drawdown_pct) if risk_briefing.summary.drawdown_pct is not none else "-" }}%</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.1f"|format(risk_briefing.summary.gross_exposure_pct) if risk_briefing.summary.gross_exposure_pct is not none else "-" }}%</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.1f"|format(risk_briefing.summary.net_exposure_pct) if risk_briefing.summary.net_exposure_pct is not none else "-" }}%</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.1f"|format(risk_briefing.summary.cash_buffer_pct) if risk_briefing.summary.cash_buffer_pct is not none else "-" }}%</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.1f"|format(risk_briefing.summary.open_risk_pct) if risk_briefing.summary.open_risk_pct is not none else "-" }}%</td>
       </tr>
     </tbody>
   </table>
 
   {% if risk_briefing.alerts %}
-    <h4 class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mt-1.5 mb-1">Alerts</h4>
+    <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mt-1.5 mb-1">Alerts</h4>
     <ul class="space-y-0 overflow-y-auto">
       {% for alert in risk_briefing.alerts[:3] %}
-        <li class="border-b border-slate-800/50 py-1">
+        <li class="border-b border-gray-200 py-1">
           <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border {% if alert.severity == 'critical' %}bg-red-500/15 text-red-400 border-red-500/30{% elif alert.severity == 'warn' %}bg-amber-500/15 text-amber-400 border-amber-500/30{% else %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% endif %}">{{ alert.severity|upper }}</span>
-          <span class="text-xs text-slate-200 ml-1">{{ alert.message }}</span>
+          <span class="text-xs text-gray-800 ml-1">{{ alert.message }}</span>
         </li>
       {% endfor %}
     </ul>

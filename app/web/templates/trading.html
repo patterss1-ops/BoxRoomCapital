@@ -6,69 +6,69 @@
   <div class="flex flex-col gap-2 overflow-hidden">
 
     <!-- Execution Controls + Manual Trade (inline row) -->
-    <div class="bg-slate-900 border border-slate-800 rounded-md p-1.5 flex-shrink-0">
+    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-shrink-0">
       <div class="flex gap-2 items-end flex-wrap">
         <!-- Bot Controls -->
         <form hx-post="/api/actions/start" hx-target="#action-result" hx-swap="innerHTML" class="flex gap-1 items-end">
-          <select name="mode" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50">
+          <select name="mode" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50">
             <option value="shadow" {% if default_mode == "shadow" %}selected{% endif %}>Shadow</option>
             <option value="live" {% if default_mode == "live" %}selected{% endif %}>Live</option>
           </select>
-          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">Start</button>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">Start</button>
         </form>
         <form hx-post="/api/actions/stop" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Stop the bot now?">
-          <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-red-500 transition-colors">Stop</button>
+          <button type="submit" class="bg-red-600 hover:bg-red-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-red-500 transition-colors">Stop</button>
         </form>
         <form hx-post="/api/actions/pause" hx-target="#action-result" hx-swap="innerHTML">
-          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2.5 py-1 rounded text-xs border border-slate-600 transition-colors">Pause</button>
+          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-2.5 py-1 rounded text-xs border border-gray-300 transition-colors">Pause</button>
         </form>
         <form hx-post="/api/actions/resume" hx-target="#action-result" hx-swap="innerHTML">
-          <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2.5 py-1 rounded text-xs border border-slate-600 transition-colors">Resume</button>
+          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-2.5 py-1 rounded text-xs border border-gray-300 transition-colors">Resume</button>
         </form>
         <form hx-post="/api/actions/scan-now" hx-target="#action-result" hx-swap="innerHTML">
           <input type="hidden" name="mode" value="shadow" />
-          <button type="submit" class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-2.5 py-1 rounded text-xs border border-slate-700 transition-colors">Scan</button>
+          <button type="submit" class="bg-transparent hover:bg-gray-100 text-gray-700 font-semibold px-2.5 py-1 rounded text-xs border border-gray-300 transition-colors">Scan</button>
         </form>
         <form hx-post="/api/actions/reconcile" hx-target="#action-result" hx-swap="innerHTML">
-          <button type="submit" class="bg-transparent hover:bg-slate-800 text-slate-300 font-semibold px-2.5 py-1 rounded text-xs border border-slate-700 transition-colors">Recon</button>
+          <button type="submit" class="bg-transparent hover:bg-gray-100 text-gray-700 font-semibold px-2.5 py-1 rounded text-xs border border-gray-300 transition-colors">Recon</button>
         </form>
 
-        <div class="border-l border-slate-700 h-5 mx-1"></div>
+        <div class="border-l border-gray-300 h-5 mx-1"></div>
 
         <!-- Manual Trade (inline) -->
         <form hx-post="/api/actions/manual-trade" hx-target="#action-result" hx-swap="innerHTML"
               data-confirm="Place this trade with real money?" class="flex gap-1 items-end">
-          <select id="trade-epic" name="epic" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50 max-w-[140px]">
+          <select id="trade-epic" name="epic" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50 max-w-[140px]">
             {% for ticker, info in market_map.items() %}
             <option value="{{ info.epic }}">{{ ticker }}</option>
             {% endfor %}
           </select>
-          <select id="trade-direction" name="direction" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50 w-16">
+          <select id="trade-direction" name="direction" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50 w-16">
             <option value="BUY">BUY</option>
             <option value="SELL">SELL</option>
           </select>
           <input type="number" name="size" value="0.50" min="0.10" step="0.10"
-            class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50 w-16" />
-          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors whitespace-nowrap">Trade</button>
+            class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs focus:ring-1 focus:ring-blue-500/50 w-16" />
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors whitespace-nowrap">Trade</button>
         </form>
       </div>
     </div>
 
     <!-- Market Chart -->
-    <div class="bg-slate-900 border border-slate-800 rounded-md p-1.5 flex-shrink-0" style="height: 35%;">
+    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-shrink-0" style="height: 35%;">
       <div class="flex justify-between items-baseline mb-1">
-        <h3 class="text-xs font-semibold text-slate-200">Market</h3>
-        <span id="chart-market-label" class="text-[10px] text-slate-500 font-mono">{{ default_epic }}</span>
+        <h3 class="text-xs font-semibold text-gray-800">Market</h3>
+        <span id="chart-market-label" class="text-[10px] text-gray-400 font-mono">{{ default_epic }}</span>
       </div>
       <div id="market-chart" class="w-full h-[calc(100%-20px)]"></div>
     </div>
 
     <!-- Tabbed: Market Browser / Broker / Risk Controls -->
-    <div class="bg-slate-900 border border-slate-800 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-slate-800 mb-1.5 flex-shrink-0" id="left-tabs">
-        <button onclick="switchTab('left','tab-markets')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-white" data-tab="tab-markets">Markets</button>
-        <button onclick="switchTab('left','tab-broker')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-broker">Broker</button>
-        <button onclick="switchTab('left','tab-risk')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-risk">Risk Ctrl</button>
+    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
+      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="left-tabs">
+        <button onclick="switchTab('left','tab-markets')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-markets">Markets</button>
+        <button onclick="switchTab('left','tab-broker')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-broker">Broker</button>
+        <button onclick="switchTab('left','tab-risk')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-risk">Risk Ctrl</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-markets" class="active" id="market-browser-panel" hx-get="/fragments/market-browser" hx-trigger="load delay:500ms, every 30s" hx-swap="innerHTML"></div>
@@ -77,36 +77,36 @@
           <!-- Risk Controls inline -->
           <div class="grid grid-cols-2 gap-1.5 p-1">
             <form hx-post="/api/actions/kill-switch-enable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Enable kill switch?" class="flex flex-col gap-1">
-              <input type="text" name="reason" value="Manual kill switch" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
-              <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-red-500 transition-colors">Kill ON</button>
+              <input type="text" name="reason" value="Manual kill switch" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
+              <button type="submit" class="bg-red-600 hover:bg-red-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-red-500 transition-colors">Kill ON</button>
             </form>
             <form hx-post="/api/actions/kill-switch-disable" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Disable kill switch?" class="flex flex-col gap-1">
-              <input type="text" name="reason" value="Manual clear" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
-              <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">Kill OFF</button>
+              <input type="text" name="reason" value="Manual clear" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
+              <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">Kill OFF</button>
             </form>
             <form hx-post="/api/actions/risk-throttle" hx-target="#action-result" hx-swap="innerHTML" class="flex gap-1 items-end col-span-2">
-              <input type="number" name="throttle_pct" min="10" max="100" value="100" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs w-16 focus:ring-1 focus:ring-blue-500/50" />
-              <input type="text" name="reason" value="Throttle" class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
-              <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2.5 py-1 rounded text-xs border border-slate-600 transition-colors">Set</button>
+              <input type="number" name="throttle_pct" min="10" max="100" value="100" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs w-16 focus:ring-1 focus:ring-blue-500/50" />
+              <input type="text" name="reason" value="Throttle" class="flex-1 bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
+              <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-2.5 py-1 rounded text-xs border border-gray-300 transition-colors">Set</button>
             </form>
             <form hx-post="/api/actions/cooldown-set" hx-target="#action-result" hx-swap="innerHTML" class="flex gap-1 items-end">
-              <input type="text" name="ticker" placeholder="SPY" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs w-14 placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
-              <input type="number" name="minutes" min="1" value="30" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs w-14 focus:ring-1 focus:ring-blue-500/50" />
+              <input type="text" name="ticker" placeholder="SPY" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs w-14 placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
+              <input type="number" name="minutes" min="1" value="30" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs w-14 focus:ring-1 focus:ring-blue-500/50" />
               <input type="hidden" name="reason" value="Manual cooldown" />
-              <button type="submit" class="bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold px-2.5 py-1 rounded text-xs border border-slate-600 transition-colors">Cool</button>
+              <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-2.5 py-1 rounded text-xs border border-gray-300 transition-colors">Cool</button>
             </form>
             <form hx-post="/api/actions/cooldown-clear" hx-target="#action-result" hx-swap="innerHTML" class="flex gap-1 items-end">
-              <input type="text" name="ticker" placeholder="SPY" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs w-14 placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
+              <input type="text" name="ticker" placeholder="SPY" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs w-14 placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
               <input type="hidden" name="reason" value="Manual clear" />
-              <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">Clear</button>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-blue-500 transition-colors">Clear</button>
             </form>
           </div>
           <!-- Close Spread -->
           <form hx-post="/api/actions/close-spread" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Close spread now?" class="flex gap-1 items-end p-1">
-            <input type="text" name="spread_id" placeholder="spread_id" class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
-            <input type="text" name="ticker" placeholder="SPY" class="bg-slate-800 border border-slate-700 text-slate-200 rounded px-2 py-1 text-xs w-14 placeholder-slate-500 focus:ring-1 focus:ring-blue-500/50" />
+            <input type="text" name="spread_id" placeholder="spread_id" class="flex-1 bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
+            <input type="text" name="ticker" placeholder="SPY" class="bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-1 text-xs w-14 placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50" />
             <input type="hidden" name="reason" value="Manual close" />
-            <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-2.5 py-1 rounded text-xs border border-red-500 transition-colors">Close</button>
+            <button type="submit" class="bg-red-600 hover:bg-red-500 text-gray-900 font-semibold px-2.5 py-1 rounded text-xs border border-red-500 transition-colors">Close</button>
           </form>
         </div>
       </div>
@@ -117,12 +117,12 @@
   <div class="flex flex-col gap-2 overflow-hidden">
 
     <!-- Tabbed: Positions / Orders / Reconcile -->
-    <div class="bg-slate-900 border border-slate-800 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-slate-800 mb-1.5 flex-shrink-0" id="right-tabs">
-        <button onclick="switchTab('right','tab-positions')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-white" data-tab="tab-positions">Positions</button>
-        <button onclick="switchTab('right','tab-orders')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-orders">Orders</button>
-        <button onclick="switchTab('right','tab-status')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-status">Status</button>
-        <button onclick="switchTab('right','tab-reconcile')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-reconcile">Recon</button>
+    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
+      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="right-tabs">
+        <button onclick="switchTab('right','tab-positions')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-positions">Positions</button>
+        <button onclick="switchTab('right','tab-orders')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-orders">Orders</button>
+        <button onclick="switchTab('right','tab-status')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-status">Status</button>
+        <button onclick="switchTab('right','tab-reconcile')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-reconcile">Recon</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-positions" class="active" id="open-positions-panel" hx-get="/fragments/open-positions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>
@@ -133,13 +133,13 @@
     </div>
 
     <!-- Tabbed: Control Actions / Broker Health / Intent Audit / Ledger -->
-    <div class="bg-slate-900 border border-slate-800 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-slate-800 mb-1.5 flex-shrink-0" id="right2-tabs">
-        <button onclick="switchTab('right2','tab-ctrl')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-white" data-tab="tab-ctrl">Actions</button>
-        <button onclick="switchTab('right2','tab-pipeline')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-pipeline">Pipeline</button>
-        <button onclick="switchTab('right2','tab-health')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-health">Health</button>
-        <button onclick="switchTab('right2','tab-audit')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-audit">Audit</button>
-        <button onclick="switchTab('right2','tab-ledger')" class="px-2.5 py-1 text-[11px] text-slate-500 hover:text-slate-300 border-b-2 border-transparent" data-tab="tab-ledger">Ledger</button>
+    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
+      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="right2-tabs">
+        <button onclick="switchTab('right2','tab-ctrl')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-ctrl">Actions</button>
+        <button onclick="switchTab('right2','tab-pipeline')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-pipeline">Pipeline</button>
+        <button onclick="switchTab('right2','tab-health')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-health">Health</button>
+        <button onclick="switchTab('right2','tab-audit')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-audit">Audit</button>
+        <button onclick="switchTab('right2','tab-ledger')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-ledger">Ledger</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-ctrl" class="active" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>

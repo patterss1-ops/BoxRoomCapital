@@ -21,8 +21,7 @@ from intelligence.sa_quant_client import SAQuantClient
 from intelligence.sa_factor_grades import normalize_factor_grades, store_factor_grades
 
 
-def _utc_now_iso() -> str:
-    return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+from utils.datetime_utils import utc_now_iso as _utc_now_iso
 
 
 @dataclass(frozen=True)
