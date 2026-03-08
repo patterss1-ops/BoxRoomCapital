@@ -1,27 +1,27 @@
-<div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+<div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h3 class="text-sm font-semibold text-slate-200 uppercase tracking-wide">Backtest Runs</h3>
-    <span class="text-slate-500 text-xs">{{ backtest_jobs|length }} run{{ 's' if backtest_jobs|length != 1 }}</span>
+    <h3 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">Backtest Runs</h3>
+    <span class="text-gray-400 text-xs">{{ backtest_jobs|length }} run{{ 's' if backtest_jobs|length != 1 }}</span>
   </div>
 
   {% if backtest_jobs %}
   <div class="overflow-x-auto">
     <table class="w-full text-sm">
       <thead>
-        <tr class="border-b border-slate-800">
-          <th class="text-left text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Strategy</th>
-          <th class="text-left text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Status</th>
-          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Return</th>
-          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Sharpe</th>
-          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Max DD</th>
-          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2 pr-3">Trades</th>
-          <th class="text-right text-slate-500 text-xs uppercase tracking-wide pb-2">Win%</th>
+        <tr class="border-b border-gray-200">
+          <th class="text-left text-gray-400 text-xs uppercase tracking-wide pb-2 pr-3">Strategy</th>
+          <th class="text-left text-gray-400 text-xs uppercase tracking-wide pb-2 pr-3">Status</th>
+          <th class="text-right text-gray-400 text-xs uppercase tracking-wide pb-2 pr-3">Return</th>
+          <th class="text-right text-gray-400 text-xs uppercase tracking-wide pb-2 pr-3">Sharpe</th>
+          <th class="text-right text-gray-400 text-xs uppercase tracking-wide pb-2 pr-3">Max DD</th>
+          <th class="text-right text-gray-400 text-xs uppercase tracking-wide pb-2 pr-3">Trades</th>
+          <th class="text-right text-gray-400 text-xs uppercase tracking-wide pb-2">Win%</th>
         </tr>
       </thead>
       <tbody>
         {% for job in backtest_jobs %}
-        <tr class="border-b border-slate-800/50 hover:bg-slate-800/30">
-          <td class="py-1.5 pr-3 text-slate-300 font-mono text-xs">
+        <tr class="border-b border-gray-200 hover:bg-gray-100/30">
+          <td class="py-1.5 pr-3 text-gray-700 font-mono text-xs">
             {% set detail = job.detail %}
             {% if detail %}
               {% set d = detail if detail is mapping else {} %}
@@ -38,7 +38,7 @@
             {% elif job.status == 'failed' %}
               <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-500/20 text-red-300 border border-red-500/30">failed</span>
             {% else %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-slate-700/50 text-slate-400 border border-slate-600">{{ job.status }}</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-500 border border-gray-300">{{ job.status }}</span>
             {% endif %}
           </td>
           {% if job.result_parsed and job.result_parsed is mapping and job.result_parsed.get('total_return_pct') is not none %}
@@ -49,20 +49,20 @@
             <td class="py-1.5 pr-3 text-right font-mono text-xs {% if job.result_parsed.total_return_pct > 0 %}text-emerald-400{% else %}text-red-400{% endif %}">
               {{ "%.1f"|format(job.result_parsed.total_return_pct) }}%
             </td>
-            <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
+            <td class="py-1.5 pr-3 text-right font-mono text-xs text-gray-700">
               {{ "%.2f"|format(sharpe_ratio if sharpe_ratio is not none else 0) }}
             </td>
             <td class="py-1.5 pr-3 text-right font-mono text-xs text-red-400">
               {{ "%.1f"|format(max_drawdown_pct if max_drawdown_pct is not none else 0) }}%
             </td>
-            <td class="py-1.5 pr-3 text-right font-mono text-xs text-slate-300">
+            <td class="py-1.5 pr-3 text-right font-mono text-xs text-gray-700">
               {{ total_trades if total_trades is not none else '-' }}
             </td>
-            <td class="py-1.5 text-right font-mono text-xs text-slate-300">
+            <td class="py-1.5 text-right font-mono text-xs text-gray-700">
               {{ "%.1f"|format(win_rate if win_rate is not none else 0) }}%
             </td>
           {% else %}
-            <td class="py-1.5 pr-3 text-right text-slate-500 text-xs" colspan="5">
+            <td class="py-1.5 pr-3 text-right text-gray-400 text-xs" colspan="5">
               {% if job.status == 'running' %}computing...{% elif job.error %}{{ job.error[:40] }}{% else %}-{% endif %}
             </td>
           {% endif %}
@@ -72,6 +72,6 @@
     </table>
   </div>
   {% else %}
-  <p class="text-slate-500 text-sm">No backtest runs yet. Submit one via POST /api/backtest.</p>
+  <p class="text-gray-400 text-sm">No backtest runs yet. Submit one via POST /api/backtest.</p>
   {% endif %}
 </div>

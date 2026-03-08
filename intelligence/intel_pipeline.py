@@ -21,12 +21,14 @@ import os
 import re as _re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 import requests
 
+import config
 from intelligence.event_store import EventStore, EventRecord
 from data.trade_db import create_job, update_job
 
@@ -598,16 +600,12 @@ def analyze_intel(submission: IntelSubmission) -> IntelAnalysis:
     ).hexdigest()[:12]
     analysis_id = f"intel_{h}"
 
-    round1_results: List[Dict[str, Any]] = []
-    for provider, key in api_keys.items():
-        if not key:
-            continue
+    # Run all models in parallel with per-model timeout
+    def _run_round1(provider: str, key: str) -> Optional[Dict[str, Any]]:
         try:
             t0 = time.monotonic()
             result = query_fns[provider](prompt, key)
             duration = time.monotonic() - t0
-            round1_results.append(result)
-            # Log cost
             usage = result.get("usage", {})
             inp = usage.get("input_tokens", 0)
             out = usage.get("output_tokens", 0)
@@ -619,8 +617,30 @@ def analyze_intel(submission: IntelSubmission) -> IntelAnalysis:
             logger.info("Round 1 from %s: %d in/%d out tokens, $%.4f, %.1fs (confidence: %s)",
                         result["model"], inp, out, cost, duration,
                         result.get("parsed", {}).get("confidence", "?"))
+            return result
         except Exception as exc:
             logger.warning("Round 1 from %s failed: %s", provider, exc)
+            return None
+
+    round1_results: List[Dict[str, Any]] = []
+    active_providers = {p: k for p, k in api_keys.items() if k}
+    with ThreadPoolExecutor(max_workers=len(active_providers) or 1) as pool:
+        futures = {pool.submit(_run_round1, p, k): p for p, k in active_providers.items()}
+        try:
+            for future in as_completed(futures, timeout=config.COUNCIL_ROUND_TIMEOUT):
+                provider = futures[future]
+                try:
+                    result = future.result(timeout=5)
+                    if result:
+                        round1_results.append(result)
+                except FuturesTimeoutError:
+                    logger.warning("Round 1 from %s timed out", provider)
+                except Exception as exc:
+                    logger.warning("Round 1 from %s raised: %s", provider, exc)
+        except FuturesTimeoutError:
+            done = {futures[f] for f in futures if f.done()}
+            missing = set(active_providers) - done
+            logger.warning("Round 1 overall timeout — still waiting on: %s", missing)
 
     if not round1_results:
         logger.error("No AI models available for intel analysis")
@@ -640,25 +660,22 @@ def analyze_intel(submission: IntelSubmission) -> IntelAnalysis:
     debate_summary = ""
     if len(round1_results) >= 2:
         logger.info("Starting Round 2 debate with %d models", len(round1_results))
-        for i, own in enumerate(round1_results):
-            others = [r for j, r in enumerate(round1_results) if j != i]
+
+        def _run_round2(own: Dict, others: List[Dict]) -> Optional[Dict[str, Any]]:
             model_name = own["model"]
-            # Map model name back to provider key (handle "chatgpt (gpt-5.4)" etc.)
             provider_map = {"claude": "anthropic", "chatgpt": "openai", "grok": "xai", "gemini": "google"}
             base_name = model_name.split("(")[0].strip().split()[0].lower()
             pkey = provider_map.get(base_name, "")
             api_key = api_keys.get(pkey, "")
             query_fn = query_fns.get(pkey)
             if not api_key or not query_fn:
-                continue
+                return None
             try:
                 r2_prompt = _build_round2_prompt(submission, own, others)
                 t0 = time.monotonic()
                 r2 = query_fn(r2_prompt, api_key)
                 duration = time.monotonic() - t0
                 r2["round"] = 2
-                round2_results.append(r2)
-                # Log cost
                 usage = r2.get("usage", {})
                 inp = usage.get("input_tokens", 0)
                 out = usage.get("output_tokens", 0)
@@ -667,8 +684,33 @@ def analyze_intel(submission: IntelSubmission) -> IntelAnalysis:
                 log_council_cost(analysis_id, r2["model"], model_key, 2, inp, out, cost, duration)
                 logger.info("Round 2 from %s: %d in/%d out tokens, $%.4f, %.1fs",
                             model_name, inp, out, cost, duration)
+                return r2
             except Exception as exc:
                 logger.warning("Round 2 from %s failed: %s", model_name, exc)
+                return None
+
+        r2_tasks = []
+        for i, own in enumerate(round1_results):
+            others = [r for j, r in enumerate(round1_results) if j != i]
+            r2_tasks.append((own, others))
+
+        with ThreadPoolExecutor(max_workers=len(r2_tasks) or 1) as pool:
+            futures = {pool.submit(_run_round2, own, others): own["model"] for own, others in r2_tasks}
+            try:
+                for future in as_completed(futures, timeout=config.COUNCIL_ROUND_TIMEOUT):
+                    model_name = futures[future]
+                    try:
+                        r2 = future.result(timeout=5)
+                        if r2:
+                            round2_results.append(r2)
+                    except FuturesTimeoutError:
+                        logger.warning("Round 2 from %s timed out", model_name)
+                    except Exception as exc:
+                        logger.warning("Round 2 from %s raised: %s", model_name, exc)
+            except FuturesTimeoutError:
+                done = {futures[f] for f in futures if f.done()}
+                missing = set(f"{own['model']}" for own, _ in r2_tasks) - done
+                logger.warning("Round 2 overall timeout — still waiting on: %s", missing)
 
         # Build debate summary from round 2
         debate_parts = []

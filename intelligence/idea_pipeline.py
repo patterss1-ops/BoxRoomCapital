@@ -755,9 +755,10 @@ class IdeaPipelineManager:
         stages = {}
         for stage in STAGES:
             ideas = get_trade_ideas(stage=stage, limit=200, db_path=self.db_path)
+            display_limit = 12 if stage == "rejected" else 6
             stages[stage] = {
                 "count": len(ideas),
-                "ideas": ideas[:6],  # Top 6 for display
+                "ideas": ideas[:display_limit],
             }
 
         all_ideas = get_trade_ideas(limit=200, db_path=self.db_path)

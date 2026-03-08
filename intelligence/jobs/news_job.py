@@ -22,8 +22,7 @@ from app.signal.layers.news_sentiment import score_news_sentiment
 logger = logging.getLogger(__name__)
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+from utils.datetime_utils import utc_now_iso as _utc_now_iso
 
 
 @dataclass(frozen=True)

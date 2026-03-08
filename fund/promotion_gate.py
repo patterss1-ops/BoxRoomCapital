@@ -15,6 +15,7 @@ from data.trade_db import (
     get_active_strategy_parameter_set,
     get_strategy_promotions,
 )
+import config
 from utils.datetime_utils import parse_iso_utc
 
 
@@ -87,13 +88,13 @@ def validate_lane_transition(from_status: str, to_status: str) -> tuple[bool, li
 
 
 def build_promotion_gate_report(
-    strategy_key: str = "ibs_credit_spreads",
+    strategy_key: str = config.DEFAULT_STRATEGY_KEY,
     cooldown_hours: int = 24,
     now_utc: Optional[datetime] = None,
     db_path: str = DB_PATH,
 ) -> dict[str, Any]:
     """Build a deterministic lane report with recommended next promotion action."""
-    clean_strategy = strategy_key.strip().lower() or "ibs_credit_spreads"
+    clean_strategy = strategy_key.strip().lower() or config.DEFAULT_STRATEGY_KEY
     cooldown = max(0, int(cooldown_hours))
     now = now_utc or datetime.now(timezone.utc)
     if now.tzinfo is None:

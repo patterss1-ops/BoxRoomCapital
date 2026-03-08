@@ -1,26 +1,23 @@
 """Tests for the Idea Pipeline — trade idea lifecycle management."""
 import json
 import os
-import tempfile
 import uuid
 
 import pytest
 
-# Use a temp DB for all tests
-_test_db = os.path.join(tempfile.gettempdir(), f"test_idea_pipeline_{uuid.uuid4().hex[:8]}.db")
+
+_test_db = ""
 
 
 @pytest.fixture(autouse=True)
-def _setup_db(monkeypatch):
-    """Initialise a fresh test DB for each test."""
+def _setup_db(monkeypatch, tmp_path):
+    """Initialise a fresh test DB per test using pytest's tmp_path."""
+    global _test_db
     from data import trade_db
-    monkeypatch.setattr(trade_db, "DB_PATH", _test_db)
-    trade_db.init_db(_test_db)
-    yield
-    try:
-        os.unlink(_test_db)
-    except FileNotFoundError:
-        pass
+    db_path = str(tmp_path / "test_idea_pipeline.db")
+    _test_db = db_path
+    monkeypatch.setattr(trade_db, "DB_PATH", db_path)
+    trade_db.init_db(db_path)
 
 
 # ─── Schema tests ────────────────────────────────────────────────────────────

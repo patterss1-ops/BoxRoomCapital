@@ -183,9 +183,9 @@ class OptionsRecoveryMixin:
         self.active_param_set_status = "default"
 
         preferred_status = "live" if self.mode == "live" else "shadow"
-        row = get_active_strategy_parameter_set("ibs_credit_spreads", status=preferred_status)
+        row = get_active_strategy_parameter_set(config.DEFAULT_STRATEGY_KEY, status=preferred_status)
         if not row and self.mode != "live":
-            row = get_active_strategy_parameter_set("ibs_credit_spreads", status="staged_live")
+            row = get_active_strategy_parameter_set(config.DEFAULT_STRATEGY_KEY, status="staged_live")
         if not row:
             return
 

@@ -21,6 +21,7 @@ from urllib.parse import parse_qs, urlparse
 
 from data.trade_db import DB_PATH, get_conn
 from intelligence.sa_quant_client import SAQuantSnapshot, score_sa_quant_snapshot
+from intelligence.scrapers import NUMERIC_TO_GRADE, RATING_MAP, normalize_rating
 
 logger = logging.getLogger(__name__)
 
@@ -39,18 +40,7 @@ _YF_RATING_MAP: Dict[str, str] = {
     "sell": "sell",
 }
 
-_BROWSER_RATING_MAP: Dict[str, str] = {
-    "strong buy": "strong buy",
-    "buy": "buy",
-    "hold": "hold",
-    "neutral": "hold",
-    "sell": "sell",
-    "strong sell": "strong sell",
-    "very bullish": "very bullish",
-    "bullish": "bullish",
-    "bearish": "bearish",
-    "very bearish": "very bearish",
-}
+_BROWSER_RATING_MAP = RATING_MAP
 
 _BROWSER_GRADE_KEYS: Dict[str, str] = {
     "value": "value_grade",
@@ -65,21 +55,7 @@ _BROWSER_GRADE_KEYS: Dict[str, str] = {
     "revisions_grade": "revisions_grade",
 }
 
-_SA_NUMERIC_TO_GRADE: Dict[int, str] = {
-    1: "F",
-    2: "D-",
-    3: "D",
-    4: "D+",
-    5: "C-",
-    6: "C",
-    7: "C+",
-    8: "B-",
-    9: "B",
-    10: "B+",
-    11: "A-",
-    12: "A",
-    13: "A+",
-}
+_SA_NUMERIC_TO_GRADE = NUMERIC_TO_GRADE
 
 _SA_HISTORY_GRADE_KEYS: Dict[str, str] = {
     "valueGrade": "value_grade",
@@ -120,6 +96,8 @@ _SA_CAPITAL_STRUCTURE_FIELDS = {
     "total_cash",
     "total_debt",
 }
+
+_SA_VALUATION_AVERAGE_FIELDS = {f"{field}_avg_5y" for field in _SA_VALUATION_FIELDS}
 
 
 @dataclass(frozen=True)
@@ -172,11 +150,7 @@ def _coerce_float(value: Any) -> Optional[float]:
         return None
 
 
-def _normalize_rating(value: Any) -> str:
-    clean = " ".join(str(value or "").strip().lower().split())
-    if not clean:
-        return ""
-    return _BROWSER_RATING_MAP.get(clean, clean)
+_normalize_rating = normalize_rating
 
 
 def _normalize_grade_value(value: Any) -> str:
@@ -345,7 +319,7 @@ def _metric_type_field_map(payload: Mapping[str, Any]) -> Dict[str, str]:
     return mapping
 
 
-def _metric_values_from_payload(payload: Any) -> Dict[str, Any]:
+def _metric_values_from_payload(payload: Any, allowed_fields: Optional[set[str]] = None) -> Dict[str, Any]:
     if isinstance(payload, list):
         merged: Dict[str, Any] = {}
         for item in payload:
@@ -353,6 +327,8 @@ def _metric_values_from_payload(payload: Any) -> Dict[str, Any]:
                 continue
             for key, value in item.items():
                 if key in {"slug", "tickerId"} or value is None:
+                    continue
+                if allowed_fields is not None and str(key) not in allowed_fields:
                     continue
                 merged[str(key)] = value
         return merged
@@ -374,6 +350,8 @@ def _metric_values_from_payload(payload: Any) -> Dict[str, Any]:
         metric_id = str(metric_data.get("id") or "").strip() if isinstance(metric_data, Mapping) else ""
         field = field_map.get(metric_id, "")
         if not field or not isinstance(attrs, Mapping):
+            continue
+        if allowed_fields is not None and field not in allowed_fields:
             continue
         value = attrs.get("value")
         if value is not None:
@@ -581,9 +559,15 @@ def normalize_sa_symbol_snapshot(payload: Mapping[str, Any]) -> Dict[str, Any]:
                 summary.setdefault("sector_rank", section_payload.get("sector_rank"))
                 summary.setdefault("industry_rank", section_payload.get("industry_rank"))
         elif section == "price":
-            section_payload = _metric_values_from_payload(record_payload)
-        elif section in {"valuation_metrics", "valuation_averages_5y", "capital_structure", "sector_metrics"} and isinstance(record_payload, Mapping):
-            section_payload = _metric_values_from_payload(record_payload)
+            section_payload = _metric_values_from_payload(record_payload, allowed_fields={"primary_price"})
+        elif section == "valuation_metrics" and isinstance(record_payload, Mapping):
+            section_payload = _metric_values_from_payload(record_payload, allowed_fields=_SA_VALUATION_FIELDS)
+        elif section == "valuation_averages_5y" and isinstance(record_payload, Mapping):
+            section_payload = _metric_values_from_payload(record_payload, allowed_fields=_SA_VALUATION_AVERAGE_FIELDS)
+        elif section == "capital_structure" and isinstance(record_payload, Mapping):
+            section_payload = _metric_values_from_payload(record_payload, allowed_fields=_SA_CAPITAL_STRUCTURE_FIELDS)
+        elif section == "sector_metrics" and isinstance(record_payload, Mapping):
+            section_payload = _metric_values_from_payload(record_payload, allowed_fields=_SA_VALUATION_FIELDS)
         elif section == "metric_grades" and isinstance(record_payload, Mapping):
             section_payload = _metric_grades_from_payload(record_payload)
         elif section == "earnings_estimates" and isinstance(record_payload, Mapping):

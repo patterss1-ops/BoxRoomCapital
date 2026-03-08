@@ -16,6 +16,7 @@ from app.api import server
 from app.signal.types import LayerId
 from data import trade_db
 from intelligence.event_store import EventRecord, EventStore
+from tests.test_helpers import FakeFeatureStore, FakeWriteEventStore
 from intelligence.scrapers.sa_adapter import (
     SA_BROWSER_CAPTURE_EVENT_TYPE,
     SA_BROWSER_CAPTURE_SOURCE,
@@ -88,6 +89,36 @@ def _sample_sa_history_payload():
                     "meta": {"is_locked": False},
                 }
             ]
+        },
+    }
+
+
+def _sample_article_capture_payload(page_type: str = "article"):
+    return {
+        "url": "https://seekingalpha.com/article/123456-apple-still-expensive",
+        "canonical_url": "https://seekingalpha.com/article/123456-apple-still-expensive",
+        "title": "Apple Still Expensive",
+        "page_type": page_type,
+        "author": "Jane Analyst",
+        "ticker": "AAPL",
+        "tickers": ["AAPL"],
+        "content": (
+            "Apple shares still look expensive relative to the current earnings path. "
+            "The key risk is multiple compression if services growth decelerates. "
+            "Near-term sentiment is constructive, but valuation leaves little margin for error."
+        ),
+        "summary": "AAPL remains fundamentally strong, but valuation is stretched.",
+        "description": "AAPL remains fundamentally strong, but valuation is stretched.",
+        "published_at": NOW_ISO,
+        "captured_at": NOW_ISO,
+        "source": SA_NETWORK_CAPTURE_SOURCE,
+        "bookmarklet_version": "sa-network-extension-0.4.0",
+        "raw_fields": {
+            "canonical_url": "https://seekingalpha.com/article/123456-apple-still-expensive",
+            "published_at": NOW_ISO,
+            "section": "Technology",
+            "keywords": ["AAPL", "technology"],
+            "content_length": 214,
         },
     }
 
@@ -478,6 +509,7 @@ def test_normalize_sa_symbol_snapshot_extracts_structured_sections():
     assert summary["raw_fields"]["primary_price"] == 397.05
     assert sections["relative_rankings"]["industry_name"] == "Semiconductors"
     assert sections["valuation_metrics"]["pe_ratio"] == 37.670307
+    assert "price_high_52w" not in sections["valuation_metrics"]
     assert sections["metric_grades"]["main_quant"]["pe_ratio"]["grade"] == "A+"
     assert sections["metric_grades"]["dividends"]["dividend_yield"]["grade"] == "A+"
     assert sections["earnings_estimates"]["estimates"]["eps_normalized_consensus_mean"]["1"]["value"] == 34.61864
@@ -706,23 +738,10 @@ def test_sa_quant_capture_webhook_stores_capture_and_signal(monkeypatch):
     recorded_events = []
     stored_features = []
 
-    class _FakeEventStore:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def write_event(self, event):
-            recorded_events.append(event)
-            return {"id": f"evt-{len(recorded_events)}"}
-
-    class _FakeFeatureStore:
-        def __init__(self, *args, **kwargs):
-            self.closed = False
-
-        def close(self):
-            self.closed = True
-
-    monkeypatch.setattr(server, "EventStore", _FakeEventStore)
-    monkeypatch.setattr(server, "FeatureStore", _FakeFeatureStore)
+    _store = FakeWriteEventStore()
+    monkeypatch.setattr(server, "EventStore", lambda *a, **kw: _store)
+    recorded_events = _store.events
+    monkeypatch.setattr(server, "FeatureStore", FakeFeatureStore)
     monkeypatch.setattr(
         server,
         "store_factor_grades",
@@ -754,23 +773,10 @@ def test_sa_symbol_capture_webhook_stores_symbol_snapshot_and_signal(monkeypatch
     recorded_events = []
     stored_features = []
 
-    class _FakeEventStore:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def write_event(self, event):
-            recorded_events.append(event)
-            return {"id": f"evt-{len(recorded_events)}"}
-
-    class _FakeFeatureStore:
-        def __init__(self, *args, **kwargs):
-            self.closed = False
-
-        def close(self):
-            self.closed = True
-
-    monkeypatch.setattr(server, "EventStore", _FakeEventStore)
-    monkeypatch.setattr(server, "FeatureStore", _FakeFeatureStore)
+    _store = FakeWriteEventStore()
+    monkeypatch.setattr(server, "EventStore", lambda *a, **kw: _store)
+    recorded_events = _store.events
+    monkeypatch.setattr(server, "FeatureStore", FakeFeatureStore)
     monkeypatch.setattr(
         server,
         "store_factor_grades",
@@ -814,3 +820,242 @@ def test_sa_symbol_capture_webhook_stores_symbol_snapshot_and_signal(monkeypatch
     assert "ratings_history" in recorded_events[2].payload["details"]["section_names"]
     assert stored_features[0][0] == "MU"
     assert stored_features[0][1]["growth_grade"] > 0
+
+
+def test_sa_page_capture_webhook_queues_article_intel(monkeypatch):
+    created_jobs = []
+    analyzed = []
+
+    _store = FakeWriteEventStore()
+    recorded_events = _store.events
+    monkeypatch.setattr(server, "EventStore", lambda *a, **kw: _store)
+    monkeypatch.setattr(server, "create_job", lambda **kwargs: created_jobs.append(kwargs))
+    monkeypatch.setattr(server, "analyze_intel_async", lambda submission, job_id: analyzed.append((submission, job_id)))
+    monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+
+    endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
+    response = asyncio.run(
+        endpoint(_build_json_request("/api/webhooks/sa_page_capture", _sample_article_capture_payload()))
+    )
+
+    if isinstance(response, JSONResponse):
+        body = json.loads(response.body.decode("utf-8"))
+        status_code = response.status_code
+    else:
+        body = response
+        status_code = 200
+
+    assert status_code == 200
+    assert body["ok"] is True
+    assert body["page_type"] == "article"
+    assert body["tickers"] == ["AAPL"]
+    assert "job_id" in body
+    assert created_jobs[0]["job_type"] == "intel_analysis"
+    assert analyzed[0][0].tickers == ["AAPL"]
+    assert analyzed[0][0].metadata["sa_page_type"] == "article"
+    assert recorded_events[0].event_type == "sa_page_capture"
+    assert recorded_events[0].payload["title"] == "Apple Still Expensive"
+
+
+def test_sa_page_capture_webhook_ignores_market_news_hub(monkeypatch):
+    created_jobs = []
+    analyzed = []
+
+    _store = FakeWriteEventStore()
+    recorded_events = _store.events
+
+    payload = _sample_article_capture_payload()
+    payload.update({
+        "url": "https://seekingalpha.com/market-news",
+        "canonical_url": "https://seekingalpha.com/market-news",
+        "title": "News",
+        "ticker": "CF",
+        "tickers": ["CF", "MOS", "NTR"],
+    })
+    payload["raw_fields"]["canonical_url"] = "https://seekingalpha.com/market-news"
+
+    monkeypatch.setattr(server, "EventStore", lambda *a, **kw: _store)
+    monkeypatch.setattr(server, "create_job", lambda **kwargs: created_jobs.append(kwargs))
+    monkeypatch.setattr(server, "analyze_intel_async", lambda submission, job_id: analyzed.append((submission, job_id)))
+    monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+
+    endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
+    response = asyncio.run(
+        endpoint(_build_json_request("/api/webhooks/sa_page_capture", payload))
+    )
+
+    if isinstance(response, JSONResponse):
+        body = json.loads(response.body.decode("utf-8"))
+        status_code = response.status_code
+    else:
+        body = response
+        status_code = 200
+
+    assert status_code == 200
+    assert body["ok"] is True
+    assert body["ignored"] is True
+    assert body["reason"] == "hub_page"
+    assert not recorded_events
+    assert not created_jobs
+    assert not analyzed
+
+
+def test_sa_page_capture_webhook_accepts_expanded_market_news_story(monkeypatch):
+    recorded_events = []
+    created_jobs = []
+    analyzed = []
+
+    class _FakeEventStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def write_event(self, event):
+            recorded_events.append(event)
+            return {"id": f"evt-{len(recorded_events)}"}
+
+    payload = _sample_article_capture_payload(page_type="news")
+    payload.update({
+        "url": "https://seekingalpha.com/market-news",
+        "canonical_url": "https://seekingalpha.com/news/4321987-apple-rallies-after-earnings",
+        "source_ref": "https://seekingalpha.com/news/4321987-apple-rallies-after-earnings",
+        "title": "Apple rallies after earnings",
+        "summary": "AAPL rises after a better-than-feared earnings update.",
+    })
+    payload["raw_fields"]["canonical_url"] = "https://seekingalpha.com/news/4321987-apple-rallies-after-earnings"
+
+    monkeypatch.setattr(server, "EventStore", _FakeEventStore)
+    monkeypatch.setattr(server, "create_job", lambda **kwargs: created_jobs.append(kwargs))
+    monkeypatch.setattr(server, "analyze_intel_async", lambda submission, job_id: analyzed.append((submission, job_id)))
+    monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+
+    endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
+    response = asyncio.run(
+        endpoint(_build_json_request("/api/webhooks/sa_page_capture", payload))
+    )
+
+    if isinstance(response, JSONResponse):
+        body = json.loads(response.body.decode("utf-8"))
+        status_code = response.status_code
+    else:
+        body = response
+        status_code = 200
+
+    assert status_code == 200
+    assert body["ok"] is True
+    assert body["page_type"] == "news"
+    assert created_jobs[0]["job_type"] == "intel_analysis"
+    assert analyzed[0][0].url == "https://seekingalpha.com/news/4321987-apple-rallies-after-earnings"
+    assert analyzed[0][0].metadata["sa_page_type"] == "news"
+    assert recorded_events[0].source_ref == "https://seekingalpha.com/news/4321987-apple-rallies-after-earnings"
+
+
+def test_sa_page_capture_webhook_skips_duplicate_canonical_url(tmp_path, monkeypatch):
+    db_path = _init_test_db(tmp_path)
+    payload = _sample_article_capture_payload()
+    created_jobs = []
+    analyzed = []
+
+    monkeypatch.setattr(server, "DB_PATH", db_path)
+    monkeypatch.setattr(server, "create_job", lambda **kwargs: created_jobs.append(kwargs))
+    monkeypatch.setattr(server, "analyze_intel_async", lambda submission, job_id: analyzed.append((submission, job_id)))
+    monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+
+    store = EventStore(db_path=db_path)
+    store.write_event(
+        EventRecord(
+            event_type="intel_analysis",
+            source="intel_seeking_alpha",
+            source_ref=payload["canonical_url"],
+            retrieved_at=NOW_ISO,
+            event_timestamp=NOW_ISO,
+            symbol="AAPL",
+            headline=payload["title"],
+            detail="existing intel analysis",
+            confidence=0.84,
+            provenance_descriptor={
+                "source": "seeking_alpha",
+                "url": payload["canonical_url"],
+                "title": payload["title"],
+                "models_used": 4,
+            },
+            payload={"url": payload["canonical_url"]},
+        )
+    )
+
+    endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
+    response = asyncio.run(
+        endpoint(_build_json_request("/api/webhooks/sa_page_capture", payload))
+    )
+
+    if isinstance(response, JSONResponse):
+        body = json.loads(response.body.decode("utf-8"))
+        status_code = response.status_code
+    else:
+        body = response
+        status_code = 200
+
+    intel_events = store.list_events(limit=10, event_type="intel_analysis")
+    sa_capture_events = store.list_events(limit=10, event_type="sa_page_capture")
+
+    assert status_code == 200
+    assert body["ok"] is True
+    assert body["ignored"] is True
+    assert body["reason"] == "duplicate_url"
+    assert not created_jobs
+    assert not analyzed
+    assert len(intel_events) == 1
+    assert len(sa_capture_events) == 1
+    assert sa_capture_events[0]["source_ref"] == payload["canonical_url"]
+
+
+def test_sa_page_capture_webhook_dispatches_symbol_payload(monkeypatch):
+    recorded_events = []
+    stored_features = []
+
+    class _FakeEventStore:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def write_event(self, event):
+            recorded_events.append(event)
+            return {"id": f"evt-{len(recorded_events)}"}
+
+    class _FakeFeatureStore:
+        def __init__(self, *args, **kwargs):
+            self.closed = False
+
+        def close(self):
+            self.closed = True
+
+    monkeypatch.setattr(server, "EventStore", _FakeEventStore)
+    monkeypatch.setattr(server, "FeatureStore", _FakeFeatureStore)
+    monkeypatch.setattr(
+        server,
+        "store_factor_grades",
+        lambda ticker, features, feature_store, as_of=None: stored_features.append((ticker, features)) or "rec-1",
+    )
+    monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+
+    endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
+    response = asyncio.run(
+        endpoint(_build_json_request("/api/webhooks/sa_page_capture", _sample_symbol_capture_payload()))
+    )
+
+    if isinstance(response, JSONResponse):
+        body = json.loads(response.body.decode("utf-8"))
+        status_code = response.status_code
+    else:
+        body = response
+        status_code = 200
+
+    assert status_code == 200
+    assert body["ok"] is True
+    assert body["ticker"] == "MU"
+    assert body["section_count"] == 6
+    assert round(body["quant_score"] or 0.0, 4) == 4.9968
+    assert {event.event_type for event in recorded_events} == {
+        SA_SYMBOL_CAPTURE_EVENT_TYPE,
+        "sa_browser_capture",
+        "signal_layer",
+    }
+    assert stored_features[0][0] == "MU"

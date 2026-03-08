@@ -1,39 +1,39 @@
 <div class="space-y-2">
-<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
+<section class="bg-white border border-gray-200 rounded-md p-1.5">
   <div class="flex justify-between items-baseline gap-2 mb-1.5">
-    <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Ledger</h3>
+    <h3 class="text-xs font-semibold text-gray-800 uppercase tracking-wide">Ledger</h3>
     <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border {% if reconcile.ok %}bg-emerald-500/15 text-emerald-400 border-emerald-500/30{% else %}bg-red-500/15 text-red-400 border-red-500/30{% endif %}">{{ "OK" if reconcile.ok else "ATT" }}</span>
   </div>
   <div class="grid grid-cols-[80px_1fr] gap-1 text-[11px] font-mono">
-    <span class="text-slate-500">Accounts</span><span class="text-slate-300">{{ ledger.summary.accounts or 0 }}</span>
-    <span class="text-slate-500">Positions</span><span class="text-slate-300">{{ ledger.summary.positions or 0 }}</span>
-    <span class="text-slate-500">Cash</span><span class="text-slate-300">GBP {{ "%.2f"|format(ledger.summary.total_cash or 0) }}</span>
-    <span class="text-slate-500">Equity</span><span class="text-slate-300">GBP {{ "%.2f"|format(ledger.summary.total_equity or 0) }}</span>
-    <span class="text-slate-500">UPnL</span><span class="text-slate-300">GBP {{ "%.2f"|format(ledger.summary.total_unrealised_pnl or 0) }}</span>
+    <span class="text-gray-400">Accounts</span><span class="text-gray-700">{{ ledger.summary.accounts or 0 }}</span>
+    <span class="text-gray-400">Positions</span><span class="text-gray-700">{{ ledger.summary.positions or 0 }}</span>
+    <span class="text-gray-400">Cash</span><span class="text-gray-700">GBP {{ "%.2f"|format(ledger.summary.total_cash or 0) }}</span>
+    <span class="text-gray-400">Equity</span><span class="text-gray-700">GBP {{ "%.2f"|format(ledger.summary.total_equity or 0) }}</span>
+    <span class="text-gray-400">UPnL</span><span class="text-gray-700">GBP {{ "%.2f"|format(ledger.summary.total_unrealised_pnl or 0) }}</span>
   </div>
 </section>
 
 {% if ledger.positions %}
-<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
-  <h4 class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Positions</h4>
+<section class="bg-white border border-gray-200 rounded-md p-1.5">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Positions</h4>
   <table class="w-full text-[11px] text-left font-mono">
     <thead>
       <tr>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">Ticker</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">Dir</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">Qty</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">UPnL</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">As Of</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Ticker</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Dir</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Qty</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">UPnL</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">As Of</th>
       </tr>
     </thead>
     <tbody>
     {% for p in ledger.positions[:8] %}
       <tr>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.ticker }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.direction or "-" }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.qty or 0 }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.2f"|format(p.unrealised_pnl or 0) }}</td>
-        <td class="text-slate-500 px-1.5 py-1 border-b border-slate-800/50">{{ p.as_of or "-" }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.ticker }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.direction or "-" }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.qty or 0 }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(p.unrealised_pnl or 0) }}</td>
+        <td class="text-gray-400 px-1.5 py-1 border-b border-gray-200">{{ p.as_of or "-" }}</td>
       </tr>
     {% endfor %}
     </tbody>
@@ -42,24 +42,24 @@
 {% endif %}
 
 {% if ledger.nav_snapshots %}
-<section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
-  <h4 class="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">NAV Snapshots</h4>
+<section class="bg-white border border-gray-200 rounded-md p-1.5">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">NAV Snapshots</h4>
   <table class="w-full text-[11px] text-left font-mono">
     <thead>
       <tr>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">Time</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">Sleeve</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">NAV</th>
-        <th class="text-slate-500 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-slate-800">Cash</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Time</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Sleeve</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">NAV</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Cash</th>
       </tr>
     </thead>
     <tbody>
     {% for row in ledger.nav_snapshots[:6] %}
       <tr>
-        <td class="text-slate-500 px-1.5 py-1 border-b border-slate-800/50">{{ row.timestamp }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ row.sleeve }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.2f"|format(row.nav or 0) }}</td>
-        <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.2f"|format(row.cash or 0) }}</td>
+        <td class="text-gray-400 px-1.5 py-1 border-b border-gray-200">{{ row.timestamp }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ row.sleeve }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(row.nav or 0) }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(row.cash or 0) }}</td>
       </tr>
     {% endfor %}
     </tbody>

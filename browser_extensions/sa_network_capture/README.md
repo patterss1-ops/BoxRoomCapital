@@ -1,6 +1,6 @@
 # BRC SA Network Capture
 
-Captures full Seeking Alpha symbol snapshots from the authenticated browser and forwards them to `sa_symbol_capture`.
+Captures Seeking Alpha symbol, analysis, and news pages from the authenticated browser.
 
 ## Install
 
@@ -21,24 +21,35 @@ Do not include a trailing slash or any path.
 ## Use
 
 1. Stay logged into Seeking Alpha in Chrome
-2. Open a symbol page such as `https://seekingalpha.com/symbol/MU`
+2. Open either:
+   - a symbol page such as `https://seekingalpha.com/symbol/MU`
+   - an analysis article such as `https://seekingalpha.com/article/...`
+   - a news page such as `https://seekingalpha.com/news/...`
 3. Let the page finish loading
-4. The extension fetches the stable symbol APIs directly from the authenticated page session, then falls back to a limited tab scan only if key sections are missing
-5. One merged symbol snapshot is forwarded automatically
+4. The extension detects the page type and chooses the right collector automatically
+5. One structured capture is forwarded automatically
 
 ## What it sends
 
-- top-level symbol metadata: `ticker`, `url`, `title`, `page_type=symbol`
-- normalized summary fields: `quant_score`, `rating`, `author_rating`, `wall_st_rating`, `grades`
-- `sections`: response metadata grouped by symbol route family
-- `normalized_sections`: structured API-derived sections such as `ratings_history`, `relative_rankings`, `valuation_metrics`, `metric_grades`, `sector_metrics`, and `earnings_estimates`
-- `raw_responses`: the JSON payloads captured from the symbol routes
-- the first ratings-history entry is still normalized into the summary so the existing SA signal path continues to work
+- Symbol pages:
+  - top-level symbol metadata: `ticker`, `url`, `title`, `page_type=symbol`
+  - normalized summary fields: `quant_score`, `rating`, `author_rating`, `wall_st_rating`, `grades`
+  - `sections`: response metadata grouped by symbol route family
+  - `normalized_sections`: structured API-derived sections such as `ratings_history`, `relative_rankings`, `valuation_metrics`, `metric_grades`, `sector_metrics`, and `earnings_estimates`
+  - `raw_responses`: the JSON payloads captured from the symbol routes
+- Analysis/news pages:
+  - `page_type=article|news`
+  - `url`, `canonical_url`, `title`, `author`, `tickers`
+  - cleaned article/news body text
+  - summary/description metadata
+  - publish/modified timestamps when available
+  - lightweight raw metadata for the intel pipeline
 
 ## Current behavior
 
-- Works on live symbol pages without depending on DOM scraping
-- Prefers direct JSON API collection for stable endpoints
-- Uses visible tab clicks only as a fallback discovery pass
-- Posts one aggregated symbol snapshot per page session
-- Dedupe is done per section + response URL + history id in the page session
+- Symbol pages use API-first capture with a small fallback tab scan
+- Analysis/news pages use a DOM+metadata extractor tuned for text pages
+- Symbol captures post to `sa_symbol_capture`
+- Analysis/news captures post to `sa_page_capture`
+- Plain hub/index pages such as `/market-news` are ignored, but inline-expanded news stories on that page are captured individually as you open them
+- Dedupe is done per page session using content fingerprints, with backend canonical-URL suppression for repeat analysis

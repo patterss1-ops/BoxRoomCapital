@@ -1,58 +1,53 @@
+{% from "_macros.html" import section_header, kv_row %}
 <div class="space-y-2">
-  <section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
-    <div class="flex justify-between items-baseline gap-2 mb-1.5">
-      <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Engine Status</h3>
-    </div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">State</span><span class="text-[11px] font-mono {% if status.running %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "RUNNING" if status.running else "STOPPED" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Paused</span><span class="text-[11px] text-slate-300 font-mono">{{ "YES" if status.paused else "NO" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Mode</span><span class="text-[11px] text-slate-300 font-mono">{{ status.mode }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Thread</span><span class="text-[11px] text-slate-300 font-mono">{{ status.thread_name or "-" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Started</span><span class="font-mono text-[11px] text-slate-500">{{ status.started_at or "-" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Last Action</span><span class="text-[11px] text-slate-300 font-mono">{{ status.last_action or "-" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Action Time</span><span class="font-mono text-[11px] text-slate-500">{{ status.last_action_at or "-" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Open Spreads</span><span class="text-[11px] text-slate-300 font-mono">{{ status.open_spreads or 0 }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Kill Switch</span><span class="text-[11px] text-slate-300 font-mono">{{ "ON" if status.kill_switch_active else "OFF" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Kill Reason</span><span class="text-[11px] text-slate-300 font-mono">{{ status.kill_switch_reason or "-" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Throttle</span><span class="text-[11px] text-slate-300 font-mono">{{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Cooldowns</span><span class="text-[11px] text-slate-300 font-mono">{{ status.cooldowns_count or 0 }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Last Error</span><span class="text-[11px] text-slate-300 font-mono">{{ status.last_error or "-" }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline py-0.5"><span class="text-[11px] text-slate-500">Log</span><span class="font-mono text-[11px] text-slate-500">{{ status.log_file }}</span></div>
+  <section class="bg-white border border-gray-200 rounded-md p-1.5">
+    {{ section_header("Engine Status") }}
+    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5"><span class="text-[11px] text-gray-400">State</span><span class="text-[11px] font-mono {% if status.running %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "RUNNING" if status.running else "STOPPED" }}</span></div>
+    {{ kv_row("Paused", "YES" if status.paused else "NO") }}
+    {{ kv_row("Mode", status.mode) }}
+    {{ kv_row("Thread", status.thread_name or "-") }}
+    {{ kv_row("Started", status.started_at or "-") }}
+    {{ kv_row("Last Action", status.last_action or "-") }}
+    {{ kv_row("Action Time", status.last_action_at or "-") }}
+    {{ kv_row("Open Spreads", status.open_spreads or 0) }}
+    {{ kv_row("Kill Switch", "ON" if status.kill_switch_active else "OFF") }}
+    {{ kv_row("Kill Reason", status.kill_switch_reason or "-") }}
+    {{ kv_row("Throttle", "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) ~ "%") }}
+    {{ kv_row("Cooldowns", status.cooldowns_count or 0) }}
+    {{ kv_row("Last Error", status.last_error or "-") }}
+    {{ kv_row("Log", status.log_file) }}
   </section>
 
-  <section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
-    <div class="flex justify-between items-baseline gap-2 mb-1.5">
-      <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Portfolio</h3>
-    </div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Closed Trades</span><span class="text-[11px] text-slate-300 font-mono">{{ summary.total_closed_trades }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Total P&amp;L</span><span class="text-[11px] text-slate-300 font-mono">GBP {{ "%.2f"|format(summary.total_pnl) }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Today P&amp;L</span><span class="text-[11px] text-slate-300 font-mono">GBP {{ "%.2f"|format(summary.today_pnl) }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-slate-800/50 py-0.5"><span class="text-[11px] text-slate-500">Open Positions</span><span class="text-[11px] text-slate-300 font-mono">{{ summary.open_positions }}</span></div>
-    <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline py-0.5"><span class="text-[11px] text-slate-500">Latest Equity</span><span class="text-[11px] text-slate-300 font-mono">GBP {{ "%.2f"|format(summary.latest_equity) }}</span></div>
+  <section class="bg-white border border-gray-200 rounded-md p-1.5">
+    {{ section_header("Portfolio") }}
+    {{ kv_row("Closed Trades", summary.total_closed_trades) }}
+    {{ kv_row("Total P&L", "GBP " ~ "%.2f"|format(summary.total_pnl)) }}
+    {{ kv_row("Today P&L", "GBP " ~ "%.2f"|format(summary.today_pnl)) }}
+    {{ kv_row("Open Positions", summary.open_positions) }}
+    {{ kv_row("Latest Equity", "GBP " ~ "%.2f"|format(summary.latest_equity)) }}
   </section>
 
-  <section class="bg-slate-900 border border-slate-800 rounded-md p-1.5">
-    <div class="flex justify-between items-baseline gap-2 mb-1.5">
-      <h3 class="text-xs font-semibold text-slate-200 uppercase tracking-wide">Open Spreads</h3>
-    </div>
+  <section class="bg-white border border-gray-200 rounded-md p-1.5">
+    {{ section_header("Open Spreads") }}
     {% if open_positions %}
       <table class="w-full text-[11px] text-left font-mono">
         <thead>
-          <tr><th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Ticker</th><th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Type</th><th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Size</th><th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Max Loss</th><th class="text-slate-500 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-slate-800">Entry</th></tr>
+          <tr><th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Ticker</th><th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Type</th><th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Size</th><th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Max Loss</th><th class="text-gray-400 text-[10px] uppercase tracking-wide font-semibold px-1.5 py-1 border-b border-gray-200">Entry</th></tr>
         </thead>
         <tbody>
         {% for p in open_positions %}
           <tr>
-            <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.ticker }}</td>
-            <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.trade_type }}</td>
-            <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.size }}</td>
-            <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ "%.2f"|format(p.max_loss or 0) }}</td>
-            <td class="text-slate-300 px-1.5 py-1 border-b border-slate-800/50">{{ p.entry_date }}</td>
+            <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.ticker }}</td>
+            <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.trade_type }}</td>
+            <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.size }}</td>
+            <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(p.max_loss or 0) }}</td>
+            <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ p.entry_date }}</td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
     {% else %}
-      <p class="text-[11px] text-slate-500">No open option positions.</p>
+      <p class="text-[11px] text-gray-400">No open option positions.</p>
     {% endif %}
   </section>
 </div>

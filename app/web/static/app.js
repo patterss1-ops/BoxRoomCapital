@@ -113,7 +113,7 @@
     paletteList.innerHTML = '';
     if (!visible.length) {
       const empty = document.createElement('li');
-      empty.className = 'px-2 py-1.5 rounded text-xs text-slate-500';
+      empty.className = 'px-2 py-1.5 rounded text-xs text-gray-400';
       empty.textContent = 'No matching commands';
       paletteList.appendChild(empty);
       return;
@@ -122,7 +122,7 @@
       const li = document.createElement('li');
       const isActive = index === activeIndex;
       li.className = 'px-2 py-1.5 rounded cursor-pointer text-xs ' +
-        (isActive ? 'bg-slate-800 text-white' : 'text-slate-300 hover:bg-slate-800/50');
+        (isActive ? 'bg-gray-100 text-gray-900' : 'text-gray-700 hover:bg-gray-100');
       li.textContent = command.label;
       li.addEventListener('mouseenter', () => {
         activeIndex = index;

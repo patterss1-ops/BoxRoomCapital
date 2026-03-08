@@ -1,17 +1,17 @@
 <div class="flex items-center gap-3 font-mono text-[11px]">
   <span class="{% if status.running %}text-emerald-400{% else %}text-red-500{% endif %} font-semibold">{{ "RUN" if status.running else "STOP" }}</span>
-  <span class="text-slate-500">|</span>
-  <span class="text-slate-400">{{ status.mode or "-" }}</span>
-  <span class="text-slate-500">|</span>
-  <span class="{% if status.kill_switch_active %}text-red-400 font-semibold{% else %}text-slate-400{% endif %}">Kill {{ "ON" if status.kill_switch_active else "OFF" }}</span>
-  <span class="text-slate-500">|</span>
-  <span class="text-slate-400">Thr {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span>
-  <span class="text-slate-500">|</span>
-  <span class="text-white font-semibold">{{ status.open_spreads or 0 }} open</span>
-  <span class="text-slate-500">|</span>
-  <span class="text-slate-400">{{ status.cooldowns_count or 0 }} cool</span>
+  <span class="text-gray-400">|</span>
+  <span class="text-gray-500">{{ status.mode or "-" }}</span>
+  <span class="text-gray-400">|</span>
+  <span class="{% if status.kill_switch_active %}text-red-400 font-semibold{% else %}text-gray-500{% endif %}">Kill {{ "ON" if status.kill_switch_active else "OFF" }}</span>
+  <span class="text-gray-400">|</span>
+  <span class="text-gray-500">Thr {{ "%.0f"|format((status.risk_throttle_pct or 1.0) * 100) }}%</span>
+  <span class="text-gray-400">|</span>
+  <span class="text-gray-900 font-semibold">{{ status.open_spreads or 0 }} open</span>
+  <span class="text-gray-400">|</span>
+  <span class="text-gray-500">{{ status.cooldowns_count or 0 }} cool</span>
   {% if latest_incident %}
-    <span class="text-slate-500">|</span>
+    <span class="text-gray-400">|</span>
     <span class="text-red-400">{{ latest_incident.title }}</span>
   {% endif %}
 </div>

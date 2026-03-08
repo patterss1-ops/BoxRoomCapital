@@ -390,6 +390,9 @@ BACKTEST_MARKETS = {
     },
 }
 
+# ─── DEFAULT STRATEGY KEY ─────────────────────────────────────────────────
+DEFAULT_STRATEGY_KEY = "ibs_credit_spreads"
+
 # ─── IBS CREDIT SPREADS PARAMETERS ─────────────────────────────────────────
 # Options-based strategy: IBS timing + credit put spread selling
 # Zero overnight financing. Defined risk. Tax-free.
@@ -666,17 +669,21 @@ IDEA_BACKTEST_MIN_PF = _env_float("IDEA_BACKTEST_MIN_PF", 1.0, min_value=0.0, ma
 IDEA_LIVE_STRATEGY_SLOT = os.getenv("IDEA_LIVE_STRATEGY_SLOT", "discretionary")
 
 # ─── Automated Idea Research Pipeline ────────────────────────────────────────
-IDEA_RESEARCH_AUTO = _env_bool("IDEA_RESEARCH_AUTO", True)
+IDEA_RESEARCH_AUTO = _runtime_overrides.get("idea_research_auto", _env_bool("IDEA_RESEARCH_AUTO", True))
 IDEA_RESEARCH_MODEL_HYPOTHESIS = os.getenv("IDEA_RESEARCH_MODEL_HYPOTHESIS", "grok")
 IDEA_RESEARCH_MODEL_REVIEW = os.getenv("IDEA_RESEARCH_MODEL_REVIEW", "claude")
 IDEA_RESEARCH_MODEL_STRATEGY = os.getenv("IDEA_RESEARCH_MODEL_STRATEGY", "openai")
-IDEA_REVIEW_MIN_SCORE = _env_float("IDEA_REVIEW_MIN_SCORE", 5.0, min_value=0.0, max_value=10.0)
-IDEA_AUTO_PROMOTE_BACKTEST = _env_bool("IDEA_AUTO_PROMOTE_BACKTEST", True)
-IDEA_AUTO_PROMOTE_PAPER = _env_bool("IDEA_AUTO_PROMOTE_PAPER", False)
-IDEA_DYNAMIC_BT_MIN_SHARPE = _env_float("IDEA_DYNAMIC_BT_MIN_SHARPE", 0.5, min_value=-5.0, max_value=10.0)
-IDEA_DYNAMIC_BT_MIN_PF = _env_float("IDEA_DYNAMIC_BT_MIN_PF", 1.2, min_value=0.0, max_value=10.0)
-IDEA_DYNAMIC_BT_MIN_TRADES = _env_int("IDEA_DYNAMIC_BT_MIN_TRADES", 20, min_value=1, max_value=1000)
+IDEA_REVIEW_MIN_SCORE = _runtime_overrides.get("idea_review_min_score", _env_float("IDEA_REVIEW_MIN_SCORE", 5.0, min_value=0.0, max_value=10.0))
+IDEA_AUTO_PROMOTE_BACKTEST = _runtime_overrides.get("idea_auto_promote_backtest", _env_bool("IDEA_AUTO_PROMOTE_BACKTEST", True))
+IDEA_AUTO_PROMOTE_PAPER = _runtime_overrides.get("idea_auto_promote_paper", _env_bool("IDEA_AUTO_PROMOTE_PAPER", False))
+IDEA_DYNAMIC_BT_MIN_SHARPE = _runtime_overrides.get("idea_dynamic_bt_min_sharpe", _env_float("IDEA_DYNAMIC_BT_MIN_SHARPE", 0.5, min_value=-5.0, max_value=10.0))
+IDEA_DYNAMIC_BT_MIN_PF = _runtime_overrides.get("idea_dynamic_bt_min_pf", _env_float("IDEA_DYNAMIC_BT_MIN_PF", 1.2, min_value=0.0, max_value=10.0))
+IDEA_DYNAMIC_BT_MIN_TRADES = _runtime_overrides.get("idea_dynamic_bt_min_trades", _env_int("IDEA_DYNAMIC_BT_MIN_TRADES", 20, min_value=1, max_value=1000))
 IDEA_DYNAMIC_BT_WF_STATUS = os.getenv("IDEA_DYNAMIC_BT_WF_STATUS", "marginal")
+
+# ─── Council & Research Timeouts ─────────────────────────────────────────────
+COUNCIL_MODEL_TIMEOUT = _runtime_overrides.get("council_model_timeout", _env_int("COUNCIL_MODEL_TIMEOUT", 90, min_value=15, max_value=300))
+COUNCIL_ROUND_TIMEOUT = _runtime_overrides.get("council_round_timeout", _env_int("COUNCIL_ROUND_TIMEOUT", 100, min_value=20, max_value=600))
 
 # ─── PIPELINE & ORCHESTRATOR ─────────────────────────────────────────────────
 

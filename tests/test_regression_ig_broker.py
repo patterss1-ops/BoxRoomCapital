@@ -119,6 +119,11 @@ class TestPositions:
         positions = broker.get_positions()
         assert positions == []
 
+    def test_get_positions_honors_explicit_timeout(self, broker, mock_session):
+        mock_session.get.return_value.json.return_value = {"positions": []}
+        broker.get_positions(timeout=2.5)
+        assert mock_session.get.call_args.kwargs["timeout"] == 2.5
+
 
 # ─── Deal map tracking ──────────────────────────────────────────────────────
 
@@ -243,6 +248,11 @@ class TestAccountInfo:
         result = broker.get_account_info()
         assert result is not None
 
+    def test_get_account_info_honors_explicit_timeout(self, broker, mock_session):
+        mock_session.get.return_value.json.return_value = {"accounts": []}
+        broker.get_account_info(timeout=1.75)
+        assert mock_session.get.call_args.kwargs["timeout"] == 1.75
+
 
 # ─── Error recovery ──────────────────────────────────────────────────────────
 
@@ -297,6 +307,11 @@ class TestMarketData:
         }
         result = broker.get_market_info(epic="IX.D.FTSE.DAILY.IP")
         assert result is not None
+
+    def test_get_market_info_honors_explicit_timeout(self, broker, mock_session):
+        mock_session.get.return_value.json.return_value = {"instrument": {}, "snapshot": {}}
+        broker.get_market_info(epic="IX.D.FTSE.DAILY.IP", timeout=1.25)
+        assert mock_session.get.call_args.kwargs["timeout"] == 1.25
 
     def test_search_option_markets(self, broker, mock_session):
         mock_session.get.return_value.json.return_value = {

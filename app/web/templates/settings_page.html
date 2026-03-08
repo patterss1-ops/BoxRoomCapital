@@ -3,61 +3,61 @@
 <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 
   <div class="md:col-span-12">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
       <div class="flex justify-between items-baseline gap-4 mb-4">
-        <h2 class="text-lg font-semibold text-slate-200">Runtime Settings</h2>
-        <p class="text-slate-500 text-sm">Edit and save configuration overrides</p>
+        <h2 class="text-lg font-semibold text-gray-800">Runtime Settings</h2>
+        <p class="text-gray-400 text-sm">Edit and save configuration overrides</p>
       </div>
       <div id="settings-feedback" class="mb-3"></div>
       <div id="settings-form-container" hx-get="/api/settings" hx-trigger="load" hx-swap="innerHTML"
            hx-on::after-request="if(event.detail.successful) window.__renderSettingsForm(event.detail.xhr.responseText)">
-        <p class="text-slate-500 text-sm">Loading settings...</p>
+        <p class="text-gray-400 text-sm">Loading settings...</p>
       </div>
     </div>
   </div>
 
   <div class="md:col-span-6">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
       <div class="flex justify-between items-baseline gap-4 mb-3">
-        <h2 class="text-lg font-semibold text-slate-200">Operational Reference</h2>
-        <p class="text-slate-500 text-sm">Runtime endpoints and paths</p>
+        <h2 class="text-lg font-semibold text-gray-800">Operational Reference</h2>
+        <p class="text-gray-400 text-sm">Runtime endpoints and paths</p>
       </div>
       <div class="space-y-0">
-        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
-          <span class="text-slate-500 text-sm">Health Endpoint</span>
-          <span class="font-mono text-slate-300 text-sm">/health</span>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5">
+          <span class="text-gray-400 text-sm">Health Endpoint</span>
+          <span class="font-mono text-gray-700 text-sm">/health</span>
         </div>
-        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
-          <span class="text-slate-500 text-sm">Status API</span>
-          <span class="font-mono text-slate-300 text-sm">/api/status</span>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5">
+          <span class="text-gray-400 text-sm">Status API</span>
+          <span class="font-mono text-gray-700 text-sm">/api/status</span>
         </div>
-        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
-          <span class="text-slate-500 text-sm">Log Tail API</span>
-          <span class="font-mono text-slate-300 text-sm">/api/log-tail</span>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5">
+          <span class="text-gray-400 text-sm">Log Tail API</span>
+          <span class="font-mono text-gray-700 text-sm">/api/log-tail</span>
         </div>
-        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
-          <span class="text-slate-500 text-sm">Process Log</span>
-          <span class="font-mono text-slate-300 text-sm">.runtime/control_plane.log</span>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5">
+          <span class="text-gray-400 text-sm">Process Log</span>
+          <span class="font-mono text-gray-700 text-sm">.runtime/control_plane.log</span>
         </div>
-        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-slate-800 py-1.5">
-          <span class="text-slate-500 text-sm">Process PID</span>
-          <span class="font-mono text-slate-300 text-sm">.runtime/control_plane.pid</span>
+        <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5">
+          <span class="text-gray-400 text-sm">Process PID</span>
+          <span class="font-mono text-gray-700 text-sm">.runtime/control_plane.pid</span>
         </div>
         <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5">
-          <span class="text-slate-500 text-sm">DB Path</span>
-          <span class="font-mono text-slate-300 text-sm">trades.db</span>
+          <span class="text-gray-400 text-sm">DB Path</span>
+          <span class="font-mono text-gray-700 text-sm">trades.db</span>
         </div>
       </div>
     </div>
   </div>
 
   <div class="md:col-span-6">
-    <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-lg">
+    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
       <div class="flex justify-between items-baseline gap-4 mb-3">
-        <h2 class="text-lg font-semibold text-slate-200">Local Commands</h2>
-        <p class="text-slate-500 text-sm">Shell reference</p>
+        <h2 class="text-lg font-semibold text-gray-800">Local Commands</h2>
+        <p class="text-gray-400 text-sm">Shell reference</p>
       </div>
-      <div class="bg-slate-950 text-slate-400 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">./start_control_plane.sh
+      <div class="bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">./start_control_plane.sh
 ./stop_control_plane.sh
 python3 -m pytest -q tests
 python3 run_console.py</div>
@@ -80,10 +80,10 @@ window.__renderSettingsForm = function(responseText) {
     var inputType = type || 'text';
     var step = (inputType === 'number' && String(val).indexOf('.') !== -1) ? ' step="0.01"' : '';
     return '<div class="space-y-1">' +
-      '<label class="text-slate-400 text-xs" for="sf-' + id + '">' + label + '</label>' +
+      '<label class="text-gray-500 text-xs" for="sf-' + id + '">' + label + '</label>' +
       '<input id="sf-' + id + '" name="' + id + '" type="' + inputType + '" value="' + val + '"' + step +
-      ' class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none" />' +
-      (helpText ? '<p class="text-slate-600 text-xs">' + helpText + '</p>' : '') +
+      ' class="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none" />' +
+      (helpText ? '<p class="text-gray-400 text-xs">' + helpText + '</p>' : '') +
       '</div>';
   }
 
@@ -92,8 +92,8 @@ window.__renderSettingsForm = function(responseText) {
       return '<option value="' + o + '"' + (o === val ? ' selected' : '') + '>' + o + '</option>';
     }).join('');
     return '<div class="space-y-1">' +
-      '<label class="text-slate-400 text-xs" for="sf-' + id + '">' + label + '</label>' +
-      '<select id="sf-' + id + '" name="' + id + '" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none">' + opts + '</select>' +
+      '<label class="text-gray-500 text-xs" for="sf-' + id + '">' + label + '</label>' +
+      '<select id="sf-' + id + '" name="' + id + '" class="w-full bg-gray-100 border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 outline-none">' + opts + '</select>' +
       '</div>';
   }
 
@@ -101,14 +101,14 @@ window.__renderSettingsForm = function(responseText) {
     var checked = val ? ' checked' : '';
     return '<div class="flex items-center gap-2 py-1">' +
       '<input id="sf-' + id + '" name="' + id + '" type="checkbox"' + checked +
-      ' class="w-4 h-4 bg-slate-800 border-slate-600 rounded text-blue-500 focus:ring-blue-500/50" />' +
-      '<label class="text-slate-400 text-sm" for="sf-' + id + '">' + label + '</label>' +
+      ' class="w-4 h-4 bg-gray-100 border-gray-300 rounded text-blue-500 focus:ring-blue-500/50" />' +
+      '<label class="text-gray-500 text-sm" for="sf-' + id + '">' + label + '</label>' +
       '</div>';
   }
 
   function section(title, content) {
-    return '<div class="border border-slate-800 rounded-lg p-4 space-y-3">' +
-      '<h3 class="text-sm font-semibold text-slate-300 mb-2">' + title + '</h3>' +
+    return '<div class="border border-gray-200 rounded-lg p-4 space-y-3">' +
+      '<h3 class="text-sm font-semibold text-gray-700 mb-2">' + title + '</h3>' +
       '<div class="grid grid-cols-1 sm:grid-cols-2 gap-3">' + content + '</div></div>';
   }
 
@@ -143,7 +143,7 @@ window.__renderSettingsForm = function(responseText) {
       inp('notifications_telegram_chat_id', n.notifications_telegram_chat_id || '', 'text', 'Telegram Chat ID', '')
     ) +
     '<div class="flex items-center gap-3">' +
-      '<button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors">Save Settings</button>' +
+      '<button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-gray-900 text-sm font-medium rounded-lg transition-colors">Save Settings</button>' +
       '<span id="settings-save-status"></span>' +
     '</div>' +
   '</form>';
@@ -168,7 +168,7 @@ window.__renderSettingsForm = function(responseText) {
       }
     }
     var fb = document.getElementById('settings-feedback');
-    fb.innerHTML = '<p class="text-slate-400 text-sm">Saving...</p>';
+    fb.innerHTML = '<p class="text-gray-500 text-sm">Saving...</p>';
     fetch('/api/settings', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},

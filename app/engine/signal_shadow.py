@@ -49,9 +49,7 @@ SHADOW_VETO_POLICY = VetoPolicy(
 )
 
 
-def _utc_now_iso() -> str:
-    """Return RFC3339 UTC timestamp with Z suffix."""
-    return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+from utils.datetime_utils import utc_now_iso as _utc_now_iso
 
 
 def _safe_json_load(raw: Any) -> Any:

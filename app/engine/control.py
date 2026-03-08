@@ -87,9 +87,7 @@ class BotControlService:
         return result
 
     def reconcile_report(self) -> dict[str, Any]:
-        result = self.engine.reconcile_report()
-        self._write_state({"last_action": "reconcile-report"})
-        return result
+        return self.engine.reconcile_report()
 
     def close_spread(self, spread_id: str = "", ticker: str = "", reason: str = "Manual close") -> dict[str, Any]:
         result = self.engine.close_spread(spread_id=spread_id, ticker=ticker, reason=reason)

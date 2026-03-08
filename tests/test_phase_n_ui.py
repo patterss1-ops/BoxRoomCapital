@@ -87,8 +87,8 @@ class TestBaseHTMLTokens:
     def test_htmx_loaded(self):
         assert "htmx.org" in self.html
 
-    def test_body_bg_slate_950(self):
-        assert "bg-slate-950" in self.html
+    def test_body_bg_light(self):
+        assert "bg-gray-50" in self.html
 
     def test_sidebar_present(self):
         assert "sidebar" in self.html
@@ -127,8 +127,8 @@ class TestPageTemplateTokens:
     """Page templates use Tailwind grid layout and design tokens."""
 
     PAGES = {
-        "overview.html": ["grid", "bg-slate-900"],
-        "trading.html": ["grid", "bg-slate-900", "hx-post"],
+        "overview.html": ["grid", "bg-white"],
+        "trading.html": ["grid", "bg-white", "hx-post"],
         "research_page.html": ["grid", "hx-post"],
         "incidents_page.html": ["grid", "hx-get"],
         "settings_page.html": ["grid", "font-mono"],
@@ -261,17 +261,17 @@ class TestDesignTokensDoc:
     def test_section_present(self, section):
         assert section in self.doc, f"DESIGN_TOKENS.md missing section: {section}"
 
-    def test_bg_slate_950_body(self):
-        assert "bg-slate-950" in self.doc
+    def test_bg_gray_50_body(self):
+        assert "bg-gray-50" in self.doc
 
-    def test_bg_slate_900_card(self):
-        assert "bg-slate-900" in self.doc
+    def test_bg_white_card(self):
+        assert "bg-white" in self.doc
 
     def test_emerald_profit(self):
-        assert "text-emerald-400" in self.doc
+        assert "text-emerald-600" in self.doc
 
     def test_red_loss(self):
-        assert "text-red-500" in self.doc
+        assert "text-red-600" in self.doc
 
 
 # ═══════════════════════════════════════════════════════════════════════════

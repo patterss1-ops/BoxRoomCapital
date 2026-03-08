@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "BRC SA Network Capture",
-  "version": "0.3.0",
-  "description": "Capture full Seeking Alpha symbol snapshots from the authenticated browser and forward them to BoxRoomCapital.",
+  "version": "0.4.5",
+  "description": "Capture Seeking Alpha symbol, analysis, and news pages from the authenticated browser and forward them to BoxRoomCapital.",
   "permissions": [
     "storage"
   ],

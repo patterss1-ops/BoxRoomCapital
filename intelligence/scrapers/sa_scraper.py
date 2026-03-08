@@ -21,18 +21,14 @@ from typing import Any, Dict, List, Mapping, Optional
 
 import requests as req_lib
 
+from intelligence.scrapers import NUMERIC_TO_GRADE, RATING_MAP
+
 logger = logging.getLogger(__name__)
 
 # SA internal API base
 _API_BASE = "https://seekingalpha.com/api/v3"
 
-# Factor grade numeric → letter mapping (SA uses 1-12 scale)
-_NUMERIC_TO_GRADE: Dict[int, str] = {
-    1: "F", 2: "D-", 3: "D", 4: "D+",
-    5: "C-", 6: "C", 7: "C+",
-    8: "B-", 9: "B", 10: "B+",
-    11: "A-", 12: "A", 13: "A+",
-}
+_NUMERIC_TO_GRADE = NUMERIC_TO_GRADE
 
 _GRADE_TO_SCORE: Dict[str, float] = {
     "A+": 100.0, "A": 95.0, "A-": 90.0,
@@ -42,12 +38,7 @@ _GRADE_TO_SCORE: Dict[str, float] = {
     "F": 20.0,
 }
 
-_RATING_MAP: Dict[str, str] = {
-    "strong buy": "strong buy", "buy": "buy", "hold": "hold",
-    "sell": "sell", "strong sell": "strong sell",
-    "very bullish": "very bullish", "bullish": "bullish",
-    "neutral": "hold", "bearish": "bearish", "very bearish": "very bearish",
-}
+_RATING_MAP = RATING_MAP
 
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
