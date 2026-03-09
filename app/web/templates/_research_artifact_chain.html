@@ -19,6 +19,22 @@
           hx-target="#research-operator-output"
           hx-swap="innerHTML"
         >Synthesize</button>
+        {% if pilot_signoff_pending %}
+          <button
+            class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs"
+            hx-post="/api/actions/research/pilot-approve"
+            hx-vals='{"chain_id":"{{ chain_id }}"}'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+          >Approve Pilot</button>
+          <button
+            class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs"
+            hx-post="/api/actions/research/pilot-reject"
+            hx-vals='{"chain_id":"{{ chain_id }}"}'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+          >Reject Pilot</button>
+        {% endif %}
         {% if can_generate_post_mortem %}
           <button
             class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
@@ -37,7 +53,7 @@
     <p class="text-sm text-amber-600">{{ error }}</p>
   {% elif artifacts %}
     {% if latest %}
-      <div class="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-3">
+      <div class="mb-4 grid grid-cols-1 lg:grid-cols-6 gap-3">
         <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
           <p class="text-[11px] uppercase tracking-wide text-gray-400">Latest Type</p>
           <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest.artifact_label }}</p>
@@ -61,6 +77,18 @@
               {{ latest_scoring.body.get("next_stage") }}
             {% elif latest.artifact_type == "trade_sheet" %}
               pilot_ready
+            {% else %}
+              -
+            {% endif %}
+          </p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Pilot Sign-Off</p>
+          <p class="mt-1 text-sm font-semibold {% if pilot_decision and pilot_decision.body.get('approved') %}text-emerald-600{% elif pilot_decision %}text-red-600{% elif pilot_signoff_pending %}text-amber-600{% else %}text-gray-800{% endif %}">
+            {% if pilot_decision %}
+              {{ pilot_decision.body.get("operator_decision") }}
+            {% elif pilot_signoff_pending %}
+              pending
             {% else %}
               -
             {% endif %}

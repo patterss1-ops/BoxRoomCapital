@@ -226,8 +226,160 @@ def test_evaluate_with_artifacts_marks_pilot_ready_chain(monkeypatch):
         chain_id="chain-1",
     )
 
-    assert decision.allowed is True
-    assert decision.outcome == PromotionOutcome.PROMOTE
-    assert decision.reason_code == "ARTIFACT_PROMOTE"
+    assert decision.allowed is False
+    assert decision.outcome == PromotionOutcome.PARK
+    assert decision.reason_code == "ARTIFACT_PILOT_SIGNOFF_PENDING"
     assert decision.research_stage == ProgressionStage.PILOT.value
     assert decision.requires_human_signoff is True
+
+
+def test_evaluate_with_artifacts_allows_operator_approved_pilot_chain(monkeypatch):
+    base = PromotionGateDecision(
+        allowed=True,
+        reason_code="PROMOTION_GATE_PASSED",
+        message="ok",
+        strategy_key="strategy",
+        outcome=PromotionOutcome.PROMOTE,
+    )
+    monkeypatch.setattr("fund.promotion_gate.evaluate_promotion_gate", lambda **kwargs: base)
+    store = FakeArtifactStore(
+        [
+            ArtifactEnvelope(
+                artifact_id="score-1",
+                chain_id="chain-1",
+                artifact_type=ArtifactType.SCORING_RESULT,
+                engine=Engine.ENGINE_B,
+                body={
+                    "hypothesis_ref": "hyp-1",
+                    "falsification_ref": "fal-1",
+                    "dimension_scores": {"source": 10.0},
+                    "raw_total": 93.0,
+                    "penalties": {},
+                    "final_score": 93.0,
+                    "outcome": "promote",
+                    "next_stage": ProgressionStage.PILOT.value,
+                    "outcome_reason": "Ready for pilot",
+                    "blocking_objections": [],
+                },
+            ),
+            ArtifactEnvelope(
+                artifact_id="trade-1",
+                chain_id="chain-1",
+                artifact_type=ArtifactType.TRADE_SHEET,
+                engine=Engine.ENGINE_B,
+                body={
+                    "hypothesis_ref": "hyp-1",
+                    "experiment_ref": "exp-1",
+                    "instruments": [],
+                    "sizing": {"method": "vol_target", "target_risk_pct": 0.01, "max_notional": 25000.0},
+                    "entry_rules": ["enter"],
+                    "exit_rules": ["exit"],
+                    "holding_period_target": "days",
+                    "risk_limits": {"max_loss_pct": 2.0, "max_portfolio_impact_pct": 3.0, "max_correlated_exposure_pct": 25.0},
+                    "kill_criteria": [],
+                },
+            ),
+            ArtifactEnvelope(
+                artifact_id="pilot-1",
+                chain_id="chain-1",
+                artifact_type=ArtifactType.PILOT_DECISION,
+                engine=Engine.ENGINE_B,
+                body={
+                    "hypothesis_ref": "hyp-1",
+                    "trade_sheet_ref": "trade-1",
+                    "approved": True,
+                    "operator_decision": "approve",
+                    "operator_notes": "Looks good for pilot.",
+                    "decided_by": "operator",
+                    "decided_at": "2026-03-09T17:50:00Z",
+                },
+            ),
+        ]
+    )
+
+    decision = evaluate_with_artifacts(
+        strategy_key="strategy",
+        artifact_store=store,
+        chain_id="chain-1",
+    )
+
+    assert decision.allowed is True
+    assert decision.outcome == PromotionOutcome.PROMOTE
+    assert decision.reason_code == "ARTIFACT_PILOT_APPROVED"
+    assert decision.research_stage == ProgressionStage.PILOT.value
+    assert decision.requires_human_signoff is False
+
+
+def test_evaluate_with_artifacts_blocks_operator_rejected_pilot_chain(monkeypatch):
+    base = PromotionGateDecision(
+        allowed=True,
+        reason_code="PROMOTION_GATE_PASSED",
+        message="ok",
+        strategy_key="strategy",
+        outcome=PromotionOutcome.PROMOTE,
+    )
+    monkeypatch.setattr("fund.promotion_gate.evaluate_promotion_gate", lambda **kwargs: base)
+    store = FakeArtifactStore(
+        [
+            ArtifactEnvelope(
+                artifact_id="score-1",
+                chain_id="chain-1",
+                artifact_type=ArtifactType.SCORING_RESULT,
+                engine=Engine.ENGINE_B,
+                body={
+                    "hypothesis_ref": "hyp-1",
+                    "falsification_ref": "fal-1",
+                    "dimension_scores": {"source": 10.0},
+                    "raw_total": 93.0,
+                    "penalties": {},
+                    "final_score": 93.0,
+                    "outcome": "promote",
+                    "next_stage": ProgressionStage.PILOT.value,
+                    "outcome_reason": "Ready for pilot",
+                    "blocking_objections": [],
+                },
+            ),
+            ArtifactEnvelope(
+                artifact_id="trade-1",
+                chain_id="chain-1",
+                artifact_type=ArtifactType.TRADE_SHEET,
+                engine=Engine.ENGINE_B,
+                body={
+                    "hypothesis_ref": "hyp-1",
+                    "experiment_ref": "exp-1",
+                    "instruments": [],
+                    "sizing": {"method": "vol_target", "target_risk_pct": 0.01, "max_notional": 25000.0},
+                    "entry_rules": ["enter"],
+                    "exit_rules": ["exit"],
+                    "holding_period_target": "days",
+                    "risk_limits": {"max_loss_pct": 2.0, "max_portfolio_impact_pct": 3.0, "max_correlated_exposure_pct": 25.0},
+                    "kill_criteria": [],
+                },
+            ),
+            ArtifactEnvelope(
+                artifact_id="pilot-1",
+                chain_id="chain-1",
+                artifact_type=ArtifactType.PILOT_DECISION,
+                engine=Engine.ENGINE_B,
+                body={
+                    "hypothesis_ref": "hyp-1",
+                    "trade_sheet_ref": "trade-1",
+                    "approved": False,
+                    "operator_decision": "reject",
+                    "operator_notes": "Needs tighter kill rules.",
+                    "decided_by": "operator",
+                    "decided_at": "2026-03-09T17:50:00Z",
+                },
+            ),
+        ]
+    )
+
+    decision = evaluate_with_artifacts(
+        strategy_key="strategy",
+        artifact_store=store,
+        chain_id="chain-1",
+    )
+
+    assert decision.allowed is False
+    assert decision.outcome == PromotionOutcome.REJECT
+    assert decision.reason_code == "ARTIFACT_PILOT_REJECTED"

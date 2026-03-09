@@ -419,6 +419,10 @@ def evaluate_with_artifacts(
         (artifact for artifact in reversed(chain) if str(artifact.artifact_type) == "ArtifactType.TRADE_SHEET" or getattr(artifact.artifact_type, "value", None) == "trade_sheet"),
         None,
     )
+    latest_pilot_decision = next(
+        (artifact for artifact in reversed(chain) if str(artifact.artifact_type) == "ArtifactType.PILOT_DECISION" or getattr(artifact.artifact_type, "value", None) == "pilot_decision"),
+        None,
+    )
 
     blocking_objections: list[str] = []
     if latest_scoring:
@@ -472,6 +476,54 @@ def evaluate_with_artifacts(
                     blocking_objections=blocking_objections,
                     research_stage=next_stage.value,
                 )
+            if next_stage == ProgressionStage.PILOT:
+                if latest_pilot_decision is None:
+                    return PromotionGateDecision(
+                        allowed=False,
+                        reason_code="ARTIFACT_PILOT_SIGNOFF_PENDING",
+                        message="Artifact chain is pilot-ready and awaiting human sign-off.",
+                        strategy_key=strategy_key,
+                        live_set_id=base_decision.live_set_id,
+                        live_version=base_decision.live_version,
+                        soak_remaining_hours=base_decision.soak_remaining_hours,
+                        outcome=PromotionOutcome.PARK,
+                        artifact_refs=artifact_refs,
+                        blocking_objections=blocking_objections,
+                        research_stage=next_stage.value,
+                        requires_human_signoff=True,
+                    )
+                if not bool(latest_pilot_decision.body.get("approved")):
+                    note = str(latest_pilot_decision.body.get("operator_notes") or "").strip()
+                    message = "Pilot sign-off was rejected by the operator."
+                    if note:
+                        message = f"{message} {note}"
+                    return PromotionGateDecision(
+                        allowed=False,
+                        reason_code="ARTIFACT_PILOT_REJECTED",
+                        message=message,
+                        strategy_key=strategy_key,
+                        live_set_id=base_decision.live_set_id,
+                        live_version=base_decision.live_version,
+                        soak_remaining_hours=base_decision.soak_remaining_hours,
+                        outcome=PromotionOutcome.REJECT,
+                        artifact_refs=artifact_refs,
+                        blocking_objections=blocking_objections,
+                        research_stage=next_stage.value,
+                    )
+                return PromotionGateDecision(
+                    allowed=True,
+                    reason_code="ARTIFACT_PILOT_APPROVED",
+                    message="Artifact chain is pilot-ready and operator-approved.",
+                    strategy_key=strategy_key,
+                    live_set_id=base_decision.live_set_id,
+                    live_version=base_decision.live_version,
+                    soak_remaining_hours=base_decision.soak_remaining_hours,
+                    outcome=PromotionOutcome.PROMOTE,
+                    artifact_refs=artifact_refs,
+                    blocking_objections=blocking_objections,
+                    research_stage=next_stage.value,
+                    requires_human_signoff=False,
+                )
         return PromotionGateDecision(
             allowed=outcome == PromotionOutcome.PROMOTE,
             reason_code=f"ARTIFACT_{outcome.value.upper()}",
@@ -484,7 +536,7 @@ def evaluate_with_artifacts(
             artifact_refs=artifact_refs,
             blocking_objections=blocking_objections,
             research_stage=next_stage_text or None,
-            requires_human_signoff=(next_stage_text == ProgressionStage.PILOT.value and latest_trade_sheet is not None),
+            requires_human_signoff=False,
         )
 
     if latest_falsification:

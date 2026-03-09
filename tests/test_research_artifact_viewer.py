@@ -130,3 +130,85 @@ def test_build_research_artifact_chain_context_handles_present_and_missing_chain
     assert missing["can_generate_post_mortem"] is False
     assert missing["post_mortem_count"] == 0
     assert "No research artifacts found" in missing["error"]
+
+
+def test_build_research_artifact_chain_context_tracks_pilot_signoff_state():
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-9",
+            version=1,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            created_at="2026-03-09T08:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fals-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 94.0,
+                "penalties": {},
+                "final_score": 92.0,
+                "outcome": "promote",
+                "next_stage": ProgressionStage.PILOT.value,
+                "outcome_reason": "Ready for pilot",
+                "blocking_objections": [],
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-9",
+            version=2,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            created_at="2026-03-09T08:01:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "NVDA", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "vol_target", "target_risk_pct": 0.01, "max_notional": 25000.0},
+                "entry_rules": ["enter"],
+                "exit_rules": ["exit"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 2.0, "max_portfolio_impact_pct": 3.0, "max_correlated_exposure_pct": 25.0},
+                "kill_criteria": [],
+            },
+        ),
+    ]
+
+    pending = _build_research_artifact_chain_context("chain-9", artifact_store=FakeArtifactStore(chain=chain))
+
+    assert pending["pilot_signoff_required"] is True
+    assert pending["pilot_signoff_pending"] is True
+    assert pending["pilot_decision"] is None
+
+    approved_chain = chain + [
+        ArtifactEnvelope(
+            artifact_id="pilot-1",
+            chain_id="chain-9",
+            version=3,
+            artifact_type=ArtifactType.PILOT_DECISION,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            created_at="2026-03-09T08:02:00Z",
+            created_by="operator",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "trade_sheet_ref": "trade-1",
+                "approved": True,
+                "operator_decision": "approve",
+                "operator_notes": "Looks good for pilot.",
+                "decided_by": "operator",
+                "decided_at": "2026-03-09T08:02:00Z",
+            },
+        )
+    ]
+
+    approved = _build_research_artifact_chain_context("chain-9", artifact_store=FakeArtifactStore(chain=approved_chain))
+
+    assert approved["pilot_signoff_required"] is True
+    assert approved["pilot_signoff_pending"] is False
+    assert approved["pilot_decision"]["artifact_type"] == "pilot_decision"

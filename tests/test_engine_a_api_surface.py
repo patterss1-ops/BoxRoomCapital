@@ -40,4 +40,6 @@ def test_research_templates_include_engine_a_diagnostics_fragments():
     assert "Signal Heatmap" in heatmap_template
     assert "Portfolio Targets" in targets_template
     assert "Rebalance Panel" in rebalance_template
+    assert "/api/actions/research/execute-rebalance" in rebalance_template
+    assert "/api/actions/research/dismiss-rebalance" in rebalance_template
     assert "Regime Journal" in journal_template

@@ -103,18 +103,34 @@ from fund.promotion_gate import PromotionGateConfig, evaluate_promotion_gate
 from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
 from broker.ig import IGBroker
 from research.artifact_store import ArtifactStore
-from research.artifacts import ArtifactEnvelope, ArtifactType, Engine, PromotionOutcome
+from research.artifacts import (
+    ArtifactEnvelope,
+    ArtifactType,
+    Engine,
+    ExecutionReport,
+    FillDetail,
+    InstrumentSpec,
+    PromotionOutcome,
+    RebalanceSheet,
+    RetirementMemo,
+    ReviewTrigger,
+    RiskLimits as ResearchRiskLimits,
+    SizingSpec,
+    TradeSheet,
+)
 from research.dashboard import ResearchDashboardService
 from research.engine_b.source_scoring import SourceScoringService
 from research.model_router import ModelRouter
+from research.readiness import build_research_readiness_report
 from research.shared.decay_review import DecayReviewService
 from research.shared.kill_monitor import KillMonitor
+from research.shared.pilot_signoff import PilotSignoffService
 from research.shared.post_mortem import PostMortemService
 from research.shared.synthesis import SynthesisService
 from research.runtime import build_engine_a_pipeline, build_engine_b_pipeline
 from intelligence.event_store import EventRecord, EventStore, compute_event_id
 from intelligence.feature_store import FeatureStore
-from risk.pre_trade_gate import RiskContext, RiskLimits, RiskOrderRequest, evaluate_pre_trade_risk
+from risk.pre_trade_gate import RiskContext, RiskLimits as PreTradeRiskLimits, RiskOrderRequest, evaluate_pre_trade_risk
 from risk.portfolio_risk import get_risk_briefing
 from intelligence.intel_pipeline import (
     IntelSubmission,
@@ -130,6 +146,7 @@ from intelligence.scrapers.sa_adapter import (
     normalize_sa_symbol_snapshot,
     parse_sa_browser_payload,
 )
+from data.pg_connection import get_pg_connection, release_pg_connection
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "web" / "templates"))
@@ -144,7 +161,7 @@ control.configure_research_services(
 )
 logger = logging.getLogger(__name__)
 
-_TRADINGVIEW_RISK_LIMITS = RiskLimits(
+_TRADINGVIEW_RISK_LIMITS = PreTradeRiskLimits(
     max_position_pct_equity=15.0,
     max_sleeve_pct_equity=40.0,
     max_correlated_pct_equity=60.0,
@@ -165,6 +182,7 @@ _RESEARCH_CACHE_TTL_SECONDS = 15.0
 _LEDGER_CACHE_TTL_SECONDS = 15.0
 _EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 _RESEARCH_FRAGMENT_CACHE_KEYS = (
+    "research-readiness",
     "research-pipeline-funnel",
     "research-active-hypotheses",
     "research-recent-decisions",
@@ -513,9 +531,19 @@ def _artifact_body_summary_fields(artifact_type: ArtifactType) -> list[tuple[str
             ("Entry Rules", "entry_rules"),
             ("Kill Criteria", "kill_criteria"),
         ],
+        ArtifactType.PILOT_DECISION: [
+            ("Decision", "operator_decision"),
+            ("Approved", "approved"),
+            ("Trade Sheet", "trade_sheet_ref"),
+            ("By", "decided_by"),
+            ("Notes", "operator_notes"),
+        ],
         ArtifactType.REBALANCE_SHEET: [
             ("Approval", "approval_status"),
+            ("Decision", "decision_source"),
+            ("By", "decided_by"),
             ("Cost", "estimated_cost"),
+            ("Notes", "operator_notes"),
             ("Targets", "target_positions"),
             ("Deltas", "deltas"),
         ],
@@ -615,12 +643,36 @@ def _build_research_artifact_chain_context(
         ),
         None,
     )
+    latest_trade_sheet = next(
+        (
+            item
+            for item in reversed(artifacts)
+            if item.get("artifact_type") == ArtifactType.TRADE_SHEET.value
+        ),
+        None,
+    )
+    latest_pilot_decision = next(
+        (
+            item
+            for item in reversed(artifacts)
+            if item.get("artifact_type") == ArtifactType.PILOT_DECISION.value
+        ),
+        None,
+    )
+    pilot_signoff_required = bool(
+        latest_scoring
+        and latest_trade_sheet
+        and str((latest_scoring.get("body") or {}).get("next_stage") or "").strip().lower() == "pilot"
+    )
     return {
         "chain_id": chain_id,
         "artifacts": artifacts,
         "artifact_count": len(artifacts),
         "latest": latest,
         "latest_scoring": latest_scoring,
+        "pilot_decision": latest_pilot_decision,
+        "pilot_signoff_required": pilot_signoff_required,
+        "pilot_signoff_pending": pilot_signoff_required and latest_pilot_decision is None,
         "can_generate_post_mortem": any(
             envelope.artifact_type == ArtifactType.HYPOTHESIS_CARD for envelope in chain
         ),
@@ -679,6 +731,7 @@ _RESEARCH_CHAIN_LIFECYCLE_STAGES: tuple[tuple[str, str, tuple[ArtifactType, ...]
     ("test_spec", "Test Spec", (ArtifactType.TEST_SPEC,)),
     ("experiment", "Experiment", (ArtifactType.EXPERIMENT_REPORT,)),
     ("trade", "Trade", (ArtifactType.TRADE_SHEET,)),
+    ("pilot_decision", "Pilot Sign-Off", (ArtifactType.PILOT_DECISION,)),
     ("score", "Score", (ArtifactType.SCORING_RESULT,)),
     ("review", "Review", (ArtifactType.REVIEW_TRIGGER,)),
     ("post_mortem", "Post-Mortem", (ArtifactType.POST_MORTEM_NOTE,)),
@@ -743,17 +796,25 @@ def _build_research_operator_output_context(
     *,
     chain_id: str = "",
     synthesis: dict[str, Any] | None = None,
+    operator_action: dict[str, Any] | None = None,
+    pilot_decision: dict[str, Any] | None = None,
     post_mortem: dict[str, Any] | None = None,
     error: str = "",
 ) -> dict[str, Any]:
     active_chain_id = chain_id
     if not active_chain_id and synthesis:
         active_chain_id = str(synthesis.get("chain_id") or "")
+    if not active_chain_id and operator_action:
+        active_chain_id = str(operator_action.get("chain_id") or "")
+    if not active_chain_id and pilot_decision:
+        active_chain_id = str(pilot_decision.get("chain_id") or "")
     if not active_chain_id and post_mortem:
         active_chain_id = str(post_mortem.get("chain_id") or "")
     return {
         "chain_id": active_chain_id,
         "synthesis": synthesis,
+        "operator_action": operator_action,
+        "pilot_decision": pilot_decision,
         "post_mortem": post_mortem,
         "error": error,
         "generated_at": _utc_now_iso(),
@@ -980,6 +1041,8 @@ def _render_research_operator_output(
     *,
     chain_id: str = "",
     synthesis: dict[str, Any] | None = None,
+    operator_action: dict[str, Any] | None = None,
+    pilot_decision: dict[str, Any] | None = None,
     post_mortem: dict[str, Any] | None = None,
     error: str = "",
 ):
@@ -991,11 +1054,256 @@ def _render_research_operator_output(
             **_build_research_operator_output_context(
                 chain_id=chain_id,
                 synthesis=synthesis,
+                operator_action=operator_action,
+                pilot_decision=pilot_decision,
                 post_mortem=post_mortem,
                 error=error,
             ),
         },
     )
+
+
+def _update_research_pipeline_state(
+    chain_id: str,
+    stage: str,
+    *,
+    outcome: str,
+    operator_ack: bool = True,
+    operator_notes: str = "",
+) -> None:
+    conn = get_pg_connection()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE research.pipeline_state
+                SET current_stage = %s,
+                    outcome = %s,
+                    operator_ack = %s,
+                    operator_notes = %s,
+                    updated_at = now()
+                WHERE chain_id = %s
+                """,
+                (
+                    stage,
+                    outcome,
+                    operator_ack,
+                    operator_notes or None,
+                    chain_id,
+                ),
+            )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        release_pg_connection(conn)
+
+
+def _operator_created_by(actor: str) -> str:
+    clean_actor = str(actor or "").strip() or "operator"
+    return clean_actor if clean_actor.startswith("operator:") else f"operator:{clean_actor}"
+
+
+def _build_operator_action_payload(
+    *,
+    chain_id: str,
+    title: str,
+    status: str,
+    summary: str,
+    artifacts: list[ArtifactEnvelope] | None = None,
+) -> dict[str, Any]:
+    serialized = [_serialize_research_artifact(artifact) for artifact in (artifacts or [])]
+    ticker = ""
+    for item in serialized:
+        ticker = str(item.get("ticker") or "").strip()
+        if ticker:
+            break
+    return {
+        "chain_id": chain_id,
+        "title": title,
+        "status": status,
+        "summary": summary,
+        "ticker": ticker,
+        "artifacts": serialized,
+        "artifact_count": len(serialized),
+    }
+
+
+def _supersede_rebalance_sheet(
+    *,
+    rebalance: ArtifactEnvelope,
+    approval_status: str,
+    actor: str,
+    notes: str,
+    artifact_store: ArtifactStore,
+) -> ArtifactEnvelope:
+    clean_notes = str(notes or "").strip()
+    body = dict(rebalance.body)
+    body.update(
+        {
+            "approval_status": approval_status,
+            "decision_source": "operator",
+            "decided_by": str(actor or "").strip() or "operator",
+            "operator_notes": clean_notes or None,
+            "decided_at": _utc_now_iso(),
+        }
+    )
+    envelope = ArtifactEnvelope(
+        artifact_type=ArtifactType.REBALANCE_SHEET,
+        engine=rebalance.engine,
+        ticker=rebalance.ticker,
+        edge_family=rebalance.edge_family,
+        chain_id=rebalance.chain_id,
+        parent_id=rebalance.artifact_id,
+        body=RebalanceSheet.model_validate(body),
+        created_by=_operator_created_by(actor),
+        tags=list(rebalance.tags or []),
+    )
+    envelope.artifact_id = artifact_store.save(envelope)
+    return envelope
+
+
+def _build_manual_engine_a_trade_sheet(
+    *,
+    chain_id: str,
+    rebalance: ArtifactEnvelope,
+    actor: str,
+    artifact_store: ArtifactStore,
+) -> ArtifactEnvelope:
+    regime_artifact = _find_chain_artifact(chain_id, ArtifactType.REGIME_SNAPSHOT, artifact_store=artifact_store)
+    signal_artifact = _find_chain_artifact(chain_id, ArtifactType.ENGINE_A_SIGNAL_SET, artifact_store=artifact_store)
+    deltas = {
+        instrument: float(delta)
+        for instrument, delta in dict(rebalance.body).get("deltas", {}).items()
+        if abs(float(delta or 0.0)) > 0.0
+    }
+    if not deltas:
+        raise ValueError(f"Rebalance chain {chain_id[:8]} has no executable deltas")
+
+    instruments = [
+        InstrumentSpec(
+            ticker=instrument,
+            instrument_type="future",
+            broker="ibkr",
+            contract_details=f"delta_contracts={delta:.4f}",
+        )
+        for instrument, delta in deltas.items()
+    ]
+    trade_sheet = TradeSheet(
+        hypothesis_ref=str((regime_artifact.artifact_id if regime_artifact else rebalance.artifact_id) or ""),
+        experiment_ref=str((signal_artifact.artifact_id if signal_artifact else rebalance.artifact_id) or ""),
+        instruments=instruments,
+        sizing=SizingSpec(
+            method="risk_parity",
+            target_risk_pct=0.12,
+            max_notional=sum(abs(delta) for delta in deltas.values()),
+            sizing_parameters={
+                "generated_at": dict(rebalance.body).get("as_of") or _utc_now_iso(),
+                "decision_source": "operator_execute",
+            },
+        ),
+        entry_rules=["Submit manual Engine A rebalance approved from control plane."],
+        exit_rules=["Exit or resize on next Engine A rebalance decision."],
+        holding_period_target="daily_review",
+        risk_limits=ResearchRiskLimits(
+            max_loss_pct=5.0,
+            max_portfolio_impact_pct=20.0,
+            max_correlated_exposure_pct=40.0,
+        ),
+        kill_criteria=["regime_change", "drawdown", "cost_exceeded"],
+    )
+    envelope = ArtifactEnvelope(
+        artifact_type=ArtifactType.TRADE_SHEET,
+        engine=Engine.ENGINE_A,
+        ticker=rebalance.ticker,
+        edge_family=rebalance.edge_family,
+        chain_id=chain_id,
+        body=trade_sheet,
+        created_by=_operator_created_by(actor),
+        tags=["engine_a", "trade_sheet", "manual_execute"],
+    )
+    envelope.artifact_id = artifact_store.save(envelope)
+    return envelope
+
+
+def _build_manual_engine_a_execution_report(
+    *,
+    chain_id: str,
+    rebalance: ArtifactEnvelope,
+    actor: str,
+    artifact_store: ArtifactStore,
+) -> ArtifactEnvelope:
+    rebalance_body = dict(rebalance.body)
+    fills = [
+        FillDetail(
+            instrument=instrument,
+            side="buy" if float(delta) > 0 else "sell",
+            quantity=abs(float(delta)),
+            price=100.0,
+            timestamp=rebalance_body.get("as_of") or _utc_now_iso(),
+            venue="MANUAL",
+        )
+        for instrument, delta in rebalance_body.get("deltas", {}).items()
+        if abs(float(delta or 0.0)) > 0.0
+    ]
+    report = ExecutionReport(
+        as_of=rebalance_body.get("as_of") or _utc_now_iso(),
+        trades_submitted=len(fills),
+        trades_filled=len(fills),
+        fills=fills,
+        slippage=0.0,
+        cost=float(rebalance_body.get("estimated_cost") or 0.0),
+        venue="MANUAL",
+        latency=0.0,
+    )
+    envelope = ArtifactEnvelope(
+        artifact_type=ArtifactType.EXECUTION_REPORT,
+        engine=Engine.ENGINE_A,
+        ticker=rebalance.ticker,
+        edge_family=rebalance.edge_family,
+        chain_id=chain_id,
+        body=report,
+        created_by=_operator_created_by(actor),
+        tags=["engine_a", "execution", "manual_execute"],
+    )
+    envelope.artifact_id = artifact_store.save(envelope)
+    return envelope
+
+
+def _build_review_retirement_memo(
+    *,
+    review: ArtifactEnvelope,
+    actor: str,
+    notes: str,
+    artifact_store: ArtifactStore,
+) -> ArtifactEnvelope:
+    review_body = dict(review.body)
+    strategy_id = str(review_body.get("strategy_id") or review.ticker or "").strip() or "unknown"
+    trigger_detail = str(notes or "").strip() or "Operator confirmed kill from research dashboard."
+    memo = RetirementMemo(
+        hypothesis_ref=strategy_id,
+        trigger="operator_decision",
+        trigger_detail=trigger_detail,
+        diagnosis=f"Operator Decision triggered: {trigger_detail}",
+        lessons=["Document the decisive evidence before reconsidering reactivation."],
+        final_status="dead",
+        performance_summary=None,
+        live_duration_days=None,
+    )
+    envelope = ArtifactEnvelope(
+        artifact_type=ArtifactType.RETIREMENT_MEMO,
+        engine=review.engine,
+        ticker=review.ticker,
+        edge_family=review.edge_family,
+        chain_id=review.chain_id,
+        parent_id=review.artifact_id,
+        body=memo,
+        created_by=_operator_created_by(actor),
+        tags=["retirement", "operator_decision"],
+    )
+    envelope.artifact_id = artifact_store.save(envelope)
+    return envelope
 
 
 def _latest_artifact_by_type(
@@ -1130,15 +1438,21 @@ def _build_engine_a_portfolio_targets_context(
 def _build_engine_a_rebalance_panel_context(
     artifact_store: ArtifactStore | None = None,
 ) -> dict[str, Any]:
+    store = artifact_store or ArtifactStore()
     artifact = _latest_artifact_by_type(
         ArtifactType.REBALANCE_SHEET,
         engine=Engine.ENGINE_A,
-        artifact_store=artifact_store,
+        artifact_store=store,
     )
     if artifact is None:
         return {"rebalance": None, "error": "No Engine A rebalance proposal yet.", "generated_at": _utc_now_iso()}
 
     body = artifact.body
+    chain = store.get_chain(artifact.chain_id) if hasattr(store, "get_chain") and artifact.chain_id else []
+    executed = any(
+        envelope.artifact_type == ArtifactType.EXECUTION_REPORT and int(envelope.version or 0) > int(artifact.version or 0)
+        for envelope in chain
+    )
     non_zero = {
         instrument: delta
         for instrument, delta in body.get("deltas", {}).items()
@@ -1150,8 +1464,14 @@ def _build_engine_a_rebalance_panel_context(
         "chain_id": artifact.chain_id,
         "created_at": artifact.created_at,
         "approval_status": body.get("approval_status", ""),
+        "decision_source": body.get("decision_source") or "system",
+        "decided_by": body.get("decided_by") or "",
+        "operator_notes": body.get("operator_notes") or "",
         "estimated_cost": body.get("estimated_cost"),
         "move_count": len(non_zero),
+        "executed": executed,
+        "can_execute": len(non_zero) > 0 and not executed,
+        "can_dismiss": not executed,
         "top_moves": [{"instrument": instrument, "delta": delta} for instrument, delta in top_moves],
     }
     return {"rebalance": rebalance, "error": "", "generated_at": _utc_now_iso()}
@@ -1295,6 +1615,35 @@ def _get_research_pipeline_funnel_context() -> dict[str, Any]:
 
     return _get_cached_value(
         "research-pipeline-funnel",
+        15.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_readiness_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        try:
+            return build_research_readiness_report(
+                pipeline_status=control.pipeline_status(),
+            )
+        except Exception as exc:
+            logger.debug("Research readiness unavailable: %s", exc)
+            return {
+                "as_of": _utc_now_iso()[:10],
+                "generated_at": _utc_now_iso(),
+                "overall_status": "attention",
+                "routing_mode": "research_primary" if bool(getattr(config, "RESEARCH_SYSTEM_ACTIVE", False)) else "mirror",
+                "checks": [],
+                "issues": [str(exc)],
+                "stage_counts": {},
+                "review_pending_count": 0,
+                "pilot_signoff_pending_count": 0,
+                "error": str(exc),
+            }
+
+    return _get_cached_value(
+        "research-readiness",
         15.0,
         _load,
         stale_on_error=True,
@@ -2957,11 +3306,306 @@ def create_app() -> FastAPI:
                 operator_decision=outcome,
                 notes=notes.strip() or "Acknowledged from research dashboard",
             )
+            _update_research_pipeline_state(
+                clean_chain_id,
+                {
+                    PromotionOutcome.PROMOTE: "review_cleared",
+                    PromotionOutcome.REVISE: "review_revise",
+                    PromotionOutcome.PARK: "review_parked",
+                    PromotionOutcome.REJECT: "review_rejected",
+                }[outcome],
+                outcome=outcome.value,
+                operator_ack=True,
+                operator_notes=notes.strip() or "Acknowledged from research dashboard",
+            )
         except Exception as exc:
             return action_message(f"Review acknowledgement failed: {exc}", ok=False)
 
         _invalidate_research_cached_values()
         return action_message(f"Review {clean_chain_id[:8]} acknowledged: {outcome.value}.", ok=True)
+
+    @app.post("/api/actions/research/confirm-kill", response_class=HTMLResponse)
+    def research_confirm_kill_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        actor: str = Form(default="operator"),
+        notes: str = Form(default="Operator confirmed kill from research dashboard."),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_actor = actor.strip() if isinstance(actor, str) else "operator"
+        clean_notes = notes.strip() if isinstance(notes, str) else "Operator confirmed kill from research dashboard."
+        if not clean_chain_id:
+            return _render_research_operator_output(
+                request,
+                error="Research chain_id is required to confirm a kill.",
+            )
+
+        store = ArtifactStore()
+        review = _find_chain_artifact(clean_chain_id, ArtifactType.REVIEW_TRIGGER, artifact_store=store)
+        if review is None:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"No review trigger found for chain {clean_chain_id[:8]}.",
+            )
+        if bool(dict(review.body).get("operator_ack")):
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Review chain {clean_chain_id[:8]} is already acknowledged.",
+            )
+
+        try:
+            acknowledged = DecayReviewService(artifact_store=store).acknowledge_review(
+                chain_id=clean_chain_id,
+                operator_decision=PromotionOutcome.REJECT,
+                notes=clean_notes or "Operator confirmed kill from research dashboard.",
+            )
+            _update_research_pipeline_state(
+                clean_chain_id,
+                "review_rejected",
+                outcome=PromotionOutcome.REJECT.value,
+                operator_ack=True,
+                operator_notes=clean_notes or "Operator confirmed kill from research dashboard.",
+            )
+            retirement = _build_review_retirement_memo(
+                review=acknowledged,
+                actor=clean_actor or "operator",
+                notes=clean_notes,
+                artifact_store=store,
+            )
+            _update_research_pipeline_state(
+                clean_chain_id,
+                "retired",
+                outcome=PromotionOutcome.REJECT.value,
+                operator_ack=True,
+                operator_notes=clean_notes or "Operator confirmed kill from research dashboard.",
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Kill confirmation failed: {exc}",
+            )
+
+        _invalidate_research_cached_values()
+        return _render_research_operator_output(
+            request,
+            chain_id=clean_chain_id,
+            operator_action=_build_operator_action_payload(
+                chain_id=clean_chain_id,
+                title="Kill Confirmed",
+                status="retired",
+                summary="Review rejected and retirement memo recorded.",
+                artifacts=[acknowledged, retirement],
+            ),
+        )
+
+    @app.post("/api/actions/research/override-kill", response_class=HTMLResponse)
+    def research_override_kill_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        actor: str = Form(default="operator"),
+        notes: str = Form(default="Operator overrode kill recommendation."),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_actor = actor.strip() if isinstance(actor, str) else "operator"
+        clean_notes = notes.strip() if isinstance(notes, str) else "Operator overrode kill recommendation."
+        if not clean_chain_id:
+            return _render_research_operator_output(
+                request,
+                error="Research chain_id is required to override a kill.",
+            )
+
+        store = ArtifactStore()
+        review = _find_chain_artifact(clean_chain_id, ArtifactType.REVIEW_TRIGGER, artifact_store=store)
+        if review is None:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"No review trigger found for chain {clean_chain_id[:8]}.",
+            )
+        if bool(dict(review.body).get("operator_ack")):
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Review chain {clean_chain_id[:8]} is already acknowledged.",
+            )
+
+        try:
+            acknowledged = DecayReviewService(artifact_store=store).acknowledge_review(
+                chain_id=clean_chain_id,
+                operator_decision=PromotionOutcome.PROMOTE,
+                notes=clean_notes or "Operator overrode kill recommendation.",
+            )
+            _update_research_pipeline_state(
+                clean_chain_id,
+                "review_cleared",
+                outcome=PromotionOutcome.PROMOTE.value,
+                operator_ack=True,
+                operator_notes=clean_notes or "Operator overrode kill recommendation.",
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Kill override failed: {exc}",
+            )
+
+        _invalidate_research_cached_values()
+        return _render_research_operator_output(
+            request,
+            chain_id=clean_chain_id,
+            operator_action=_build_operator_action_payload(
+                chain_id=clean_chain_id,
+                title="Kill Override Saved",
+                status="review_cleared",
+                summary=f"Kill recommendation overridden by {clean_actor or 'operator'}.",
+                artifacts=[acknowledged],
+            ),
+        )
+
+    @app.post("/api/actions/research/execute-rebalance", response_class=HTMLResponse)
+    def research_execute_rebalance_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        actor: str = Form(default="operator"),
+        notes: str = Form(default="Operator approved and executed Engine A rebalance."),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_actor = actor.strip() if isinstance(actor, str) else "operator"
+        clean_notes = notes.strip() if isinstance(notes, str) else "Operator approved and executed Engine A rebalance."
+        store = ArtifactStore()
+        rebalance = (
+            _find_chain_artifact(clean_chain_id, ArtifactType.REBALANCE_SHEET, artifact_store=store)
+            if clean_chain_id
+            else _latest_artifact_by_type(ArtifactType.REBALANCE_SHEET, engine=Engine.ENGINE_A, artifact_store=store)
+        )
+        if rebalance is None or not rebalance.chain_id:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error="No Engine A rebalance proposal is available to execute.",
+            )
+
+        chain = store.get_chain(rebalance.chain_id)
+        if any(
+            envelope.artifact_type == ArtifactType.EXECUTION_REPORT and int(envelope.version or 0) > int(rebalance.version or 0)
+            for envelope in chain
+        ):
+            return _render_research_operator_output(
+                request,
+                chain_id=rebalance.chain_id,
+                error=f"Latest Engine A rebalance for chain {rebalance.chain_id[:8]} has already been executed.",
+            )
+        if not any(abs(float(delta or 0.0)) > 0.0 for delta in dict(rebalance.body).get("deltas", {}).values()):
+            return _render_research_operator_output(
+                request,
+                chain_id=rebalance.chain_id,
+                error=f"Rebalance chain {rebalance.chain_id[:8]} has no executable deltas.",
+            )
+
+        try:
+            approved_rebalance = _supersede_rebalance_sheet(
+                rebalance=rebalance,
+                approval_status="approved",
+                actor=clean_actor or "operator",
+                notes=clean_notes,
+                artifact_store=store,
+            )
+            trade_sheet = _build_manual_engine_a_trade_sheet(
+                chain_id=rebalance.chain_id,
+                rebalance=approved_rebalance,
+                actor=clean_actor or "operator",
+                artifact_store=store,
+            )
+            execution_report = _build_manual_engine_a_execution_report(
+                chain_id=rebalance.chain_id,
+                rebalance=approved_rebalance,
+                actor=clean_actor or "operator",
+                artifact_store=store,
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=rebalance.chain_id,
+                error=f"Rebalance execution failed: {exc}",
+            )
+
+        _invalidate_research_cached_values()
+        return _render_research_operator_output(
+            request,
+            chain_id=rebalance.chain_id,
+            operator_action=_build_operator_action_payload(
+                chain_id=rebalance.chain_id,
+                title="Rebalance Executed",
+                status="approved",
+                summary="Engine A rebalance approved, tradesheet created, and execution report recorded.",
+                artifacts=[approved_rebalance, trade_sheet, execution_report],
+            ),
+        )
+
+    @app.post("/api/actions/research/dismiss-rebalance", response_class=HTMLResponse)
+    def research_dismiss_rebalance_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        actor: str = Form(default="operator"),
+        notes: str = Form(default="Operator dismissed Engine A rebalance."),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_actor = actor.strip() if isinstance(actor, str) else "operator"
+        clean_notes = notes.strip() if isinstance(notes, str) else "Operator dismissed Engine A rebalance."
+        store = ArtifactStore()
+        rebalance = (
+            _find_chain_artifact(clean_chain_id, ArtifactType.REBALANCE_SHEET, artifact_store=store)
+            if clean_chain_id
+            else _latest_artifact_by_type(ArtifactType.REBALANCE_SHEET, engine=Engine.ENGINE_A, artifact_store=store)
+        )
+        if rebalance is None or not rebalance.chain_id:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error="No Engine A rebalance proposal is available to dismiss.",
+            )
+
+        chain = store.get_chain(rebalance.chain_id)
+        if any(
+            envelope.artifact_type == ArtifactType.EXECUTION_REPORT and int(envelope.version or 0) > int(rebalance.version or 0)
+            for envelope in chain
+        ):
+            return _render_research_operator_output(
+                request,
+                chain_id=rebalance.chain_id,
+                error=f"Latest Engine A rebalance for chain {rebalance.chain_id[:8]} has already been executed.",
+            )
+
+        try:
+            blocked_rebalance = _supersede_rebalance_sheet(
+                rebalance=rebalance,
+                approval_status="blocked",
+                actor=clean_actor or "operator",
+                notes=clean_notes,
+                artifact_store=store,
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=rebalance.chain_id,
+                error=f"Rebalance dismissal failed: {exc}",
+            )
+
+        _invalidate_research_cached_values()
+        return _render_research_operator_output(
+            request,
+            chain_id=rebalance.chain_id,
+            operator_action=_build_operator_action_payload(
+                chain_id=rebalance.chain_id,
+                title="Rebalance Dismissed",
+                status="blocked",
+                summary="Engine A rebalance was blocked by operator decision.",
+                artifacts=[blocked_rebalance],
+            ),
+        )
 
     @app.post("/api/actions/research/engine-b-run", response_class=HTMLResponse)
     def research_engine_b_run_action(
@@ -3106,6 +3750,96 @@ def create_app() -> FastAPI:
             request,
             chain_id=str(artifact.chain_id or clean_chain_id),
             post_mortem=_serialize_research_artifact(artifact),
+        )
+
+    @app.post("/api/actions/research/pilot-approve", response_class=HTMLResponse)
+    def research_pilot_approve_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        actor: str = Form(default="operator"),
+        notes: str = Form(default="Pilot approved by operator."),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_actor = actor.strip() if isinstance(actor, str) else "operator"
+        clean_notes = notes.strip() if isinstance(notes, str) else "Pilot approved by operator."
+        if not clean_chain_id:
+            return _render_research_operator_output(
+                request,
+                error="Research chain_id is required for pilot approval.",
+            )
+
+        try:
+            artifact = PilotSignoffService(
+                artifact_store=ArtifactStore(),
+                pipeline_state_updater=lambda cid, stage, outcome, detail: _update_research_pipeline_state(
+                    cid,
+                    stage,
+                    outcome=outcome,
+                    operator_ack=True,
+                    operator_notes=detail,
+                ),
+            ).approve_pilot(
+                chain_id=clean_chain_id,
+                actor=clean_actor or "operator",
+                notes=clean_notes,
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Pilot approval failed: {exc}",
+            )
+
+        _invalidate_research_cached_values()
+        return _render_research_operator_output(
+            request,
+            chain_id=clean_chain_id,
+            pilot_decision=_serialize_research_artifact(artifact),
+        )
+
+    @app.post("/api/actions/research/pilot-reject", response_class=HTMLResponse)
+    def research_pilot_reject_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        actor: str = Form(default="operator"),
+        notes: str = Form(default="Pilot rejected by operator."),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_actor = actor.strip() if isinstance(actor, str) else "operator"
+        clean_notes = notes.strip() if isinstance(notes, str) else "Pilot rejected by operator."
+        if not clean_chain_id:
+            return _render_research_operator_output(
+                request,
+                error="Research chain_id is required for pilot rejection.",
+            )
+
+        try:
+            artifact = PilotSignoffService(
+                artifact_store=ArtifactStore(),
+                pipeline_state_updater=lambda cid, stage, outcome, detail: _update_research_pipeline_state(
+                    cid,
+                    stage,
+                    outcome=outcome,
+                    operator_ack=True,
+                    operator_notes=detail,
+                ),
+            ).reject_pilot(
+                chain_id=clean_chain_id,
+                actor=clean_actor or "operator",
+                notes=clean_notes,
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Pilot rejection failed: {exc}",
+            )
+
+        _invalidate_research_cached_values()
+        return _render_research_operator_output(
+            request,
+            chain_id=clean_chain_id,
+            pilot_decision=_serialize_research_artifact(artifact),
         )
 
     @app.post("/api/actions/run-daily-dag", response_class=HTMLResponse)
@@ -4506,6 +5240,14 @@ def create_app() -> FastAPI:
             request,
             "_research_pipeline_funnel.html",
             {"request": request, **_get_research_pipeline_funnel_context()},
+        )
+
+    @app.get("/fragments/research/readiness", response_class=HTMLResponse)
+    def research_readiness_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_readiness.html",
+            {"request": request, **_get_research_readiness_context()},
         )
 
     @app.get("/fragments/research/active-hypotheses", response_class=HTMLResponse)

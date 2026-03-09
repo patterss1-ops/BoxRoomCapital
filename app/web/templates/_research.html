@@ -1,6 +1,13 @@
 {% set report = promotion_gate %}
 {% include "_promotion_gate.html" %}
 
+<section class="grid grid-cols-1 gap-4 mb-4">
+  <div id="research-readiness"
+       hx-get="/fragments/research/readiness"
+       hx-trigger="load delay:75ms, every 20s"
+       hx-swap="innerHTML"></div>
+</section>
+
 <section class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
   <div class="xl:col-span-4"
        id="research-engine-status"

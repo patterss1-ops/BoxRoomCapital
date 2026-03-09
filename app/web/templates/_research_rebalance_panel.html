@@ -28,6 +28,23 @@
       </div>
     </div>
 
+    {% if rebalance.decided_by or rebalance.operator_notes %}
+      <div class="mt-3 grid grid-cols-1 gap-2 text-sm">
+        {% if rebalance.decided_by %}
+          <div class="grid grid-cols-[96px_1fr] gap-2 items-start">
+            <span class="text-gray-400 uppercase tracking-wide text-[11px]">By</span>
+            <span class="text-gray-700">{{ rebalance.decided_by }}</span>
+          </div>
+        {% endif %}
+        {% if rebalance.operator_notes %}
+          <div class="grid grid-cols-[96px_1fr] gap-2 items-start">
+            <span class="text-gray-400 uppercase tracking-wide text-[11px]">Notes</span>
+            <span class="text-gray-700">{{ rebalance.operator_notes }}</span>
+          </div>
+        {% endif %}
+      </div>
+    {% endif %}
+
     {% if rebalance.top_moves %}
       <div class="mt-3">
         <p class="text-xs uppercase tracking-wide text-gray-400 mb-2">Top Moves</p>
@@ -45,13 +62,27 @@
     {% endif %}
 
     {% if rebalance.chain_id %}
-      <div class="mt-3">
+      <div class="mt-3 flex flex-wrap gap-2">
         <button
           class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
           hx-get="/fragments/research/artifact-chain/{{ rebalance.chain_id }}"
           hx-target="#research-artifact-chain-viewer"
           hx-swap="innerHTML"
         >Open chain</button>
+        {% if rebalance.can_execute %}
+          <form hx-post="/api/actions/research/execute-rebalance" hx-target="#research-operator-output" hx-swap="innerHTML">
+            <input type="hidden" name="chain_id" value="{{ rebalance.chain_id }}" />
+            <input type="hidden" name="notes" value="Rebalance executed from Engine A panel." />
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Execute</button>
+          </form>
+        {% endif %}
+        {% if rebalance.can_dismiss %}
+          <form hx-post="/api/actions/research/dismiss-rebalance" hx-target="#research-operator-output" hx-swap="innerHTML">
+            <input type="hidden" name="chain_id" value="{{ rebalance.chain_id }}" />
+            <input type="hidden" name="notes" value="Rebalance dismissed from Engine A panel." />
+            <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Dismiss</button>
+          </form>
+        {% endif %}
       </div>
     {% endif %}
   {% else %}

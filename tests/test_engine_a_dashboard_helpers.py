@@ -80,6 +80,9 @@ def test_engine_a_rebalance_contexts_render_latest_positions_and_moves():
     assert rebalance["rebalance"]["move_count"] == 2
     assert rebalance["rebalance"]["top_moves"][0]["instrument"] in {"ES", "NQ"}
     assert rebalance["rebalance"]["approval_status"] == "approved"
+    assert rebalance["rebalance"]["decision_source"] == "system"
+    assert rebalance["rebalance"]["can_execute"] is True
+    assert rebalance["rebalance"]["can_dismiss"] is True
 
 
 def test_engine_a_regime_panel_and_journal_contexts_use_latest_artifacts():

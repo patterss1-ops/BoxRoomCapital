@@ -32,6 +32,18 @@
               </form>
             {% endfor %}
           </div>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <form hx-post="/api/actions/research/confirm-kill" hx-target="#research-operator-output" hx-swap="innerHTML">
+              <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+              <input type="hidden" name="notes" value="Dashboard confirm-kill for {{ alert.strategy_id }}" />
+              <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs uppercase tracking-wide">Confirm Kill</button>
+            </form>
+            <form hx-post="/api/actions/research/override-kill" hx-target="#research-operator-output" hx-swap="innerHTML">
+              <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+              <input type="hidden" name="notes" value="Dashboard override-kill for {{ alert.strategy_id }}" />
+              <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs uppercase tracking-wide">Override Kill</button>
+            </form>
+          </div>
         </div>
       {% endfor %}
     </div>

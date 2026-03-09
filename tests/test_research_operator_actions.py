@@ -62,23 +62,53 @@ class FakeArtifactStore:
             self.chains["chain-1"] = list(self.chain)
         self.post_mortems = list(post_mortems or [])
         self.retirements = list(retirements or [])
+        self.saved = []
 
     def get_chain(self, chain_id: str):
         return list(self.chains.get(chain_id, []))
 
+    def get_latest(self, chain_id: str):
+        chain = self.get_chain(chain_id)
+        return chain[-1] if chain else None
+
+    def get(self, artifact_id: str):
+        for chain in self.chains.values():
+            for artifact in chain:
+                if artifact.artifact_id == artifact_id:
+                    return artifact
+        return None
+
+    def save(self, envelope):
+        chain_id = str(envelope.chain_id or "chain-1")
+        chain = self.chains.setdefault(chain_id, [])
+        envelope.artifact_id = envelope.artifact_id or f"artifact-{len(self.saved) + 1}"
+        envelope.version = len(chain) + 1
+        chain.append(envelope)
+        self.saved.append(envelope)
+        if envelope.artifact_type == ArtifactType.POST_MORTEM_NOTE:
+            self.post_mortems.append(envelope)
+        if envelope.artifact_type == ArtifactType.RETIREMENT_MEMO:
+            self.retirements.append(envelope)
+        return envelope.artifact_id
+
     def query(self, artifact_type=None, engine=None, limit=50, **kwargs):
         ticker = str(kwargs.get("ticker") or "").strip().upper()
         search_text = str(kwargs.get("search_text") or "").strip().lower()
-        if artifact_type == ArtifactType.POST_MORTEM_NOTE:
-            rows = list(self.post_mortems)
-        elif artifact_type == ArtifactType.RETIREMENT_MEMO:
-            rows = list(self.retirements)
-        else:
-            rows = []
+        rows = []
+        for chain in self.chains.values():
+            rows.extend(chain)
+        if artifact_type is not None:
+            rows = [row for row in rows if row.artifact_type == artifact_type]
+        if engine is not None:
+            rows = [row for row in rows if row.engine == engine]
         if ticker:
             rows = [row for row in rows if ticker in str(row.ticker or "").upper()]
         if search_text:
             rows = [row for row in rows if search_text in str(row.body).lower()]
+        rows.sort(
+            key=lambda row: (str(getattr(row, "created_at", "") or ""), int(getattr(row, "version", 0) or 0)),
+            reverse=True,
+        )
         return rows[:limit]
 
 
@@ -244,6 +274,439 @@ def test_research_post_mortem_action_renders_generated_artifact(monkeypatch):
     assert "Post-Mortem Saved" in body
     assert "Mostly correct but crowded." in body
     assert "React faster to invalidators" in body
+
+
+def test_research_pilot_approve_action_saves_decision_and_updates_output(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="hyp-1",
+            chain_id="chain-1",
+            version=1,
+            artifact_type=ArtifactType.HYPOTHESIS_CARD,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_id": "hyp-local",
+                "event_card_ref": "evt-1",
+                "mechanism": "revision drift",
+                "market_implied_view": "muted",
+                "variant_view": "higher",
+                "catalyst": "estimate changes",
+                "direction": "long",
+                "horizon": "days",
+                "confidence": 0.7,
+                "invalidators": ["guide cut"],
+                "candidate_expressions": ["AAPL equity"],
+                "testable_predictions": ["outperformance"],
+                "edge_family": "underreaction_revision",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-1",
+            version=2,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:01:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fal-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 94.0,
+                "penalties": {},
+                "final_score": 92.0,
+                "outcome": "promote",
+                "next_stage": "pilot",
+                "outcome_reason": "Ready for pilot",
+                "blocking_objections": [],
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-1",
+            version=3,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:02:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "AAPL", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "vol_target", "target_risk_pct": 0.01, "max_notional": 25000.0},
+                "entry_rules": ["enter"],
+                "exit_rules": ["exit"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 2.0, "max_portfolio_impact_pct": 3.0, "max_correlated_exposure_pct": 25.0},
+                "kill_criteria": [],
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-1": chain})
+    pipeline_updates = []
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_update_research_pipeline_state",
+        lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
+            (chain_id, stage, outcome, operator_ack, operator_notes)
+        ),
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/pilot-approve", "POST")
+    response = endpoint(_build_form_request("/api/actions/research/pilot-approve"), chain_id="chain-1", notes="Looks good.")
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Pilot Sign-Off Saved" in body
+    assert "approve" in body
+    assert fake_store.saved[-1].artifact_type == ArtifactType.PILOT_DECISION
+    assert fake_store.saved[-1].body["approved"] is True
+    assert pipeline_updates[-1][:3] == ("chain-1", "review_cleared", "promote")
+
+
+def test_research_pilot_reject_action_saves_decision_and_updates_output(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="hyp-1",
+            chain_id="chain-1",
+            version=1,
+            artifact_type=ArtifactType.HYPOTHESIS_CARD,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_id": "hyp-local",
+                "event_card_ref": "evt-1",
+                "mechanism": "revision drift",
+                "market_implied_view": "muted",
+                "variant_view": "higher",
+                "catalyst": "estimate changes",
+                "direction": "long",
+                "horizon": "days",
+                "confidence": 0.7,
+                "invalidators": ["guide cut"],
+                "candidate_expressions": ["AAPL equity"],
+                "testable_predictions": ["outperformance"],
+                "edge_family": "underreaction_revision",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-1",
+            version=2,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:01:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fal-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 94.0,
+                "penalties": {},
+                "final_score": 92.0,
+                "outcome": "promote",
+                "next_stage": "pilot",
+                "outcome_reason": "Ready for pilot",
+                "blocking_objections": [],
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-1",
+            version=3,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:02:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "AAPL", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "vol_target", "target_risk_pct": 0.01, "max_notional": 25000.0},
+                "entry_rules": ["enter"],
+                "exit_rules": ["exit"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 2.0, "max_portfolio_impact_pct": 3.0, "max_correlated_exposure_pct": 25.0},
+                "kill_criteria": [],
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-1": chain})
+    pipeline_updates = []
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_update_research_pipeline_state",
+        lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
+            (chain_id, stage, outcome, operator_ack, operator_notes)
+        ),
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/pilot-reject", "POST")
+    response = endpoint(_build_form_request("/api/actions/research/pilot-reject"), chain_id="chain-1", notes="Kill rules too weak.")
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Pilot Sign-Off Saved" in body
+    assert "reject" in body
+    assert fake_store.saved[-1].artifact_type == ArtifactType.PILOT_DECISION
+    assert fake_store.saved[-1].body["approved"] is False
+    assert pipeline_updates[-1][:3] == ("chain-1", "review_rejected", "reject")
+
+
+def test_research_confirm_kill_action_rejects_review_and_records_retirement(monkeypatch):
+    review_chain = [
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review",
+            version=1,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_B,
+            ticker="momentum",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "momentum",
+                "trigger_source": "decay_detector",
+                "health_status": "decay",
+                "flags": ["profit_factor_below_floor"],
+                "recent_metrics": {"recent_profit_factor": 0.7},
+                "baseline_metrics": {"baseline_profit_factor": 1.4},
+                "recommended_action": "park",
+                "artifact_id": "review-1",
+                "operator_ack": False,
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review": review_chain})
+    pipeline_updates = []
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_update_research_pipeline_state",
+        lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
+            (chain_id, stage, outcome, operator_ack, operator_notes)
+        ),
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/confirm-kill", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/confirm-kill"),
+        chain_id="chain-review",
+        notes="Decay confirmed after operator review.",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Kill Confirmed" in body
+    assert fake_store.saved[-2].artifact_type == ArtifactType.REVIEW_TRIGGER
+    assert fake_store.saved[-2].body["operator_decision"] == "reject"
+    assert fake_store.saved[-1].artifact_type == ArtifactType.RETIREMENT_MEMO
+    assert fake_store.saved[-1].body["trigger"] == "operator_decision"
+    assert fake_store.saved[-1].body["final_status"] == "dead"
+    assert pipeline_updates[0][:3] == ("chain-review", "review_rejected", "reject")
+    assert pipeline_updates[-1][:3] == ("chain-review", "retired", "reject")
+
+
+def test_research_override_kill_action_clears_review_without_retirement(monkeypatch):
+    review_chain = [
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review",
+            version=1,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_B,
+            ticker="momentum",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "momentum",
+                "trigger_source": "decay_detector",
+                "health_status": "warning",
+                "flags": ["win_rate_below_floor"],
+                "recent_metrics": {"recent_profit_factor": 0.95},
+                "baseline_metrics": {"baseline_profit_factor": 1.2},
+                "recommended_action": "revise",
+                "artifact_id": "review-1",
+                "operator_ack": False,
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review": review_chain})
+    pipeline_updates = []
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_update_research_pipeline_state",
+        lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
+            (chain_id, stage, outcome, operator_ack, operator_notes)
+        ),
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/override-kill", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/override-kill"),
+        chain_id="chain-review",
+        actor="pm",
+        notes="Metrics recovered enough to keep the strategy live.",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Kill Override Saved" in body
+    assert len(fake_store.saved) == 1
+    assert fake_store.saved[-1].artifact_type == ArtifactType.REVIEW_TRIGGER
+    assert fake_store.saved[-1].body["operator_decision"] == "promote"
+    assert pipeline_updates[-1][:3] == ("chain-review", "review_cleared", "promote")
+
+
+def test_research_execute_rebalance_action_records_manual_trade_and_execution(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="regime-1",
+            chain_id="chain-a",
+            version=1,
+            artifact_type=ArtifactType.REGIME_SNAPSHOT,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "vol_regime": "normal",
+                "trend_regime": "strong_trend",
+                "carry_regime": "steep",
+                "macro_regime": "risk_on",
+                "sizing_factor": 0.9,
+                "active_overrides": [],
+                "indicators": {"vix": 18.0},
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="signal-1",
+            chain_id="chain-a",
+            version=2,
+            artifact_type=ArtifactType.ENGINE_A_SIGNAL_SET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:01:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "signals": {"ES:trend": {"normalized_value": 0.7}},
+                "forecast_weights": {"trend": 1.0},
+                "combined_forecast": {"ES": 0.7, "NQ": -0.3},
+                "regime_ref": "regime-1",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="rebalance-1",
+            chain_id="chain-a",
+            version=3,
+            artifact_type=ArtifactType.REBALANCE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:02:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "current_positions": {"ES": 1.0, "NQ": 0.0},
+                "target_positions": {"ES": 2.0, "NQ": -1.0},
+                "deltas": {"ES": 1.0, "NQ": -1.0},
+                "estimated_cost": 0.0042,
+                "approval_status": "draft",
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-a": chain})
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+
+    endpoint = _route_endpoint("/api/actions/research/execute-rebalance", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/execute-rebalance"),
+        chain_id="chain-a",
+        actor="ops",
+        notes="Approve and execute the latest rebalance.",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Rebalance Executed" in body
+    assert fake_store.saved[-3].artifact_type == ArtifactType.REBALANCE_SHEET
+    assert fake_store.saved[-3].body["approval_status"] == "approved"
+    assert fake_store.saved[-3].body["decision_source"] == "operator"
+    assert fake_store.saved[-2].artifact_type == ArtifactType.TRADE_SHEET
+    assert fake_store.saved[-2].created_by == "operator:ops"
+    assert fake_store.saved[-1].artifact_type == ArtifactType.EXECUTION_REPORT
+    assert fake_store.saved[-1].body["trades_submitted"] == 2
+
+
+def test_research_dismiss_rebalance_action_blocks_latest_sheet(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="rebalance-1",
+            chain_id="chain-a",
+            version=1,
+            artifact_type=ArtifactType.REBALANCE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:02:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "current_positions": {"ES": 1.0},
+                "target_positions": {"ES": 2.0},
+                "deltas": {"ES": 1.0},
+                "estimated_cost": 0.0042,
+                "approval_status": "draft",
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-a": chain})
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+
+    endpoint = _route_endpoint("/api/actions/research/dismiss-rebalance", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/dismiss-rebalance"),
+        chain_id="chain-a",
+        actor="ops",
+        notes="Block this rebalance until tomorrow.",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Rebalance Dismissed" in body
+    assert fake_store.saved[-1].artifact_type == ArtifactType.REBALANCE_SHEET
+    assert fake_store.saved[-1].body["approval_status"] == "blocked"
+    assert fake_store.saved[-1].body["operator_notes"] == "Block this rebalance until tomorrow."
 
 
 def test_build_research_archive_context_combines_synthesis_post_mortems_and_retirements():
@@ -619,7 +1082,7 @@ def test_build_research_archive_context_adds_completed_chain_lifecycle_summary()
     assert context["completed_chains"][0]["latest_artifact_label"] == "Post Mortem Note"
     assert context["completed_chains"][0]["latest_note"] == "Edge worked, but crowding tightened exits."
     assert context["completed_chains"][0]["lifecycle"]["completed_count"] == 9
-    assert context["completed_chains"][0]["lifecycle"]["total_count"] == 10
+    assert context["completed_chains"][0]["lifecycle"]["total_count"] == 11
     assert context["completed_chains"][0]["lifecycle"]["summary"].endswith("+3 more")
     assert [
         milestone["key"]

@@ -18,6 +18,7 @@ class ArtifactType(str, Enum):
     TEST_SPEC = "test_spec"
     EXPERIMENT_REPORT = "experiment_report"
     TRADE_SHEET = "trade_sheet"
+    PILOT_DECISION = "pilot_decision"
     RETIREMENT_MEMO = "retirement_memo"
     REGIME_SNAPSHOT = "regime_snapshot"
     REGIME_JOURNAL = "regime_journal"
@@ -269,6 +270,16 @@ class TradeSheet(BaseModel):
     kill_criteria: list[str] = Field(default_factory=list)
 
 
+class PilotDecision(BaseModel):
+    hypothesis_ref: str
+    trade_sheet_ref: str
+    approved: bool
+    operator_decision: Literal["approve", "reject"]
+    operator_notes: str | None = None
+    decided_by: str
+    decided_at: str
+
+
 class RetirementMemo(BaseModel):
     hypothesis_ref: str
     trigger: Literal[
@@ -311,6 +322,10 @@ class RebalanceSheet(BaseModel):
     deltas: dict[str, float]
     estimated_cost: float
     approval_status: Literal["draft", "approved", "blocked"]
+    decision_source: Literal["system", "operator"] | None = None
+    decided_by: str | None = None
+    operator_notes: str | None = None
+    decided_at: str | None = None
 
 
 class FillDetail(BaseModel):
@@ -396,6 +411,7 @@ ARTIFACT_BODY_MODELS: dict[ArtifactType, type[BaseModel]] = {
     ArtifactType.TEST_SPEC: TestSpec,
     ArtifactType.EXPERIMENT_REPORT: ExperimentReport,
     ArtifactType.TRADE_SHEET: TradeSheet,
+    ArtifactType.PILOT_DECISION: PilotDecision,
     ArtifactType.RETIREMENT_MEMO: RetirementMemo,
     ArtifactType.REGIME_SNAPSHOT: RegimeSnapshot,
     ArtifactType.REGIME_JOURNAL: RegimeJournal,

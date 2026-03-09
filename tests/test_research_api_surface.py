@@ -7,6 +7,7 @@ def test_research_dashboard_routes_are_registered():
     paths = {route.path for route in server.app.routes}
 
     assert "/fragments/research/pipeline-funnel" in paths
+    assert "/fragments/research/readiness" in paths
     assert "/fragments/research/active-hypotheses" in paths
     assert "/fragments/research/engine-status" in paths
     assert "/fragments/research/recent-decisions" in paths
@@ -21,8 +22,14 @@ def test_research_dashboard_routes_are_registered():
     assert "/fragments/research/rebalance-panel" in paths
     assert "/fragments/research/regime-journal" in paths
     assert "/api/actions/research/review-ack" in paths
+    assert "/api/actions/research/confirm-kill" in paths
+    assert "/api/actions/research/override-kill" in paths
+    assert "/api/actions/research/execute-rebalance" in paths
+    assert "/api/actions/research/dismiss-rebalance" in paths
     assert "/api/actions/research/engine-b-run" in paths
     assert "/api/actions/research/synthesize" in paths
+    assert "/api/actions/research/pilot-approve" in paths
+    assert "/api/actions/research/pilot-reject" in paths
     assert "/api/actions/research/post-mortem" in paths
     assert "/api/research/artifact-chain/{chain_id}" in paths
     assert "/api/research/artifact/{artifact_id}" in paths
@@ -32,6 +39,7 @@ def test_research_template_loads_dashboard_fragments():
     template = Path("app/web/templates/_research.html").read_text(encoding="utf-8")
 
     assert "/fragments/research/engine-status" in template
+    assert "/fragments/research/readiness" in template
     assert "/fragments/research/alerts" in template
     assert "/fragments/research/pipeline-funnel" in template
     assert "/fragments/research/active-hypotheses" in template
@@ -62,6 +70,8 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     chain_template = Path("app/web/templates/_research_artifact_chain.html").read_text(encoding="utf-8")
     operator_template = Path("app/web/templates/_research_operator_output.html").read_text(encoding="utf-8")
     archive_template = Path("app/web/templates/_research_archive.html").read_text(encoding="utf-8")
+    alerts_template = Path("app/web/templates/_research_alerts.html").read_text(encoding="utf-8")
+    readiness_template = Path("app/web/templates/_research_readiness.html").read_text(encoding="utf-8")
 
     assert "/fragments/research/artifact-chain/{{ row.chain_id }}" in active_template
     assert "#research-artifact-chain-viewer" in active_template
@@ -69,11 +79,18 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     assert "Research Chain Viewer" in chain_template
     assert "Raw Body" in chain_template
     assert "/api/actions/research/synthesize" in chain_template
+    assert "/api/actions/research/pilot-approve" in chain_template
+    assert "/api/actions/research/pilot-reject" in chain_template
     assert "/api/actions/research/post-mortem" in chain_template
     assert "#research-operator-output" in chain_template
     assert "Research Operator Output" in operator_template
+    assert "Refresh Chain" in operator_template
+    assert "Research Readiness" in readiness_template
+    assert "Operational blockers for real-data validation" in readiness_template
     assert "Research Archive" in archive_template
     assert "/fragments/research/archive" in archive_template
     assert "Completed Chains" in archive_template
     assert "Lifecycle" in archive_template
     assert "#research-operator-output" in archive_template
+    assert "/api/actions/research/confirm-kill" in alerts_template
+    assert "/api/actions/research/override-kill" in alerts_template
