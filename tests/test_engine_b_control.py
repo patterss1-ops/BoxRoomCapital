@@ -48,6 +48,10 @@ class FakeOptionsEngine:
 def test_engine_b_control_start_submit_stop_and_status(monkeypatch, tmp_path):
     monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
     monkeypatch.setattr("app.engine.control.config.ENGINE_B_ENABLED", True)
+    monkeypatch.setattr(
+        "app.engine.control.research_db_status",
+        lambda: {"status": "ready", "schema_ready": True, "reachable": True, "driver_available": True, "configured": True, "detail": "ok"},
+    )
     processed = threading.Event()
     seen = {}
 
@@ -93,6 +97,7 @@ def test_engine_b_control_start_submit_stop_and_status(monkeypatch, tmp_path):
     assert status["last_result"]["artifact_count"] == 2
     assert status["last_result"]["outcome"] == "experiment"
     assert control.pipeline_status()["engine_b"]["running"] is True
+    assert control.pipeline_status()["research_db"]["status"] == "ready"
     assert seen["payload"]["source_ids"] == ["news:1"]
 
     stopped = control.stop_engine_b()
@@ -103,6 +108,10 @@ def test_engine_b_control_start_submit_stop_and_status(monkeypatch, tmp_path):
 def test_engine_b_submit_runs_ad_hoc_when_service_disabled(monkeypatch, tmp_path):
     monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
     monkeypatch.setattr("app.engine.control.config.ENGINE_B_ENABLED", False)
+    monkeypatch.setattr(
+        "app.engine.control.research_db_status",
+        lambda: {"status": "schema_missing", "schema_ready": False, "reachable": True, "driver_available": True, "configured": True, "detail": "run init_research_schema()"},
+    )
     processed = threading.Event()
 
     class FakePipeline:
@@ -138,6 +147,10 @@ def test_engine_b_submit_runs_ad_hoc_when_service_disabled(monkeypatch, tmp_path
 def test_engine_b_supervisor_restarts_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
     monkeypatch.setattr("app.engine.control.config.ENGINE_B_ENABLED", True)
+    monkeypatch.setattr(
+        "app.engine.control.research_db_status",
+        lambda: {"status": "ready", "schema_ready": True, "reachable": True, "driver_available": True, "configured": True, "detail": "ok"},
+    )
 
     class FakePipeline:
         def process_event(self, raw_content, source_class, source_credibility, source_ids):

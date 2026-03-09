@@ -77,3 +77,29 @@ def test_init_research_schema_executes_expected_ddl(monkeypatch):
     assert "CREATE TABLE IF NOT EXISTS research.artifacts" in executed_sql
     assert conn.committed is True
     assert released == [conn]
+
+
+def test_research_db_status_reports_ready_schema(monkeypatch):
+    cursor = FakeCursor(fetchone_results=[("research.artifacts", "research.pipeline_state", "research.feature_cache")])
+    conn = FakeConnection(cursor)
+
+    monkeypatch.setattr(pg_connection, "_psycopg2_pool", object())
+    monkeypatch.setattr(pg_connection, "get_pg_connection", lambda: conn)
+    monkeypatch.setattr(pg_connection, "release_pg_connection", lambda connection: None)
+
+    status = pg_connection.research_db_status()
+
+    assert status["reachable"] is True
+    assert status["schema_ready"] is True
+    assert status["status"] == "ready"
+
+
+def test_research_db_status_reports_connect_failure(monkeypatch):
+    monkeypatch.setattr(pg_connection, "_psycopg2_pool", object())
+    monkeypatch.setattr(pg_connection, "get_pg_connection", lambda: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(pg_connection, "release_pg_connection", lambda connection: None)
+
+    status = pg_connection.research_db_status()
+
+    assert status["reachable"] is False
+    assert status["status"] == "connect_failed"
