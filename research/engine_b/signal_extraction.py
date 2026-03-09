@@ -15,6 +15,11 @@ from research.prompts.v1_signal_extraction import build_signal_extraction_prompt
 class SignalExtractionService:
     """Convert raw source events into structured EventCards."""
 
+    _TICKER_STOPWORDS = {
+        "A", "AN", "AND", "API", "AT", "BY", "COM", "FOR", "FROM", "GUIDE", "HTTP", "HTTPS",
+        "IN", "IO", "NET", "OF", "ON", "OR", "SA", "SNAPSHOT", "THE", "TO", "URL", "USD", "VIA", "WWW",
+    }
+
     def __init__(self, model_router: ModelRouter, artifact_store: ArtifactStore):
         self._model_router = model_router
         self._artifact_store = artifact_store
@@ -47,7 +52,11 @@ class SignalExtractionService:
         )
         parsed = dict(response.parsed or {})
         parsed.setdefault("claims", [])
-        parsed.setdefault("affected_instruments", [])
+        parsed["affected_instruments"] = self._normalize_instruments(
+            parsed.get("affected_instruments"),
+            raw_content=normalized,
+            source_ids=source_ids,
+        )
         parsed.setdefault("market_implied_prior", "")
         parsed.setdefault("materiality", "low")
         parsed.setdefault("time_sensitivity", "days")
@@ -78,3 +87,43 @@ class SignalExtractionService:
         )
         envelope.artifact_id = self._artifact_store.save(envelope)
         return envelope
+
+    @classmethod
+    def _normalize_instruments(cls, value: object, *, raw_content: str, source_ids: list[str]) -> list[str]:
+        instruments = []
+        if isinstance(value, list):
+            instruments = [str(item).strip().upper() for item in value if str(item).strip()]
+        elif value not in (None, ""):
+            instruments = [str(value).strip().upper()]
+        if instruments:
+            return instruments
+        return cls._fallback_instruments(raw_content=raw_content, source_ids=source_ids)
+
+    @classmethod
+    def _fallback_instruments(cls, *, raw_content: str, source_ids: list[str]) -> list[str]:
+        source_candidates: list[str] = []
+        for text in source_ids:
+            source_candidates.extend(cls._extract_ticker_candidates(str(text or "")))
+        candidates = source_candidates or cls._extract_ticker_candidates(raw_content)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for candidate in candidates:
+            if candidate not in seen:
+                seen.add(candidate)
+                deduped.append(candidate)
+        return deduped
+
+    @classmethod
+    def _extract_ticker_candidates(cls, text: str) -> list[str]:
+        if not text:
+            return []
+        matches = re.findall(r"\b[A-Z][A-Z.\-]{0,4}\b", text.upper())
+        candidates: list[str] = []
+        for match in matches:
+            token = match.strip(".-")
+            if not token or token in cls._TICKER_STOPWORDS:
+                continue
+            if not any(char.isalpha() for char in token):
+                continue
+            candidates.append(token)
+        return candidates

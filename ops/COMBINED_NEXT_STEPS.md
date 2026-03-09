@@ -91,6 +91,11 @@ These are the undelivered backlog items from Claude's review. Lower priority tha
 - UX-11: Top bar KPIs
 - **Effort:** 2-3 tranches
 
+### 3.4 Candidate UX Backlog Item (needs discussion + expansion)
+- Research workflow shell rewrite: promote research intake, active chains, and decision queue to the primary operator surface; demote legacy discovery/calibration tools; replace card-grid fragments with an explicit `intake -> processing -> decision` flow; separate default operator UX from expandable debug/raw-artifact panels.
+- **Status:** Candidate only. Needs product discussion, IA/user-flow expansion, and acceptance criteria before ticketing.
+- **Reason:** Backend workflow changed substantially, but the current UI still reads as the old dashboard with extra cards, so the new research system does not feel materially different in day-to-day use.
+
 ---
 
 ## Phase 4: Paper Trading (The Goal)

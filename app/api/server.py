@@ -8,7 +8,7 @@ import logging
 import os
 import time
 from dataclasses import asdict, is_dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import threading
 import uuid
@@ -193,6 +193,7 @@ _FRAGMENT_CACHE: dict[str, dict[str, Any]] = {}
 _FRAGMENT_CACHE_LOCK = threading.Lock()
 _FRAGMENT_CACHE_REFRESH_LOCKS: dict[str, threading.Lock] = {}
 _ENGINE_B_SOURCE_SCORING = SourceScoringService()
+_INTEL_ANALYSIS_STALE_SECONDS = max(15 * 60, int(config.COUNCIL_ROUND_TIMEOUT) * 4)
 _RESEARCH_SYNTHESIS_EVENT_TYPE = "research_synthesis"
 _RESEARCH_OPERATOR_SOURCE = "research_ui"
 _RESEARCH_ARCHIVE_VIEWS = {"all", "completed", "synthesis", "post_mortem", "retirement"}
@@ -300,6 +301,45 @@ def _invalidate_cached_values(*keys: str) -> None:
 
 def _invalidate_research_cached_values() -> None:
     _invalidate_cached_values(*_RESEARCH_FRAGMENT_CACHE_KEYS)
+
+
+def _parse_iso_datetime(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _expire_stale_intel_analysis_jobs(now: datetime | None = None) -> int:
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(seconds=_INTEL_ANALYSIS_STALE_SECONDS)
+    conn = get_conn(DB_PATH)
+    rows = conn.execute(
+        """SELECT id, created_at, updated_at
+           FROM jobs
+           WHERE job_type = 'intel_analysis' AND status IN ('queued', 'running')"""
+    ).fetchall()
+    conn.close()
+
+    stale_ids: list[str] = []
+    for row in rows:
+        heartbeat = _parse_iso_datetime(row["updated_at"] or row["created_at"])
+        if heartbeat is not None and heartbeat < cutoff:
+            stale_ids.append(str(row["id"]))
+
+    for job_id in stale_ids:
+        update_job(
+            job_id,
+            status="failed",
+            error="Council analysis became stale; the worker likely exited before completion.",
+            db_path=DB_PATH,
+        )
+    return len(stale_ids)
 
 
 def _build_engine_b_submission_content(submission: IntelSubmission) -> str:
@@ -2399,6 +2439,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/jobs")
     def api_jobs(limit: int = 50):
+        _expire_stale_intel_analysis_jobs()
         return {"items": get_jobs(limit=limit)}
 
     @app.get("/api/jobs/{job_id}")
@@ -4186,6 +4227,7 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/jobs", response_class=HTMLResponse)
     def jobs_fragment(request: Request):
+        _expire_stale_intel_analysis_jobs()
         return TEMPLATES.TemplateResponse(
             request,
             "_jobs.html",
@@ -4194,6 +4236,7 @@ def create_app() -> FastAPI:
 
     @app.get("/fragments/job-detail", response_class=HTMLResponse)
     def job_detail_fragment(request: Request, job_id: str = ""):
+        _expire_stale_intel_analysis_jobs()
         selected_id = job_id.strip()
         if not selected_id:
             for row in get_jobs(limit=40):
@@ -4544,13 +4587,11 @@ def create_app() -> FastAPI:
     @app.get("/fragments/intel-council", response_class=HTMLResponse)
     def intel_council_fragment(request: Request):
         """Render the LLM council analysis feed."""
-        from intelligence.event_store import EventStore
-        from datetime import datetime, timezone as tz
+        _expire_stale_intel_analysis_jobs()
 
         # Check for active council jobs
         active_jobs = []
         try:
-            from data.trade_db import get_conn, DB_PATH
             conn = get_conn(DB_PATH)
             running = conn.execute(
                 """SELECT id, status, detail, created_at FROM jobs
@@ -4558,7 +4599,7 @@ def create_app() -> FastAPI:
                    ORDER BY created_at DESC LIMIT 5"""
             ).fetchall()
             conn.close()
-            now = datetime.now(tz.utc)
+            now = datetime.now(timezone.utc)
             for r in running:
                 created = r[3] or ""
                 elapsed = ""
@@ -4566,7 +4607,7 @@ def create_app() -> FastAPI:
                     try:
                         dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
                         if dt.tzinfo is None:
-                            dt = dt.replace(tzinfo=tz.utc)
+                            dt = dt.replace(tzinfo=timezone.utc)
                         secs = (now - dt).total_seconds()
                         elapsed = f"{int(secs)}s" if secs < 120 else f"{int(secs/60)}m{int(secs%60)}s"
                     except Exception:
