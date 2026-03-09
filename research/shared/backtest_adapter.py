@@ -106,7 +106,12 @@ class ResearchBacktestAdapter:
         initial_equity = float(getattr(result, "initial_equity", 10_000.0) or 10_000.0)
         converted: list[dict[str, Any]] = []
         for trade in list(getattr(result, "trades", []) or []):
-            payload = asdict(trade) if is_dataclass(trade) else dict(trade)
+            if is_dataclass(trade):
+                payload = asdict(trade)
+            elif isinstance(trade, dict):
+                payload = dict(trade)
+            else:
+                payload = vars(trade)
             entry_price = float(payload.get("entry_price") or 0.0)
             notional = max(abs(entry_price), 1.0)
             if instrument_type == "spread_bet":

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from research.artifacts import TestSpec
+from research.artifacts import TestSpec as ResearchTestSpec
 from research.shared.backtest_adapter import ResearchBacktestAdapter
 
 
@@ -54,7 +54,7 @@ def _test_spec(**overrides):
         "frozen_at": "2026-03-08T23:00:00Z",
     }
     payload.update(overrides)
-    return TestSpec.model_validate(payload)
+    return ResearchTestSpec.model_validate(payload)
 
 
 def test_backtest_adapter_returns_variant_results():

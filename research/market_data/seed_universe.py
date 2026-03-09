@@ -57,8 +57,10 @@ FUTURE_SEEDS: tuple[FutureSeed, ...] = (
 )
 
 PROXY_SEEDS: tuple[ProxySeed, ...] = tuple(
-    ProxySeed(seed.proxy_symbol, "SMART", "us_equity", seed.root_symbol)
-    for seed in FUTURE_SEEDS
+    {
+        seed.proxy_symbol: ProxySeed(seed.proxy_symbol, "SMART", "us_equity", seed.root_symbol)
+        for seed in FUTURE_SEEDS
+    }.values()
 )
 
 _MONTH_CODES = {3: "H", 6: "M", 9: "U", 12: "Z"}
@@ -182,12 +184,12 @@ def _contract_pair(root_symbol: str, as_of: date) -> tuple[dict[str, date | str]
     next_roll = date(next_expiry.year, next_expiry.month, max(1, next_expiry.day - 7))
     return (
         {
-            "contract_code": f"{root_symbol}{_month_codes[front_expiry.month]}{str(front_expiry.year)[-2:]}",
+            "contract_code": f"{root_symbol}{_MONTH_CODES[front_expiry.month]}{str(front_expiry.year)[-2:]}",
             "expiry_date": front_expiry,
             "roll_date": front_roll,
         },
         {
-            "contract_code": f"{root_symbol}{_month_codes[next_expiry.month]}{str(next_expiry.year)[-2:]}",
+            "contract_code": f"{root_symbol}{_MONTH_CODES[next_expiry.month]}{str(next_expiry.year)[-2:]}",
             "expiry_date": next_expiry,
             "roll_date": next_roll,
         },

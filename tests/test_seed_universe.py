@@ -1,6 +1,6 @@
 from datetime import date
 
-from research.market_data.seed_universe import seed_mvp_universe
+from research.market_data.seed_universe import FUTURE_SEEDS, PROXY_SEEDS, seed_mvp_universe
 
 
 def test_seed_mvp_universe_is_idempotent(monkeypatch):
@@ -53,7 +53,7 @@ def test_seed_mvp_universe_is_idempotent(monkeypatch):
     second = seed_mvp_universe(as_of=date(2026, 3, 9))
 
     assert first == second
-    assert len(instruments) == 18 + (18 * 2)
-    assert len(contracts) == 18 * 2
-    assert len(rolls) == 18
-    assert len(memberships) == 18 + (18 * 2)
+    assert len(instruments) == len({seed.symbol for seed in PROXY_SEEDS}) + (len(FUTURE_SEEDS) * 2)
+    assert len(contracts) == len(FUTURE_SEEDS) * 2
+    assert len(rolls) == len(FUTURE_SEEDS)
+    assert len(memberships) == len({seed.symbol for seed in PROXY_SEEDS}) + (len(FUTURE_SEEDS) * 2)

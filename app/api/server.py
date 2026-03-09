@@ -6186,8 +6186,8 @@ def _build_research_system_state_context() -> dict[str, Any]:
     except Exception:
         pipeline = {}
 
-    engine_b = pipeline.get("engine_b") if isinstance(pipeline, dict) else {}
-    research_db = pipeline.get("research_db") if isinstance(pipeline, dict) else {}
+    engine_b = (pipeline.get("engine_b") or {}) if isinstance(pipeline, dict) else {}
+    research_db = (pipeline.get("research_db") or {}) if isinstance(pipeline, dict) else {}
     running = bool(engine_b.get("running"))
     status = str(engine_b.get("status") or ("running" if running else "stopped"))
     queue_depth = int(engine_b.get("queue_depth") or 0)
