@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from research.artifact_store import ArtifactStore
 from research.artifacts import (
     ArtifactEnvelope,
@@ -49,7 +51,7 @@ class HypothesisService:
             artifact_id=event_card_id,
             engine=Engine.ENGINE_B,
         )
-        parsed = dict(response.parsed or {})
+        parsed = self._normalize_model_payload(dict(response.parsed or {}))
         parsed.setdefault("event_card_ref", event_card_id)
         edge_family = self._taxonomy_service.validate(parsed.get("edge_family", ""))
         parsed["edge_family"] = edge_family
@@ -66,3 +68,82 @@ class HypothesisService:
         )
         envelope.artifact_id = self._artifact_store.save(envelope)
         return envelope
+
+    @classmethod
+    def _normalize_model_payload(cls, payload: dict) -> dict:
+        normalized = dict(payload)
+        normalized["direction"] = cls._normalize_direction(normalized.get("direction"))
+        normalized["horizon"] = cls._normalize_horizon(normalized.get("horizon"))
+        normalized["confidence"] = cls._normalize_confidence(normalized.get("confidence"))
+        normalized["invalidators"] = cls._normalize_string_list(normalized.get("invalidators"))
+        normalized["failure_regimes"] = cls._normalize_string_list(normalized.get("failure_regimes"))
+        normalized["candidate_expressions"] = cls._normalize_string_list(
+            normalized.get("candidate_expressions"),
+            preferred_keys=("expression", "trade", "idea", "text"),
+        )
+        normalized["testable_predictions"] = cls._normalize_string_list(
+            normalized.get("testable_predictions"),
+            preferred_keys=("prediction", "text", "check", "condition"),
+        )
+        return normalized
+
+    @staticmethod
+    def _normalize_direction(value: object) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"long", "short"}:
+            return text
+        if any(token in text for token in {"sell", "down", "bear", "short"}):
+            return "short"
+        return "long"
+
+    @staticmethod
+    def _normalize_horizon(value: object) -> str:
+        text = str(value or "").strip().lower()
+        if text in {"intraday", "days", "weeks", "months"}:
+            return text
+        if "intraday" in text or "hour" in text:
+            return "intraday"
+        if "month" in text or "quarter" in text:
+            return "months"
+        if "week" in text:
+            return "weeks"
+        if "day" in text:
+            return "days"
+        return "days"
+
+    @staticmethod
+    def _normalize_confidence(value: object) -> float:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return 0.5
+        if numeric > 1.0 and numeric <= 100.0:
+            numeric /= 100.0
+        return max(0.0, min(1.0, numeric))
+
+    @staticmethod
+    def _normalize_string_list(value: object, preferred_keys: tuple[str, ...] = ()) -> list[str]:
+        items = value if isinstance(value, list) else ([] if value is None else [value])
+        normalized: list[str] = []
+        for item in items:
+            text = ""
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, dict):
+                for key in preferred_keys:
+                    candidate = str(item.get(key) or "").strip()
+                    if candidate:
+                        text = candidate
+                        break
+                if not text:
+                    text = next(
+                        (str(candidate).strip() for candidate in item.values() if str(candidate).strip()),
+                        "",
+                    )
+                if not text:
+                    text = json.dumps(item, sort_keys=True)
+            elif item is not None:
+                text = str(item).strip()
+            if text:
+                normalized.append(text)
+        return normalized

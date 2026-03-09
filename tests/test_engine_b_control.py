@@ -144,6 +144,47 @@ def test_engine_b_submit_runs_ad_hoc_when_service_disabled(monkeypatch, tmp_path
     assert status["last_result"]["status"] == "ok"
 
 
+def test_engine_b_validation_persists_result(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
+    monkeypatch.setattr(
+        "app.engine.control.research_db_status",
+        lambda: {"status": "ready", "schema_ready": True, "reachable": True, "driver_available": True, "configured": True, "detail": "ok"},
+    )
+
+    class FakePipeline:
+        def process_event(self, raw_content, source_class, source_credibility, source_ids):
+            return SimpleNamespace(
+                artifacts=[
+                    SimpleNamespace(artifact_type=SimpleNamespace(value="event_card")),
+                    SimpleNamespace(artifact_type=SimpleNamespace(value="scoring_result")),
+                ],
+                outcome=SimpleNamespace(value="experiment"),
+                score=83.5,
+                next_stage="test",
+                current_stage="experiment_ready",
+                requires_human_signoff=False,
+                blocking_reasons=[],
+            )
+
+    control = BotControlService(tmp_path, engine_b_factory=lambda: FakePipeline())
+
+    result = control.run_engine_b_validation(
+        job_id="job-persist",
+        raw_content="AAPL beat estimates",
+        source_class="news_wire",
+        source_credibility=0.8,
+        source_ids=["news:1"],
+    )
+
+    assert result["status"] == "ok"
+    assert result["job_id"] == "job-persist"
+    assert result["current_stage"] == "experiment_ready"
+
+    reloaded = BotControlService(tmp_path, engine_b_factory=lambda: FakePipeline())
+    assert reloaded.engine_b_status()["last_result"]["job_id"] == "job-persist"
+    assert reloaded.engine_b_status()["last_result"]["current_stage"] == "experiment_ready"
+
+
 def test_engine_b_supervisor_restarts_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
     monkeypatch.setattr("app.engine.control.config.ENGINE_B_ENABLED", True)

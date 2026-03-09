@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 import config
@@ -98,12 +98,14 @@ class EngineARuntimeDataProvider:
         capital_base: float = config.ENGINE_A_CAPITAL_BASE,
         lookback_bars: int = 320,
         min_history: int = 180,
+        carry_lookback_days: int = 90,
         connection_factory=get_pg_connection,
         release_factory=release_pg_connection,
     ):
         self._capital_base = float(capital_base)
         self._lookback_bars = int(lookback_bars)
         self._min_history = int(min_history)
+        self._carry_lookback_days = max(1, int(carry_lookback_days))
         self._get_connection = connection_factory
         self._release_connection = release_factory
 
@@ -143,7 +145,11 @@ class EngineARuntimeDataProvider:
             multiplier = float(instrument.multiplier) if instrument and instrument.multiplier is not None else 1.0
             current_price = float(multiple.current_price)
             next_price = float(multiple.next_price) if multiple.next_price is not None else current_price
-            carry_points = get_carry_series(root_symbol, start=max(as_of_date.replace(year=max(1970, as_of_date.year - 1)), date.min), end=as_of_date)
+            carry_points = get_carry_series(
+                root_symbol,
+                start=max(as_of_date - timedelta(days=self._carry_lookback_days), date.min),
+                end=as_of_date,
+            )
 
             price_history[root_symbol] = [float(price) for price in prices]
             value_series = _rolling_price_to_mean(prices, window=126)

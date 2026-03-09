@@ -32,8 +32,10 @@ class BotControlService:
         self.runtime_dir = self.project_root / ".runtime"
         self.runtime_dir.mkdir(exist_ok=True)
         self.state_file = self.runtime_dir / "options_engine_state.json"
+        self.research_state_file = self.runtime_dir / "research_pipeline_state.json"
         self.process_log = self.project_root / config.LOG_FILE
         self.engine = OptionsEngine()
+        persisted_research_state = self._load_json_file(self.research_state_file)
 
         # Scheduler and dispatcher state
         self._scheduler: Optional[Any] = None
@@ -48,14 +50,58 @@ class BotControlService:
         self._engine_a_pipeline: Optional[Any] = None
         self._engine_a_thread: Optional[threading.Thread] = None
         self._engine_a_stop_event = threading.Event()
-        self._last_engine_a_result: Optional[dict[str, Any]] = None
+        self._last_engine_a_result = self._load_persisted_result(persisted_research_state, "engine_a")
         self._engine_b_pipeline: Optional[Any] = None
         self._engine_b_thread: Optional[threading.Thread] = None
         self._engine_b_stop_event = threading.Event()
         self._engine_b_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
-        self._last_engine_b_result: Optional[dict[str, Any]] = None
-        self._last_decay_review_result: Optional[dict[str, Any]] = None
-        self._last_kill_check_result: Optional[dict[str, Any]] = None
+        self._last_engine_b_result = self._load_persisted_result(persisted_research_state, "engine_b")
+        self._last_decay_review_result = self._load_persisted_result(persisted_research_state, "decay_review")
+        self._last_kill_check_result = self._load_persisted_result(persisted_research_state, "kill_check")
+
+    @staticmethod
+    def _load_json_file(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    @staticmethod
+    def _load_persisted_result(payload: dict[str, Any], key: str) -> Optional[dict[str, Any]]:
+        section = payload.get(key)
+        if not isinstance(section, dict):
+            return None
+        result = section.get("last_result")
+        return dict(result) if isinstance(result, dict) else None
+
+    def _persist_research_state(self) -> None:
+        payload = {
+            "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "engine_a": {"last_result": self._last_engine_a_result},
+            "engine_b": {"last_result": self._last_engine_b_result},
+            "decay_review": {"last_result": self._last_decay_review_result},
+            "kill_check": {"last_result": self._last_kill_check_result},
+        }
+        self.research_state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+    def _set_engine_a_result(self, payload: Optional[dict[str, Any]]) -> None:
+        self._last_engine_a_result = dict(payload) if isinstance(payload, dict) else None
+        self._persist_research_state()
+
+    def _set_engine_b_result(self, payload: Optional[dict[str, Any]]) -> None:
+        self._last_engine_b_result = dict(payload) if isinstance(payload, dict) else None
+        self._persist_research_state()
+
+    def _set_decay_review_result(self, payload: Optional[dict[str, Any]]) -> None:
+        self._last_decay_review_result = dict(payload) if isinstance(payload, dict) else None
+        self._persist_research_state()
+
+    def _set_kill_check_result(self, payload: Optional[dict[str, Any]]) -> None:
+        self._last_kill_check_result = dict(payload) if isinstance(payload, dict) else None
+        self._persist_research_state()
 
     def configure_research_services(
         self,
@@ -283,17 +329,17 @@ class BotControlService:
                 as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 try:
                     result = self._engine_a_pipeline.run_daily(as_of)
-                    self._last_engine_a_result = {
+                    self._set_engine_a_result({
                         "status": "ok",
                         "as_of": as_of,
                         "artifacts": len(getattr(result, "artifacts", [])),
-                    }
+                    })
                 except Exception as exc:
-                    self._last_engine_a_result = {
+                    self._set_engine_a_result({
                         "status": "failed",
                         "as_of": as_of,
                         "error": str(exc),
-                    }
+                    })
                     logger.warning("Engine A cycle error: %s", exc)
                 self._engine_a_stop_event.wait(timeout=config.ENGINE_A_INTERVAL_SECONDS)
 
@@ -329,6 +375,37 @@ class BotControlService:
             "interval_seconds": config.ENGINE_A_INTERVAL_SECONDS,
             "last_result": self._last_engine_a_result,
         }
+
+    def run_engine_a_validation(self, as_of: str | None = None) -> dict[str, Any]:
+        """Run one synchronous Engine A validation cycle and persist the result."""
+        timestamp = as_of or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        if self._engine_a_factory is None:
+            summary = {"status": "unavailable", "as_of": timestamp, "error": "engine_a_factory not configured"}
+            self._set_engine_a_result(summary)
+            return summary
+
+        try:
+            pipeline = self._engine_a_factory()
+            result = pipeline.run_daily(timestamp)
+            summary = {
+                "status": "ok",
+                "as_of": timestamp,
+                "artifacts": len(getattr(result, "artifacts", [])),
+                "executed": any(
+                    getattr(getattr(artifact, "artifact_type", None), "value", None) == "execution_report"
+                    for artifact in getattr(result, "artifacts", [])
+                ),
+                "validation": "manual",
+            }
+        except Exception as exc:
+            summary = {
+                "status": "failed",
+                "as_of": timestamp,
+                "error": str(exc),
+                "validation": "manual",
+            }
+        self._set_engine_a_result(summary)
+        return summary
 
     # ─── Engine B lifecycle ──────────────────────────────────────────────
 
@@ -454,6 +531,52 @@ class BotControlService:
             "queue_depth": self._engine_b_queue.qsize() if running else 0,
             "last_result": self._last_engine_b_result,
         }
+
+    def run_engine_b_validation(
+        self,
+        *,
+        raw_content: str,
+        source_class: str,
+        source_credibility: float,
+        source_ids: list[str],
+        job_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Run one synchronous Engine B validation cycle and persist the result."""
+        if self._engine_b_factory is None:
+            summary = {
+                "status": "unavailable",
+                "as_of": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "job_id": job_id,
+                "error": "engine_b_factory not configured",
+            }
+            self._set_engine_b_result(summary)
+            return summary
+
+        try:
+            pipeline = self._engine_b_factory()
+        except Exception as exc:
+            summary = {
+                "status": "failed",
+                "as_of": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "job_id": job_id,
+                "error": str(exc),
+            }
+            self._set_engine_b_result(summary)
+            return summary
+
+        self._run_engine_b_job(
+            {
+                "job_id": job_id,
+                "raw_content": raw_content,
+                "source_class": source_class,
+                "source_credibility": source_credibility,
+                "source_ids": list(source_ids),
+                "on_success": None,
+                "on_error": None,
+            },
+            pipeline,
+        )
+        return dict(self._last_engine_b_result or {})
 
     def decay_review_status(self) -> dict[str, Any]:
         return {
@@ -636,13 +759,13 @@ class BotControlService:
             getattr(getattr(artifact, "artifact_type", None), "value", None) == "execution_report"
             for artifact in result.artifacts
         )
-        self._last_engine_a_result = {
+        self._set_engine_a_result({
             "status": "ok",
             "as_of": as_of,
             "artifacts": len(result.artifacts),
             "executed": executed,
             "window": window_name,
-        }
+        })
         return {
             "artifacts_created": len(result.artifacts),
             "actions_taken": 1 if executed else 0,
@@ -655,12 +778,12 @@ class BotControlService:
         as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         service = self._decay_review_factory()
         reviews = service.run_decay_check(as_of=as_of, db_path=db_path)
-        self._last_decay_review_result = {
+        self._set_decay_review_result({
             "status": "ok",
             "as_of": as_of,
             "pending_reviews": len(reviews),
             "window": window_name,
-        }
+        })
         return {
             "artifacts_created": len(reviews),
             "pending_reviews": len(reviews),
@@ -683,13 +806,13 @@ class BotControlService:
                     operator_approved=False,
                 )
                 auto_kills += 1
-        self._last_kill_check_result = {
+        self._set_kill_check_result({
             "status": "ok",
             "as_of": as_of,
             "alerts": len(alerts),
             "auto_kills": auto_kills,
             "window": window_name,
-        }
+        })
         return {
             "items_processed": len(alerts),
             "actions_taken": auto_kills,
@@ -726,7 +849,7 @@ class BotControlService:
                 "requires_human_signoff": bool(getattr(result, "requires_human_signoff", False)),
                 "blocking_reasons": list(getattr(result, "blocking_reasons", [])),
             }
-            self._last_engine_b_result = summary
+            self._set_engine_b_result(summary)
             on_success = job.get("on_success")
             if callable(on_success):
                 try:
@@ -734,12 +857,12 @@ class BotControlService:
                 except Exception as callback_exc:
                     logger.warning("Engine B success callback error: %s", callback_exc)
         except Exception as exc:
-            self._last_engine_b_result = {
+            self._set_engine_b_result({
                 "status": "failed",
                 "as_of": as_of,
                 "job_id": job.get("job_id"),
                 "error": str(exc),
-            }
+            })
             logger.warning("Engine B job error: %s", exc)
             on_error = job.get("on_error")
             if callable(on_error):

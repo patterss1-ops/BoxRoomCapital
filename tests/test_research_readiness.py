@@ -95,3 +95,65 @@ def test_build_research_readiness_report_highlights_partial_data_and_pending_sig
     assert report["pilot_signoff_pending_count"] == 1
     assert report["review_pending_count"] == 2
     assert any("Resolve pending decay reviews and pilot sign-offs" in item for item in report["issues"])
+
+
+def test_build_research_readiness_report_allows_manual_validation_when_service_disabled():
+    report = build_research_readiness_report(
+        as_of=date(2026, 3, 9),
+        pipeline_status={
+            "engine_a": {
+                "enabled": False,
+                "configured": True,
+                "last_result": {"status": "ok", "as_of": "2026-03-09T18:00:00Z", "artifacts": 4},
+            },
+            "engine_b": {
+                "enabled": False,
+                "configured": True,
+                "last_result": None,
+            },
+        },
+        db_status={"status": "ready", "detail": "research schema ready", "schema_ready": True},
+        market_data_loader=lambda as_of: {
+            "instrument_count": 1,
+            "ready_count": 1,
+            "rows": [{"symbol": "SPY", "status": "ready", "latest_raw_bar": "2026-03-09"}],
+        },
+        stage_counts_loader=lambda: {},
+    )
+
+    by_key = {item["key"]: item for item in report["checks"]}
+
+    assert by_key["engine_a"]["status"] == "ready"
+    assert by_key["engine_a"]["headline"] == "ok"
+    assert by_key["engine_b"]["status"] == "pending"
+    assert by_key["engine_b"]["headline"] == "disabled"
+
+
+def test_build_research_readiness_report_suggests_cutover_when_green():
+    report = build_research_readiness_report(
+        as_of=date(2026, 3, 9),
+        pipeline_status={
+            "engine_a": {
+                "enabled": False,
+                "configured": True,
+                "last_result": {"status": "ok", "as_of": "2026-03-09T18:00:00Z", "artifacts": 4},
+            },
+            "engine_b": {
+                "enabled": False,
+                "configured": True,
+                "last_result": {"status": "ok", "as_of": "2026-03-09T18:05:00Z", "current_stage": "scored"},
+            },
+        },
+        db_status={"status": "ready", "detail": "research schema ready", "schema_ready": True},
+        market_data_loader=lambda as_of: {
+            "instrument_count": 1,
+            "ready_count": 1,
+            "rows": [{"symbol": "SPY", "status": "ready", "latest_raw_bar": "2026-03-09"}],
+        },
+        stage_counts_loader=lambda: {},
+    )
+
+    assert report["overall_status"] == "ready"
+    assert report["issues"] == [
+        "Research readiness is green; enable RESEARCH_SYSTEM_ACTIVE when you want to leave mirror mode."
+    ]

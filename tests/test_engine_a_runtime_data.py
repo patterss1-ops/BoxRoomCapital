@@ -76,3 +76,41 @@ def test_engine_a_runtime_provider_raises_when_history_is_missing(monkeypatch):
 
     with pytest.raises(ValueError, match="Insufficient canonical futures history"):
         provider("2026-03-09T00:00:00Z")
+
+
+def test_engine_a_runtime_provider_limits_carry_history_lookback(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(EngineARuntimeDataProvider, "_root_symbols", lambda self: ["ES"])
+    monkeypatch.setattr(
+        "research.engine_a.runtime_data.get_front_contract",
+        lambda root_symbol, as_of: SimpleNamespace(instrument_id=1, expiry_date=date(2026, 6, 15)),
+    )
+    monkeypatch.setattr(
+        "research.engine_a.runtime_data.build_multiple_prices",
+        lambda root_symbol, as_of: SimpleNamespace(current_price=5200.0, next_price=5180.0),
+    )
+    monkeypatch.setattr(
+        "research.engine_a.runtime_data.build_continuous_series",
+        lambda root_symbol: [
+            SimpleNamespace(bar_date=date(2025, 1, 1) + timedelta(days=idx), price=100.0 + idx)
+            for idx in range(260)
+        ],
+    )
+
+    def _carry_series(root_symbol, start, end):
+        seen["start"] = start
+        seen["end"] = end
+        return []
+
+    monkeypatch.setattr("research.engine_a.runtime_data.get_carry_series", _carry_series)
+    monkeypatch.setattr(
+        "research.engine_a.runtime_data.get_instrument",
+        lambda instrument_id: SimpleNamespace(multiplier=50.0),
+    )
+
+    provider = EngineARuntimeDataProvider(carry_lookback_days=30)
+
+    provider("2026-03-09T00:00:00Z")
+
+    assert seen["start"] == date(2026, 2, 7)
+    assert seen["end"] == date(2026, 3, 9)

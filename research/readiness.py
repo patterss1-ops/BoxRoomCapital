@@ -177,18 +177,18 @@ def _build_engine_check(label: str, payload: dict[str, Any]) -> dict[str, Any]:
     configured = bool(payload.get("configured", False))
     last_result = dict(payload.get("last_result") or {})
 
-    if not enabled:
-        status = "blocked"
-        headline = "disabled"
-        detail = f"{label} is disabled in config."
-    elif not configured:
+    if not configured:
         status = "blocked"
         headline = "unconfigured"
         detail = f"{label} factory is not configured."
     elif not last_result:
         status = "pending"
-        headline = "not_run"
-        detail = f"No recorded {label} validation run yet."
+        headline = "disabled" if not enabled else "not_run"
+        detail = (
+            f"{label} service is disabled in config and no manual validation run has been recorded yet."
+            if not enabled
+            else f"No recorded {label} validation run yet."
+        )
     else:
         raw_status = str(last_result.get("status") or "unknown").lower()
         if raw_status == "ok":
@@ -200,6 +200,8 @@ def _build_engine_check(label: str, payload: dict[str, Any]) -> dict[str, Any]:
         detail_parts = [str(last_result.get("current_stage") or ""), str(last_result.get("error") or "")]
         detail = " ".join(part for part in detail_parts if part).strip() or f"Last run status: {raw_status}"
         headline = raw_status
+        if not enabled:
+            detail = f"{detail} Service is disabled in config."
 
     return {
         "key": label.lower().replace(" ", "_"),
@@ -263,6 +265,7 @@ def _overall_status(checks: list[dict[str, Any]]) -> str:
 def _build_next_steps(*, checks: list[dict[str, Any]], routing_active: bool) -> list[str]:
     by_key = {str(check.get("key") or ""): check for check in checks}
     steps: list[str] = []
+    checks_ready = all(str(check.get("status") or "") == "ready" for check in checks)
 
     if by_key.get("research_db", {}).get("status") != "ready":
         steps.append("Provision PostgreSQL, set RESEARCH_DB_DSN, and run init_research_schema().")
@@ -275,5 +278,8 @@ def _build_next_steps(*, checks: list[dict[str, Any]], routing_active: bool) -> 
     if by_key.get("operator_queue", {}).get("status") != "ready":
         steps.append("Resolve pending decay reviews and pilot sign-offs before cutover.")
     if not routing_active:
-        steps.append("Leave RESEARCH_SYSTEM_ACTIVE=false until the readiness checks above are green.")
+        if checks_ready:
+            steps.append("Research readiness is green; enable RESEARCH_SYSTEM_ACTIVE when you want to leave mirror mode.")
+        else:
+            steps.append("Leave RESEARCH_SYSTEM_ACTIVE=false until the readiness checks above are green.")
     return steps

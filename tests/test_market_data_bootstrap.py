@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from research.market_data.bootstrap import ingest_seeded_market_data, market_data_readiness
+from research.market_data.bootstrap import bootstrap_mvp_market_data, ingest_seeded_market_data, market_data_readiness
 from research.market_data.instruments import InstrumentMaster
 from research.market_data.raw_bars import RawBar
 
@@ -100,3 +100,32 @@ def test_market_data_readiness_reports_ready_rows(monkeypatch):
     assert summary["ready_count"] == 1
     assert summary["rows"][0]["symbol"] == "QQQ"
     assert summary["rows"][0]["status"] == "ready"
+
+
+def test_bootstrap_mvp_market_data_seeds_for_validation_end_date(monkeypatch):
+    seen = {}
+
+    def _seed(as_of=None):
+        seen["seed_as_of"] = as_of
+        return {"memberships": 1}
+
+    monkeypatch.setattr(
+        "research.market_data.bootstrap.seed_mvp_universe",
+        _seed,
+    )
+    monkeypatch.setattr(
+        "research.market_data.bootstrap.ingest_seeded_market_data",
+        lambda **kwargs: {"instrument_count": 0, "results": [], **kwargs},
+    )
+    monkeypatch.setattr(
+        "research.market_data.bootstrap.market_data_readiness",
+        lambda **kwargs: {"instrument_count": 0, "ready_count": 0, "rows": [], **kwargs},
+    )
+
+    payload = bootstrap_mvp_market_data(
+        start=date(2021, 3, 9),
+        end=date(2026, 3, 9),
+    )
+
+    assert seen["seed_as_of"] == date(2026, 3, 9)
+    assert payload["seed_summary"] == {"memberships": 1}

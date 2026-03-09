@@ -24,7 +24,7 @@ def bootstrap_mvp_market_data(
     universes: tuple[str, ...] = DEFAULT_UNIVERSES,
 ) -> dict[str, object]:
     """Seed the MVP universe and ingest missing daily history for it."""
-    seed_summary = seed_mvp_universe(as_of=start)
+    seed_summary = seed_mvp_universe(as_of=end)
     ingest_summary = ingest_seeded_market_data(
         start=start,
         end=end,

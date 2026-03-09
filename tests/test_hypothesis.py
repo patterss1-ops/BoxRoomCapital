@@ -120,3 +120,51 @@ def test_hypothesis_service_rejects_invalid_taxonomy():
 
     with pytest.raises(TaxonomyRejection):
         HypothesisService(router, store).form_hypothesis("evt-1")
+
+
+def test_hypothesis_service_normalizes_rich_model_payload():
+    store = FakeStore()
+    store.items["evt-1"] = ArtifactEnvelope(
+        artifact_id="evt-1",
+        chain_id="chain-1",
+        artifact_type=ArtifactType.EVENT_CARD,
+        engine=Engine.ENGINE_B,
+        ticker="NVDA",
+        body={
+            "source_ids": ["src"],
+            "source_class": "news_wire",
+            "source_credibility": 0.8,
+            "event_timestamp": "2026-03-08T21:00:00Z",
+            "corroboration_count": 0,
+            "claims": ["Revenue beat"],
+            "affected_instruments": ["NVDA"],
+            "market_implied_prior": "Muted growth",
+            "materiality": "high",
+            "time_sensitivity": "days",
+            "raw_content_hash": "x" * 64,
+        },
+    )
+    router = FakeRouter(
+        {
+            "edge_family": "underreaction_revision",
+            "market_implied_view": "Underreaction",
+            "variant_view": "More upside",
+            "mechanism": "Revision cycle",
+            "catalyst": "Analyst updates",
+            "direction": "bullish",
+            "horizon": "2-6 weeks",
+            "confidence": "82",
+            "invalidators": [{"text": "Guide cut"}],
+            "failure_regimes": [{"text": "risk_off"}],
+            "candidate_expressions": [{"expression": "Long NVDA equity"}],
+            "testable_predictions": [{"prediction": "Positive drift"}],
+        }
+    )
+
+    envelope = HypothesisService(router, store).form_hypothesis("evt-1")
+
+    assert envelope.body["direction"] == "long"
+    assert envelope.body["horizon"] == "weeks"
+    assert envelope.body["confidence"] == 0.82
+    assert envelope.body["candidate_expressions"] == ["Long NVDA equity"]
+    assert envelope.body["testable_predictions"] == ["Positive drift"]

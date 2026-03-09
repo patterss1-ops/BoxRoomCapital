@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from datetime import date, datetime
 
+import pandas as pd
 import yfinance as yf
 
 from broker.ibkr import IBKRBroker
@@ -45,7 +46,7 @@ class IBKRAdapter(VendorAdapter):
         return "ibkr"
 
     def fetch_daily_bars(self, symbol: str, start: date, end: date, instrument_id: int = 0) -> list[RawBar]:
-        frame = self._history_fetcher(symbol, start, end)
+        frame = self._normalize_history_frame(self._history_fetcher(symbol, start, end), symbol)
         bars: list[RawBar] = []
         if frame is None or getattr(frame, "empty", True):
             return bars
@@ -58,11 +59,11 @@ class IBKRAdapter(VendorAdapter):
                     vendor=self.vendor_name(),
                     bar_timestamp=timestamp,
                     session_code="ibkr_daily",
-                    open=float(row["Open"]) if row.get("Open") is not None else None,
-                    high=float(row["High"]) if row.get("High") is not None else None,
-                    low=float(row["Low"]) if row.get("Low") is not None else None,
-                    close=float(row["Close"]) if row.get("Close") is not None else None,
-                    volume=int(row["Volume"]) if row.get("Volume") is not None else None,
+                    open=_coerce_float(row.get("Open")),
+                    high=_coerce_float(row.get("High")),
+                    low=_coerce_float(row.get("Low")),
+                    close=_coerce_float(row.get("Close")),
+                    volume=_coerce_int(row.get("Volume")),
                 )
             )
         return bars
@@ -103,6 +104,44 @@ class IBKRAdapter(VendorAdapter):
             auto_adjust=False,
             progress=False,
         )
+
+    @staticmethod
+    def _normalize_history_frame(frame, symbol: str):
+        if frame is None or getattr(frame, "empty", True):
+            return frame
+        columns = getattr(frame, "columns", None)
+        if getattr(columns, "nlevels", 1) <= 1:
+            return frame
+
+        ticker_level = columns.get_level_values(-1)
+        selected_ticker = symbol if symbol in ticker_level else ticker_level[0]
+        normalized = frame.xs(selected_ticker, axis=1, level=-1, drop_level=True)
+        if getattr(normalized.columns, "nlevels", 1) > 1:
+            normalized.columns = normalized.columns.get_level_values(0)
+        return normalized
+
+
+def _coerce_float(value) -> float | None:
+    scalar = _coerce_scalar(value)
+    if scalar is None or pd.isna(scalar):
+        return None
+    return float(scalar)
+
+
+def _coerce_int(value) -> int | None:
+    scalar = _coerce_scalar(value)
+    if scalar is None or pd.isna(scalar):
+        return None
+    return int(scalar)
+
+
+def _coerce_scalar(value):
+    if isinstance(value, pd.Series):
+        non_null = value.dropna()
+        if non_null.empty:
+            return None
+        return non_null.iloc[0]
+    return value
 
 
 class NorgateAdapter(VendorAdapter):

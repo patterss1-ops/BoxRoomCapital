@@ -41,10 +41,19 @@ if ! kill -0 "$pid" 2>/dev/null; then
 fi
 
 if command -v curl >/dev/null 2>&1; then
-  if curl -fsS "http://$HOST:$PORT/health" >/dev/null 2>&1; then
+  ready=0
+  for _ in $(seq 1 20); do
+    if curl -fsS "http://$HOST:$PORT/api/health" >/dev/null 2>&1 || curl -fsS "http://$HOST:$PORT/health" >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
+    sleep 1
+  done
+  if [[ "$ready" -eq 1 ]]; then
     echo "Control plane started: http://$HOST:$PORT"
   else
     echo "Process started (pid=$pid) but health check failed. See: $LOG_FILE"
+    tail -n 40 "$LOG_FILE" || true
     exit 1
   fi
 else

@@ -86,6 +86,33 @@ def test_engine_a_control_disabled_without_config(monkeypatch, tmp_path):
     assert control.start_engine_a()["status"] == "disabled"
 
 
+def test_engine_a_validation_persists_result(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
+
+    class FakePipeline:
+        def run_daily(self, as_of: str):
+            return type(
+                "Result",
+                (),
+                {
+                    "artifacts": [
+                        SimpleNamespace(artifact_type=SimpleNamespace(value="execution_report")),
+                    ]
+                },
+            )()
+
+    control = BotControlService(tmp_path, engine_a_factory=lambda: FakePipeline())
+
+    result = control.run_engine_a_validation("2026-03-09T00:00:00Z")
+
+    assert result["status"] == "ok"
+    assert result["executed"] is True
+
+    reloaded = BotControlService(tmp_path, engine_a_factory=lambda: FakePipeline())
+    assert reloaded.engine_a_status()["last_result"]["as_of"] == "2026-03-09T00:00:00Z"
+    assert reloaded.engine_a_status()["last_result"]["executed"] is True
+
+
 def test_engine_a_supervisor_restarts_when_enabled(monkeypatch, tmp_path):
     monkeypatch.setattr("app.engine.control.OptionsEngine", FakeOptionsEngine)
     monkeypatch.setattr("app.engine.control.config.ENGINE_A_ENABLED", True)
