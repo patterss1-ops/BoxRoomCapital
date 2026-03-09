@@ -15,6 +15,7 @@ from research.engine_b.pipeline import EngineBPipeline
 from research.engine_b.signal_extraction import SignalExtractionService
 from research.model_router import ModelRouter
 from research.scorer import ScoringEngine
+from research.shared.backtest_adapter import ResearchBacktestAdapter
 from research.shared.cost_model import CostModel
 
 
@@ -31,6 +32,7 @@ def latest_regime_snapshot(artifact_store: ArtifactStore) -> dict | None:
 def build_engine_b_pipeline(
     artifact_store: ArtifactStore | None = None,
     model_router: ModelRouter | None = None,
+    backtest_runner: ResearchBacktestAdapter | None = None,
 ) -> EngineBPipeline:
     """Build a fully wired Engine B pipeline for live/manual use."""
     store = artifact_store or ArtifactStore()
@@ -42,7 +44,11 @@ def build_engine_b_pipeline(
         hypothesis_service=HypothesisService(router, store),
         challenge_service=ChallengeService(router, store),
         scoring_engine=ScoringEngine(store),
-        experiment_service=ExperimentService(store, CostModel()),
+        experiment_service=ExperimentService(
+            store,
+            CostModel(),
+            backtest_runner=backtest_runner or ResearchBacktestAdapter(),
+        ),
         expression_service=ExpressionService(store),
         regime_provider=regime_provider,
     )

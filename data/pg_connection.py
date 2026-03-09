@@ -289,3 +289,64 @@ def init_research_schema() -> None:
         raise
     finally:
         release_pg_connection(conn)
+
+
+def research_db_status() -> dict[str, Any]:
+    """Return coarse readiness for the research PostgreSQL layer."""
+    dsn = str(getattr(config, "RESEARCH_DB_DSN", "") or "").strip()
+    if not dsn:
+        return {
+            "configured": False,
+            "driver_available": _psycopg2_pool is not None,
+            "reachable": False,
+            "schema_ready": False,
+            "status": "missing_dsn",
+            "detail": "RESEARCH_DB_DSN is empty",
+        }
+    if _psycopg2_pool is None:
+        return {
+            "configured": True,
+            "driver_available": False,
+            "reachable": False,
+            "schema_ready": False,
+            "status": "driver_missing",
+            "detail": "psycopg2 is not installed",
+        }
+
+    conn = None
+    try:
+        conn = get_pg_connection()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT
+                    to_regclass('research.artifacts'),
+                    to_regclass('research.pipeline_state'),
+                    to_regclass('research.feature_cache')
+                """
+            )
+            row = cur.fetchone() or (None, None, None)
+        schema_ready = all(row)
+        return {
+            "configured": True,
+            "driver_available": True,
+            "reachable": True,
+            "schema_ready": schema_ready,
+            "status": "ready" if schema_ready else "schema_missing",
+            "detail": (
+                "research schema ready"
+                if schema_ready
+                else "core research tables are missing; run init_research_schema()"
+            ),
+        }
+    except Exception as exc:
+        return {
+            "configured": True,
+            "driver_available": True,
+            "reachable": False,
+            "schema_ready": False,
+            "status": "connect_failed",
+            "detail": str(exc),
+        }
+    finally:
+        release_pg_connection(conn)

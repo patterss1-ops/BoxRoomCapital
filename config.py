@@ -87,10 +87,7 @@ IG_ACC_TYPE = os.getenv("IG_ACC_TYPE", "DEMO")  # "DEMO" or "LIVE"
 IG_ACC_NUMBER = os.getenv("IG_ACC_NUMBER", "")   # Your spread bet account number
 
 # PostgreSQL research database
-RESEARCH_DB_DSN = _env_str(
-    "RESEARCH_DB_DSN",
-    "postgresql://localhost:5432/boxroom_research",
-)
+RESEARCH_DB_DSN = os.getenv("RESEARCH_DB_DSN") or os.getenv("DATABASE_URL") or "postgresql://localhost:5432/boxroom_research"
 
 # ─── MARKET MAPPING ──────────────────────────────────────────────────────────
 # yfinance ticker → IG EPIC code for spread betting

@@ -114,6 +114,30 @@
     </div>
   </div>
 
+  <!-- Research DB State -->
+  <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5">
+    <span class="text-[11px] text-gray-400">Research DB</span>
+    <div class="flex items-center gap-1.5">
+      {% if pipeline.research_db.schema_ready %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">READY</span>
+      {% elif not pipeline.research_db.driver_available %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">DRIVER</span>
+      {% elif pipeline.research_db.reachable %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">SCHEMA</span>
+      {% else %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-red-500/15 text-red-400 border-red-500/30">ERROR</span>
+      {% endif %}
+      <span class="text-[10px] font-mono text-gray-400">
+        {{ pipeline.research_db.status }}
+      </span>
+      {% if pipeline.research_db.detail %}
+      <span class="text-[10px] text-gray-500 truncate">
+        {{ pipeline.research_db.detail }}
+      </span>
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Config Flags -->
   <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5">
     <span class="text-[11px] text-gray-400">Dry Run</span>

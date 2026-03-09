@@ -1321,6 +1321,7 @@ def _get_research_active_hypotheses_context() -> dict[str, Any]:
 def _get_research_engine_status_context() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
         pipeline = control.pipeline_status()
+        research_db = pipeline.get("research_db") or {}
         try:
             funnel = research_dashboard.pipeline_funnel()
             funnel_total = sum(int(stage.get("total", 0)) for stage in funnel)
@@ -1356,6 +1357,18 @@ def _get_research_engine_status_context() -> dict[str, Any]:
                     f" | q={pipeline['engine_b'].get('queue_depth', 0)}"
                 ),
                 "last_result": pipeline["engine_b"].get("last_result"),
+            },
+            {
+                "name": "Research DB",
+                "key": "research_db",
+                "running": bool(research_db.get("schema_ready")),
+                "configured": bool(research_db.get("configured")) and bool(research_db.get("driver_available")),
+                "enabled": True,
+                "status_detail": str(research_db.get("detail") or "Research PostgreSQL status"),
+                "last_result": {
+                    "status": research_db.get("status"),
+                    "as_of": "schema_ready" if research_db.get("schema_ready") else "attention_required",
+                },
             },
             {
                 "name": "Dispatcher",
@@ -6174,6 +6187,7 @@ def _build_research_system_state_context() -> dict[str, Any]:
         pipeline = {}
 
     engine_b = pipeline.get("engine_b") if isinstance(pipeline, dict) else {}
+    research_db = pipeline.get("research_db") if isinstance(pipeline, dict) else {}
     running = bool(engine_b.get("running"))
     status = str(engine_b.get("status") or ("running" if running else "stopped"))
     queue_depth = int(engine_b.get("queue_depth") or 0)
@@ -6190,6 +6204,11 @@ def _build_research_system_state_context() -> dict[str, Any]:
             "running": running,
             "status": status,
             "queue_depth": queue_depth,
+        },
+        "research_db_state": {
+            "status": str(research_db.get("status") or "unknown"),
+            "schema_ready": bool(research_db.get("schema_ready")),
+            "detail": str(research_db.get("detail") or ""),
         },
     }
 

@@ -21,6 +21,9 @@
         <span class="inline-flex items-center px-2 py-0.5 rounded-full border {% if research_system_active %}border-amber-300 bg-white text-amber-800{% else %}border-slate-300 bg-white text-slate-700{% endif %}">
           Queue {{ engine_b_state.queue_depth }}
         </span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full border {% if research_db_state.schema_ready %}border-emerald-300 bg-emerald-50 text-emerald-700{% else %}border-amber-300 bg-white text-amber-800{% endif %}">
+          Research DB {{ research_db_state.status }}
+        </span>
       </div>
     </div>
   </div>

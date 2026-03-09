@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 
 import config
 from app.engine.options_engine import OptionsEngine
+from data.pg_connection import research_db_status
 
 logger = logging.getLogger(__name__)
 
@@ -499,6 +500,7 @@ class BotControlService:
             "dispatcher": self.dispatcher_status(),
             "engine_a": self.engine_a_status(),
             "engine_b": self.engine_b_status(),
+            "research_db": research_db_status(),
             "decay_review": self.decay_review_status(),
             "kill_check": self.kill_check_status(),
             "intraday": self.intraday_status(),

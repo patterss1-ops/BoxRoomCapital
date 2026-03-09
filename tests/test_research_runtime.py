@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from research.artifacts import ArtifactType, Engine
 from research.runtime import build_engine_a_pipeline, build_engine_b_pipeline, latest_regime_snapshot
+from research.shared.backtest_adapter import ResearchBacktestAdapter
 
 
 class FakeStore:
@@ -33,6 +34,7 @@ def test_build_engine_b_pipeline_uses_supplied_store_and_router():
     assert pipeline._challenge_service._model_router is router
     assert pipeline._scoring_engine._artifact_store is store
     assert pipeline._experiment_service._artifact_store is store
+    assert isinstance(pipeline._experiment_service._backtest_runner, ResearchBacktestAdapter)
     assert pipeline._expression_service._artifact_store is store
     assert pipeline._regime_provider() == {"macro_regime": "risk_on"}
 
