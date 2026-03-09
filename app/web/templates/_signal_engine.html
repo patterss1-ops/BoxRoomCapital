@@ -29,6 +29,11 @@
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-red-500/15 text-red-400 border-red-500/30">Short {{ (summary.action_counts or {}).get("short_candidate", 0) }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">Blocked Missing {{ summary.tickers_blocked_missing_required_layers or 0 }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-400 border-blue-500/30">Blocked Stale {{ summary.tickers_blocked_stale_layers or 0 }}</span>
+      {% if signal_shadow.research_overlay_diagnostics %}
+        {% set rd = signal_shadow.research_overlay_diagnostics %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">Research Layer {{ rd.tickers_with_research_layer or 0 }}</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">Research Blocks {{ rd.tickers_blocked_by_research or 0 }}</span>
+      {% endif %}
     </div>
 
     <table class="w-full text-sm text-left">
@@ -38,8 +43,10 @@
           <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Status</th>
           <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Final</th>
           <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Action</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Research</th>
           <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Layers</th>
           <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Missing Required</th>
+          <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Vetoes</th>
         </tr>
       </thead>
       <tbody>
@@ -53,8 +60,16 @@
           </td>
           <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.final_score) if is_scored else "-" }}</td>
           <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.action if is_scored else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200">
+            {% if row.research_layer_score is not none %}
+              {{ "%.2f"|format(row.research_layer_score) }}
+            {% else %}
+              -
+            {% endif %}
+          </td>
           <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.layer_count or 0 }}</td>
           <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ (row.missing_required_layers or [])|join(", ") if row.missing_required_layers else "-" }}</td>
+          <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ (row.vetoes or [])|join(", ") if row.vetoes else "-" }}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -70,6 +85,8 @@
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Action</th>
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Final</th>
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Rank Score</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Research</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Vetoes</th>
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Freshness</th>
           </tr>
         </thead>
@@ -81,6 +98,14 @@
             <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.action }}</td>
             <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.final_score) }}</td>
             <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.rank_score) }}</td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200">
+              {% if row.research_layer_score is not none %}
+                {{ "%.2f"|format(row.research_layer_score) }}
+              {% else %}
+                -
+              {% endif %}
+            </td>
+            <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ (row.vetoes or [])|join(", ") if row.vetoes else "-" }}</td>
             <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">
               warn={{ (row.warning_layers or [])|length }},
               stale={{ (row.stale_layers or [])|length }}
@@ -99,6 +124,16 @@
         stale={{ fd.tickers_with_stale or 0 }},
         blocked_missing={{ fd.blocked_missing_required_layers or 0 }},
         blocked_stale={{ fd.blocked_stale_layers or 0 }}
+      </p>
+    {% endif %}
+    {% if signal_shadow.research_overlay_diagnostics %}
+      {% set rd = signal_shadow.research_overlay_diagnostics %}
+      <p class="text-sm text-gray-400 mt-1">
+        Research overlay:
+        covered={{ rd.tickers_with_research_layer or 0 }},
+        blocked={{ rd.tickers_blocked_by_research or 0 }},
+        rejected={{ rd.tickers_research_rejected or 0 }},
+        objections={{ rd.tickers_research_blocking_objections or 0 }}
       </p>
     {% endif %}
   {% else %}

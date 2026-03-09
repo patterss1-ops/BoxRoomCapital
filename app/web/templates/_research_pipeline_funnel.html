@@ -1,0 +1,26 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-gray-800">Pipeline Funnel</h2>
+    <p class="text-gray-400 text-sm">{{ total }} tracked chains</p>
+  </div>
+  {% if error %}
+    <p class="text-sm text-amber-600">{{ error }}</p>
+  {% endif %}
+  {% if stages %}
+    <div class="space-y-2">
+      {% for stage in stages %}
+        <div class="grid grid-cols-[1fr_auto] items-center gap-3">
+          <div>
+            <p class="text-sm font-medium text-gray-700">{{ stage.label }}</p>
+            <div class="mt-1 h-2 rounded-full bg-gray-100 overflow-hidden">
+              <div class="h-2 bg-blue-500" style="width: {{ 0 if total == 0 else ((stage.total / total) * 100)|round(1) }}%"></div>
+            </div>
+          </div>
+          <span class="font-mono text-xs text-gray-500">{{ stage.total }}</span>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="text-sm text-gray-400">No research pipeline rows yet.</p>
+  {% endif %}
+</section>

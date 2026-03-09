@@ -130,6 +130,21 @@ LAYER_REGISTRY: Dict[LayerId, LayerContract] = {
         warn_age_hours=24,
         required_detail_keys=("rating", "quant_score_raw", "updated_at", "rating_score"),
     ),
+    LayerId.L9_RESEARCH: LayerContract(
+        layer_id=LayerId.L9_RESEARCH,
+        label="Research Overlay",
+        default_source="research-engine-b",
+        cadence="event-driven",
+        max_age_hours=168,
+        warn_age_hours=72,
+        required_detail_keys=(
+            "artifact_type",
+            "chain_id",
+            "outcome",
+            "raw_final_score",
+            "translated_score",
+        ),
+    ),
 }
 
 

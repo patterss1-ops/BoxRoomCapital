@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _run_ingest_tier1() -> None:
-    """Run all signal layer ingestion jobs (L1-L8)."""
+    """Run all signal layer ingestion jobs (L1-L9)."""
     from intelligence.jobs.signal_layer_jobs import run_tier1_shadow_jobs
 
     result = run_tier1_shadow_jobs()

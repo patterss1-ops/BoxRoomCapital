@@ -1,0 +1,37 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-gray-800">Engine Status</h2>
+    <p class="text-gray-400 text-sm">{{ funnel_total }} tracked chains</p>
+  </div>
+  <div class="space-y-3">
+    {% for card in engine_cards %}
+      <div class="border border-gray-200 rounded-lg p-3">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="text-sm font-semibold text-gray-800">{{ card.name }}</p>
+            <p class="text-xs text-gray-400">{{ card.status_detail }}</p>
+          </div>
+          {% if card.running %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-500 border-emerald-500/30">run</span>
+          {% elif card.configured is defined and not card.configured %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">uncfg</span>
+          {% elif card.enabled is defined and not card.enabled %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">off</span>
+          {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">idle</span>
+          {% endif %}
+        </div>
+        {% if card.last_result %}
+          <div class="mt-2 text-xs text-gray-500 font-mono break-all">
+            {% if card.key == "scheduler" %}
+              {{ card.last_result.window_name or "-" }} :: {{ card.last_result.finished_at or card.last_result.started_at or "-" }}
+            {% else %}
+              {{ card.last_result.status or "-" }} :: {{ card.last_result.as_of or "-" }}
+            {% endif %}
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+  <p class="mt-3 text-xs text-gray-400 font-mono">{{ generated_at }}</p>
+</section>

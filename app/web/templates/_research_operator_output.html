@@ -1,0 +1,99 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-800">Research Operator Output</h2>
+      <p class="text-gray-400 text-sm">On-demand synthesis and post-mortem results for the selected chain.</p>
+    </div>
+    <p class="text-xs text-gray-400 font-mono">{{ generated_at }}</p>
+  </div>
+
+  {% if error %}
+    <p class="text-sm text-amber-600">{{ error }}</p>
+  {% elif synthesis %}
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Chain</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ synthesis.chain_id[:8] }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Ticker</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ synthesis.ticker or "-" }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Artifacts</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ synthesis.artifact_count }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">History ID</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ synthesis.event_id[:8] if synthesis.event_id else "-" }}</p>
+      </div>
+    </div>
+    <div class="mt-3 border border-gray-200 rounded-lg p-3">
+      <div class="flex justify-between gap-3 items-baseline">
+        <p class="text-sm font-semibold text-gray-800">Synthesis Summary</p>
+        <p class="text-xs text-gray-400">{{ synthesis.latest_artifact_type or "latest artifact" }}</p>
+      </div>
+      <p class="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{{ synthesis.summary }}</p>
+    </div>
+    <div class="mt-3 flex justify-end">
+      <button
+        class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        hx-get="/fragments/research/artifact-chain/{{ synthesis.chain_id }}"
+        hx-target="#research-artifact-chain-viewer"
+        hx-swap="innerHTML"
+      >Refresh Chain</button>
+    </div>
+  {% elif post_mortem %}
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Artifact</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ post_mortem.artifact_id[:8] }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Chain</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ post_mortem.chain_id[:8] }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Ticker</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ post_mortem.ticker or "-" }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Created</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ post_mortem.created_at or "-" }}</p>
+      </div>
+    </div>
+    <div class="mt-3 border border-gray-200 rounded-lg p-3">
+      <div class="flex justify-between gap-3 items-baseline">
+        <p class="text-sm font-semibold text-gray-800">Post-Mortem Saved</p>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">{{ post_mortem.artifact_label }}</span>
+      </div>
+      {% if post_mortem.summary %}
+        <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2">
+          {% for item in post_mortem.summary %}
+            <div class="grid grid-cols-[100px_1fr] gap-2 items-start">
+              <span class="text-xs uppercase tracking-wide text-gray-400">{{ item.label }}</span>
+              <span class="text-sm text-gray-700">{{ item.value }}</span>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      <details class="mt-3">
+        <summary class="cursor-pointer text-sm font-semibold text-gray-600">Raw Body</summary>
+        <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ post_mortem.body | tojson(indent=2) }}</pre>
+      </details>
+    </div>
+    <div class="mt-3 flex justify-end">
+      <button
+        class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        hx-get="/fragments/research/artifact-chain/{{ post_mortem.chain_id }}"
+        hx-target="#research-artifact-chain-viewer"
+        hx-swap="innerHTML"
+      >Refresh Chain</button>
+    </div>
+  {% else %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center">
+      <p class="text-sm text-gray-500">No operator output yet.</p>
+      <p class="mt-1 text-xs text-gray-400">Select a chain above, then run Synthesize or Generate Post-Mortem.</p>
+    </div>
+  {% endif %}
+</section>

@@ -7,10 +7,11 @@ brokers), with periodic sync from broker APIs and reconciliation diff reporting.
 import json
 import logging
 import uuid
-from datetime import datetime, date
+from datetime import date
 from typing import Optional
 
 from data.trade_db import get_conn, DB_PATH
+from utils.datetime_utils import utc_now_naive_iso
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def register_broker_account(
     Returns the internal account ID (UUID).
     """
     internal_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
+    now = utc_now_naive_iso()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO broker_accounts (id, broker, account_id, account_type, currency, label, is_active, created_at, updated_at)
@@ -88,7 +89,7 @@ def sync_positions(
 
     Returns sync summary: {synced, inserted, updated, removed}.
     """
-    now = datetime.utcnow().isoformat()
+    now = utc_now_naive_iso()
     conn = get_conn(db_path)
 
     # Get existing positions for this account
@@ -199,7 +200,7 @@ def sync_cash_balance(
     db_path: str = DB_PATH,
 ):
     """Record a cash balance snapshot for a broker account."""
-    now = datetime.utcnow().isoformat()
+    now = utc_now_naive_iso()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO broker_cash_balances (broker_account_id, balance, buying_power, currency, synced_at)
@@ -254,7 +255,7 @@ def save_nav_snapshot(
     level_id: e.g. 'fund', 'sleeve_1', broker account internal id
     """
     snap_date = snapshot_date or date.today().isoformat()
-    now = datetime.utcnow().isoformat()
+    now = utc_now_naive_iso()
     conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO nav_snapshots
@@ -361,7 +362,7 @@ def reconcile_positions(
 
     status = "clean" if not mismatches else "mismatch"
     report_id = str(uuid.uuid4())
-    now = datetime.utcnow().isoformat()
+    now = utc_now_naive_iso()
 
     # Persist the reconciliation report
     conn.execute(

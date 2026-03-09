@@ -6,7 +6,7 @@ import os
 import sys
 from types import SimpleNamespace
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import ASGITestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -32,7 +32,7 @@ def test_api_risk_briefing_endpoint_uses_builder(monkeypatch):
     }
     monkeypatch.setattr(server, "build_risk_briefing_payload", lambda: payload)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/risk/briefing")
 
     assert response.status_code == 200
@@ -74,7 +74,7 @@ def test_risk_briefing_fragment_renders_state_and_alert(monkeypatch):
     }
     monkeypatch.setattr(server, "build_risk_briefing_payload", lambda: payload)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/fragments/risk-briefing")
 
     assert response.status_code == 200
@@ -97,7 +97,7 @@ def test_api_risk_briefing_default_payload_is_unavailable(monkeypatch):
         ),
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/risk/briefing")
 
     assert response.status_code == 200
@@ -164,7 +164,7 @@ def test_build_risk_briefing_payload_handles_provider_error(monkeypatch):
 
 
 def test_overview_page_includes_risk_briefing_panel():
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/overview")
 
     assert response.status_code == 200

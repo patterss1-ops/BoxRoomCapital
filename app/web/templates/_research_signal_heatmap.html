@@ -1,0 +1,47 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-800">Signal Heatmap</h2>
+      <p class="text-gray-400 text-sm">Latest Engine A signal set.</p>
+    </div>
+    {% if as_of %}
+      <p class="text-xs text-gray-400 font-mono">{{ as_of }}</p>
+    {% endif %}
+  </div>
+  {% if error %}
+    <p class="text-sm text-amber-600">{{ error }}</p>
+  {% elif rows %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Instrument</th>
+            {% for signal in signal_columns %}
+              <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">{{ signal }}</th>
+            {% endfor %}
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Forecast</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.instrument }}</td>
+              {% for signal in signal_columns %}
+                {% set value = row.signals[signal] %}
+                <td class="px-2 py-2 border-b border-gray-200 text-sm {% if value is not none and value > 0.2 %}text-emerald-600{% elif value is not none and value < -0.2 %}text-red-600{% else %}text-gray-600{% endif %}">
+                  {{ "%.2f"|format(value) if value is not none else "-" }}
+                </td>
+              {% endfor %}
+              <td class="px-2 py-2 border-b border-gray-200 font-semibold {% if row.combined_forecast is not none and row.combined_forecast > 0.2 %}text-emerald-600{% elif row.combined_forecast is not none and row.combined_forecast < -0.2 %}text-red-600{% else %}text-gray-700{% endif %}">
+                {{ "%.2f"|format(row.combined_forecast) if row.combined_forecast is not none else "-" }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-gray-400">No signal set available.</p>
+  {% endif %}
+  <p class="mt-3 text-xs text-gray-400 font-mono">{{ generated_at }}</p>
+</section>

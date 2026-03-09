@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime
 from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -22,6 +21,7 @@ from data.order_intent_store import (
 )
 from execution.dispatcher import IntentDispatcher
 from execution.order_intent import OrderIntent
+from utils.datetime_utils import utc_now_naive
 
 
 class StubBroker(BaseBroker):
@@ -50,10 +50,10 @@ class StubBroker(BaseBroker):
 
     def _next_outcome(self) -> OrderResult:
         if not self.outcomes:
-            return OrderResult(success=True, order_id="stub-ok", timestamp=datetime.utcnow())
+            return OrderResult(success=True, order_id="stub-ok", timestamp=utc_now_naive())
         result = self.outcomes.pop(0)
         if result.timestamp is None:
-            result.timestamp = datetime.utcnow()
+            result.timestamp = utc_now_naive()
         return result
 
     def place_long(self, ticker: str, stake_per_point: float, strategy: str) -> OrderResult:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import ASGITestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,7 +21,7 @@ def test_ledger_snapshot_endpoint(monkeypatch):
 
     monkeypatch.setattr(ledger, "get_unified_ledger_snapshot", fake_snapshot)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/snapshot?nav_limit=12")
 
     assert response.status_code == 200
@@ -43,7 +43,7 @@ def test_ledger_reconcile_endpoint(monkeypatch):
 
     monkeypatch.setattr(ledger, "get_ledger_reconcile_report", fake_reconcile)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/reconcile?stale_after_minutes=45")
 
     assert response.status_code == 200
@@ -62,7 +62,7 @@ def test_ledger_snapshot_default_nav_limit(monkeypatch):
 
     monkeypatch.setattr(ledger, "get_unified_ledger_snapshot", fake_snapshot)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/snapshot")
 
     assert response.status_code == 200
@@ -78,7 +78,7 @@ def test_ledger_reconcile_default_stale(monkeypatch):
 
     monkeypatch.setattr(ledger, "get_ledger_reconcile_report", fake_reconcile)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/reconcile")
 
     assert response.status_code == 200
@@ -98,7 +98,7 @@ def test_ledger_snapshot_returns_positions(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/snapshot")
 
     assert response.status_code == 200
@@ -114,7 +114,7 @@ def test_ledger_reconcile_ok_true(monkeypatch):
         lambda stale_after_minutes=30: {"ok": True, "stale_position_count": 0, "suggestions": []},
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/reconcile")
 
     assert response.status_code == 200
@@ -129,7 +129,7 @@ def test_ledger_snapshot_empty_state(monkeypatch):
         lambda nav_limit=50: {"summary": {"accounts": 0, "positions": 0}, "positions": [], "nav_snapshots": []},
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/ledger/snapshot")
 
     assert response.status_code == 200

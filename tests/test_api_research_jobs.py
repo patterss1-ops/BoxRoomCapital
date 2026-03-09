@@ -3,12 +3,11 @@ import json
 import os
 import sys
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api import server
 from data import trade_db
+from tests.asgi_client import ASGITestClient
 
 
 class ImmediateThread:
@@ -90,7 +89,7 @@ def test_discover_options_action_lifecycle_and_persistence(tmp_path, monkeypatch
 
     monkeypatch.setattr(server.research, "run_discovery", fake_run_discovery)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/actions/discover-options",
             data={"mode": "search", "include_details": "off", "strikes": "US 500"},
@@ -176,7 +175,7 @@ def test_calibrate_options_action_lifecycle_and_persistence(tmp_path, monkeypatc
 
     monkeypatch.setattr(server.research, "run_calibration", fake_run_calibration)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/actions/calibrate-options",
             data={"index_filter": "US 500", "verbose": "off"},

@@ -40,6 +40,7 @@ from risk.pre_trade_gate import (
     evaluate_pre_trade_risk,
 )
 from strategies.base import BaseStrategy, Signal, SignalType
+from utils.datetime_utils import utc_now_naive_iso
 
 logger = logging.getLogger(__name__)
 
@@ -291,7 +292,7 @@ def run_orchestration_cycle(
         OrchestrationResult summarising all signals, intents, and errors.
     """
     run_id = uuid.uuid4().hex[:12]
-    run_at = datetime.utcnow().isoformat()
+    run_at = utc_now_naive_iso()
     result = OrchestrationResult(run_id=run_id, run_at=run_at)
 
     if data_provider is None:

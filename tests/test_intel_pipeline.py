@@ -6,12 +6,12 @@ import os
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api import server
 from intelligence.intel_pipeline import IntelSubmission, IntelAnalysis
+from tests.asgi_client import ASGITestClient
 
 
 # ─── Unit tests for IntelSubmission ──────────────────────────────────
@@ -69,7 +69,7 @@ def _stub_side_effects(monkeypatch, tmp_path):
 
 class TestSAIntelWebhook:
     def test_accepts_valid_payload(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/sa_intel", json={
                 "title": "Apple: Strong Buy",
                 "content": "Apple is well positioned for growth...",
@@ -83,7 +83,7 @@ class TestSAIntelWebhook:
         assert "job_id" in body
 
     def test_rejects_empty_content(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/sa_intel", json={
                 "title": "Test",
                 "content": "",
@@ -92,7 +92,7 @@ class TestSAIntelWebhook:
         assert resp.json()["error"] == "missing_content"
 
     def test_rejects_invalid_json(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post(
                 "/api/webhooks/sa_intel",
                 content=b"not json",
@@ -102,7 +102,7 @@ class TestSAIntelWebhook:
         assert resp.json()["error"] == "invalid_payload"
 
     def test_accepts_tickers_as_string(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/sa_intel", json={
                 "content": "Analysis of tech stocks",
                 "tickers": "AAPL, MSFT, GOOGL",
@@ -113,7 +113,7 @@ class TestSAIntelWebhook:
 
 class TestXIntelWebhook:
     def test_accepts_valid_payload(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/x_intel", json={
                 "content": "Thread: $NVDA earnings beat expectations...",
                 "author": "@traderX",
@@ -125,7 +125,7 @@ class TestXIntelWebhook:
         assert "job_id" in body
 
     def test_rejects_empty_content(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/x_intel", json={
                 "author": "@someone",
                 "content": "",
@@ -134,7 +134,7 @@ class TestXIntelWebhook:
 
     def test_accepts_text_field(self):
         """Content can also be provided as 'text' field."""
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/x_intel", json={
                 "text": "Some analysis about $TSLA",
             })
@@ -143,7 +143,7 @@ class TestXIntelWebhook:
 
 class TestTelegramWebhook:
     def test_ignores_empty_update(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/telegram", json={})
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -155,7 +155,7 @@ class TestTelegramWebhook:
             "app.api.server._telegram_reply",
             lambda *a, **kw: None,
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/telegram", json={
                 "message": {
                     "chat": {"id": 12345},
@@ -170,7 +170,7 @@ class TestTelegramWebhook:
             "app.api.server._telegram_reply",
             lambda *a, **kw: None,
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/telegram", json={
                 "message": {
                     "chat": {"id": 12345},
@@ -181,7 +181,7 @@ class TestTelegramWebhook:
 
     def test_ignores_unknown_chat(self, monkeypatch):
         monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/webhooks/telegram", json={
                 "message": {
                     "chat": {"id": 99999},
@@ -197,7 +197,7 @@ class TestIntelHistory:
             "intelligence.event_store.EventStore.list_events",
             lambda self, **kw: [],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/intel/history")
         assert resp.status_code == 200
         body = resp.json()

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from typing import Any, Optional, Sequence
 
 logger = logging.getLogger(__name__)
@@ -55,24 +55,24 @@ class EarningsClient:
 
             yf_ticker = yf.Ticker(symbol)
 
-            # Try quarterly earnings
-            earnings = getattr(yf_ticker, "quarterly_earnings", None)
-            if earnings is not None and not earnings.empty:
-                for idx, row in earnings.iterrows():
-                    actual = row.get("Actual") or row.get("actual")
-                    estimate = row.get("Estimate") or row.get("estimate")
+            earnings_dates = getattr(yf_ticker, "earnings_dates", None)
+            if earnings_dates is not None and not earnings_dates.empty:
+                for idx, row in earnings_dates.iterrows():
+                    actual = row.get("Reported EPS")
+                    estimate = row.get("EPS Estimate")
+                    surprise = row.get("Surprise(%)")
                     if actual is not None and estimate is not None:
                         try:
                             actual_f = float(actual)
                             estimate_f = float(estimate)
-                            surprise_pct = (
+                            surprise_pct = float(surprise) if surprise is not None else (
                                 ((actual_f - estimate_f) / abs(estimate_f)) * 100.0
-                                if estimate_f != 0
-                                else 0.0
+                                if estimate_f != 0 else 0.0
                             )
+                            date_str = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
                             results.append({
                                 "ticker": symbol,
-                                "earnings_date": str(idx) if idx else _utc_now_iso(),
+                                "earnings_date": date_str,
                                 "actual_eps": actual_f,
                                 "consensus_eps": estimate_f,
                                 "surprise_pct": round(surprise_pct, 2),
@@ -80,26 +80,30 @@ class EarningsClient:
                         except (ValueError, TypeError):
                             continue
 
-            # Try earnings_dates for upcoming/recent
             if not results:
-                earnings_dates = getattr(yf_ticker, "earnings_dates", None)
-                if earnings_dates is not None and not earnings_dates.empty:
-                    for idx, row in earnings_dates.iterrows():
-                        actual = row.get("Reported EPS")
-                        estimate = row.get("EPS Estimate")
-                        surprise = row.get("Surprise(%)")
+                with warnings.catch_warnings():
+                    warnings.filterwarnings(
+                        "ignore",
+                        message=r".*Ticker\\.earnings.*deprecated.*",
+                        category=DeprecationWarning,
+                    )
+                    earnings = getattr(yf_ticker, "quarterly_earnings", None)
+                if earnings is not None and not earnings.empty:
+                    for idx, row in earnings.iterrows():
+                        actual = row.get("Actual") or row.get("actual")
+                        estimate = row.get("Estimate") or row.get("estimate")
                         if actual is not None and estimate is not None:
                             try:
                                 actual_f = float(actual)
                                 estimate_f = float(estimate)
-                                surprise_pct = float(surprise) if surprise is not None else (
+                                surprise_pct = (
                                     ((actual_f - estimate_f) / abs(estimate_f)) * 100.0
-                                    if estimate_f != 0 else 0.0
+                                    if estimate_f != 0
+                                    else 0.0
                                 )
-                                date_str = idx.isoformat() if hasattr(idx, "isoformat") else str(idx)
                                 results.append({
                                     "ticker": symbol,
-                                    "earnings_date": date_str,
+                                    "earnings_date": str(idx) if idx else _utc_now_iso(),
                                     "actual_eps": actual_f,
                                     "consensus_eps": estimate_f,
                                     "surprise_pct": round(surprise_pct, 2),

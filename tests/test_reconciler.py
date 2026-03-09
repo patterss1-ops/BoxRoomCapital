@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Optional
 
 from broker.base import AccountInfo, BaseBroker, Position
@@ -14,6 +13,7 @@ from execution.reconciler import (
     compute_live_equity,
     sync_broker_snapshot,
 )
+from utils.datetime_utils import utc_now_naive
 
 
 class StubBroker(BaseBroker):
@@ -75,7 +75,7 @@ class TestReconciler:
                     direction="long",
                     size=2.0,
                     entry_price=500.0,
-                    entry_time=datetime.utcnow(),
+                    entry_time=utc_now_naive(),
                     strategy="gtaa",
                     unrealised_pnl=100.0,
                     deal_id="DL-1",
@@ -171,7 +171,7 @@ class TestReconciler:
             direction="long",
             size=2.0,
             entry_price=500.0,
-            entry_time=datetime.utcnow(),
+            entry_time=utc_now_naive(),
             strategy="gtaa",
             unrealised_pnl=100.0,
             deal_id="L-1",
@@ -181,7 +181,7 @@ class TestReconciler:
             direction="short",
             size=2.0,
             entry_price=500.0,
-            entry_time=datetime.utcnow(),
+            entry_time=utc_now_naive(),
             strategy="dm",
             unrealised_pnl=100.0,
             deal_id="S-1",

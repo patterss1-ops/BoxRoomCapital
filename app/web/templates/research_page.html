@@ -9,7 +9,7 @@
         <h2 class="text-lg font-semibold text-gray-800">Research Workflows</h2>
         <p class="text-gray-400 text-sm">Discovery, calibration, and strategy parameter promotion.</p>
       </div>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
         <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
           <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Option Discovery</p>
           <div class="grid grid-cols-3 gap-2">
@@ -52,6 +52,37 @@
             </div>
           </div>
           <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Calibration</button>
+        </form>
+
+        <form hx-post="/api/actions/research/engine-b-run" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Manual Engine B Intake</p>
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Source Class</label>
+              <select name="source_class" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                <option value="news_wire" selected>news_wire</option>
+                <option value="filing">filing</option>
+                <option value="transcript">transcript</option>
+                <option value="analyst_revision">analyst_revision</option>
+                <option value="sa_quant">sa_quant</option>
+                <option value="social_curated">social_curated</option>
+                <option value="social_general">social_general</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-gray-400 text-xs uppercase tracking-wide">Credibility</label>
+              <input type="number" name="source_credibility" value="0.7" min="0" max="1" step="0.1" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+          </div>
+          <div>
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Source IDs</label>
+            <input type="text" name="source_ids" placeholder="filing:10q-2026-03-09, news:benzinga-123" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+          </div>
+          <div>
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Raw Content</label>
+            <textarea name="raw_content" rows="5" placeholder="Paste filing excerpt, news item, or transcript section" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
+          </div>
+          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Engine B</button>
         </form>
       </div>
     </div>
@@ -134,6 +165,27 @@
 
   <!-- Research Fragment — full width -->
   <div class="md:col-span-12" id="research-panel" hx-get="/fragments/research" hx-trigger="load delay:300ms, every 15s" hx-swap="innerHTML"></div>
+
+  <!-- Research Chain Viewer — full width -->
+  <div class="md:col-span-12"
+       id="research-artifact-chain-viewer"
+       hx-get="/fragments/research/artifact-chain"
+       hx-trigger="load delay:350ms"
+       hx-swap="innerHTML"></div>
+
+  <!-- Research Operator Output — full width -->
+  <div class="md:col-span-12"
+       id="research-operator-output"
+       hx-get="/fragments/research/operator-output"
+       hx-trigger="load delay:400ms"
+       hx-swap="innerHTML"></div>
+
+  <!-- Research Archive — full width -->
+  <div class="md:col-span-12"
+       id="research-archive"
+       hx-get="/fragments/research/archive"
+       hx-trigger="load delay:450ms, every 30s"
+       hx-swap="innerHTML"></div>
 
   <!-- SA Snapshots — full width -->
   <div class="md:col-span-12" id="sa-symbol-captures-panel" hx-get="/fragments/sa-symbol-captures?limit=6" hx-trigger="load delay:450ms, every 20s" hx-swap="innerHTML"></div>

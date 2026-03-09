@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.asgi_client import ASGITestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -118,7 +118,7 @@ def test_tradingview_webhook_creates_intent_when_lane_is_live(monkeypatch):
         lambda strategy_key, status="live", db_path=server.DB_PATH: {"id": "live-set", "status": "live"} if status == "live" else None,
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "tv-secret"},
@@ -142,7 +142,7 @@ def test_tradingview_webhook_audits_only_when_lane_is_staged_live(monkeypatch):
         ),
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "tv-secret"},
@@ -164,7 +164,7 @@ def test_tradingview_webhook_deduplicates_repeat_alert(monkeypatch):
         lambda strategy_key, status="live", db_path=server.DB_PATH: {"id": "live-set", "status": "live"} if status == "live" else None,
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         first = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "tv-secret"},
@@ -184,7 +184,7 @@ def test_tradingview_webhook_deduplicates_repeat_alert(monkeypatch):
 
 
 def test_tradingview_webhook_rejects_invalid_token_with_audit():
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "wrong-token"},
@@ -198,7 +198,7 @@ def test_tradingview_webhook_rejects_invalid_token_with_audit():
 
 
 def test_tradingview_webhook_rejects_invalid_payload_with_audit():
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "tv-secret", "Content-Type": "text/plain"},
@@ -214,7 +214,7 @@ def test_tradingview_webhook_rejects_invalid_payload_with_audit():
 def test_tradingview_webhook_rejects_when_not_configured(monkeypatch):
     monkeypatch.setattr(server.config, "TRADINGVIEW_WEBHOOK_TOKEN", "")
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "anything"},
@@ -236,7 +236,7 @@ def test_tradingview_alerts_api_returns_persisted_alerts(monkeypatch):
         ),
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         post_resp = client.post(
             "/api/webhooks/tradingview",
             headers={"X-Webhook-Token": "tv-secret"},

@@ -9,6 +9,7 @@ import pytest
 from unittest.mock import patch
 
 from app.api.server import create_app
+from tests.asgi_client import ASGITestClient
 
 
 @pytest.fixture
@@ -16,8 +17,8 @@ def client():
     """Create a test client with mocked dependencies."""
     with patch("app.api.server.init_db"):
         app = create_app()
-    from starlette.testclient import TestClient
-    return TestClient(app)
+    with ASGITestClient(app) as client:
+        yield client
 
 
 # ─── JSON API endpoint ────────────────────────────────────────────────────

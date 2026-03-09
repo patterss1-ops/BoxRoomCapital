@@ -1,6 +1,62 @@
 {% set report = promotion_gate %}
 {% include "_promotion_gate.html" %}
 
+<section class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
+  <div class="xl:col-span-4"
+       id="research-engine-status"
+       hx-get="/fragments/research/engine-status"
+       hx-trigger="load delay:100ms, every 10s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-4"
+       id="research-alerts"
+       hx-get="/fragments/research/alerts"
+       hx-trigger="load delay:200ms, every 10s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-4"
+       id="research-pipeline-funnel"
+       hx-get="/fragments/research/pipeline-funnel"
+       hx-trigger="load delay:300ms, every 30s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-8"
+       id="research-active-hypotheses"
+       hx-get="/fragments/research/active-hypotheses"
+       hx-trigger="load delay:400ms, every 15s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-4"
+       id="research-recent-decisions"
+       hx-get="/fragments/research/recent-decisions"
+       hx-trigger="load delay:500ms, every 30s"
+       hx-swap="innerHTML"></div>
+</section>
+
+<section class="grid grid-cols-1 xl:grid-cols-12 gap-4 mb-4">
+  <div class="xl:col-span-4"
+       id="research-regime-panel"
+       hx-get="/fragments/research/regime-panel"
+       hx-trigger="load delay:550ms, every 15s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-8"
+       id="research-signal-heatmap"
+       hx-get="/fragments/research/signal-heatmap"
+       hx-trigger="load delay:600ms, every 15s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-8"
+       id="research-portfolio-targets"
+       hx-get="/fragments/research/portfolio-targets"
+       hx-trigger="load delay:650ms, every 15s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-4"
+       id="research-rebalance-panel"
+       hx-get="/fragments/research/rebalance-panel"
+       hx-trigger="load delay:700ms, every 15s"
+       hx-swap="innerHTML"></div>
+  <div class="xl:col-span-12"
+       id="research-regime-journal"
+       hx-get="/fragments/research/regime-journal"
+       hx-trigger="load delay:750ms, every 30s"
+       hx-swap="innerHTML"></div>
+</section>
+
 <section class="grid grid-cols-1 lg:grid-cols-2 gap-4">
   <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
     <div class="flex justify-between items-baseline gap-4 mb-3">

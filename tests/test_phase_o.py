@@ -24,6 +24,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from tests.asgi_client import ASGITestClient
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -279,9 +281,9 @@ class TestWebhookExecutionWiring:
 
         from app.api.server import create_app
         self.app = create_app()
-
-        from fastapi.testclient import TestClient
-        self.client = TestClient(self.app)
+        with ASGITestClient(self.app) as client:
+            self.client = client
+            yield
 
     def _webhook_payload(self, action="buy", ticker="SPY", qty=10.0, **extra):
         payload = {
@@ -544,9 +546,9 @@ class TestBacktesterSurface:
 
         from app.api.server import create_app
         self.app = create_app()
-
-        from fastapi.testclient import TestClient
-        self.client = TestClient(self.app)
+        with ASGITestClient(self.app) as client:
+            self.client = client
+            yield
 
     def test_submit_backtest_returns_job_id(self):
         """POST /api/backtest returns job_id."""
@@ -686,9 +688,9 @@ class TestAPIEndpoints:
 
         from app.api.server import create_app
         self.app = create_app()
-
-        from fastapi.testclient import TestClient
-        self.client = TestClient(self.app)
+        with ASGITestClient(self.app) as client:
+            self.client = client
+            yield
 
     def test_webhook_endpoint_exists(self):
         resp = self.client.post("/api/webhooks/tradingview", json={})

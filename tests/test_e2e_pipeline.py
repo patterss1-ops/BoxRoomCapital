@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Optional
 
 import pandas as pd
@@ -38,6 +37,7 @@ from data.trade_db import init_db
 from execution.dispatcher import DispatchRunSummary, IntentDispatcher
 from execution.order_intent import OrderIntentStatus
 from execution.reconciler import compute_live_equity, sync_broker_snapshot
+from utils.datetime_utils import utc_now_naive
 from execution.signal_adapter import StrategySlotConfig
 from execution.policy.capability_policy import StrategyRequirements
 from notifications import NotificationHandler
@@ -164,26 +164,26 @@ class E2EPaperBroker(BaseBroker):
         self._trade_counter += 1
         self._positions.append(Position(
             ticker=ticker, direction="long", size=qty,
-            entry_price=100.0, entry_time=datetime.utcnow(),
+            entry_price=100.0, entry_time=utc_now_naive(),
             strategy=strategy,
         ))
         return OrderResult(
             success=True, order_id=f"E2E-{self._trade_counter}",
             fill_price=100.0, fill_qty=qty,
-            timestamp=datetime.utcnow(),
+            timestamp=utc_now_naive(),
         )
 
     def place_short(self, ticker, qty, strategy) -> OrderResult:
         self._trade_counter += 1
         self._positions.append(Position(
             ticker=ticker, direction="short", size=qty,
-            entry_price=100.0, entry_time=datetime.utcnow(),
+            entry_price=100.0, entry_time=utc_now_naive(),
             strategy=strategy,
         ))
         return OrderResult(
             success=True, order_id=f"E2E-{self._trade_counter}",
             fill_price=100.0, fill_qty=qty,
-            timestamp=datetime.utcnow(),
+            timestamp=utc_now_naive(),
         )
 
     def close_position(self, ticker, strategy) -> OrderResult:
@@ -194,7 +194,7 @@ class E2EPaperBroker(BaseBroker):
         ]
         return OrderResult(
             success=True, order_id=f"E2E-{self._trade_counter}",
-            fill_price=100.0, timestamp=datetime.utcnow(),
+            fill_price=100.0, timestamp=utc_now_naive(),
         )
 
 
@@ -203,7 +203,7 @@ class E2EPaperBroker(BaseBroker):
 def _make_price_df(ticker: str, n_bars: int = 60) -> pd.DataFrame:
     """Generate a synthetic OHLCV DataFrame for testing."""
     base = 100.0
-    dates = pd.bdate_range(end=datetime.utcnow(), periods=n_bars)
+    dates = pd.bdate_range(end=utc_now_naive(), periods=n_bars)
     data = {
         "Open": [base + i * 0.1 for i in range(n_bars)],
         "High": [base + i * 0.1 + 1.0 for i in range(n_bars)],

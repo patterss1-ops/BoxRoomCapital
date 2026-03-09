@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import ASGITestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -30,7 +30,7 @@ def test_api_strategy_promotion_gate_uses_builder(monkeypatch):
 
     monkeypatch.setattr(server, "build_promotion_gate_report", fake_builder)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/strategy/promotion-gate?cooldown_hours=12")
 
     assert response.status_code == 200
@@ -51,7 +51,7 @@ def test_strategy_params_promote_blocks_invalid_lane_transition(monkeypatch):
     create_calls = []
     monkeypatch.setattr(server, "create_job", lambda **kwargs: create_calls.append(kwargs))
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/actions/strategy-params/promote",
             data={
@@ -88,7 +88,7 @@ def test_strategy_params_promote_blocks_when_gate_not_recommending(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/actions/strategy-params/promote",
             data={
@@ -141,7 +141,7 @@ def test_strategy_params_promote_allows_gate_recommended_transition(monkeypatch)
     monkeypatch.setattr(server, "update_job", fake_update_job)
     monkeypatch.setattr(server, "promote_strategy_parameter_set", fake_promote)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post(
             "/api/actions/strategy-params/promote",
             data={
@@ -186,7 +186,7 @@ def test_promotion_gate_fragment_renders(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/fragments/promotion-gate")
 
     assert response.status_code == 200

@@ -6,9 +6,8 @@ persists lifecycle transitions for completed/retrying/failed outcomes.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
 import logging
+from dataclasses import dataclass
 from typing import Callable, Optional
 
 import config
@@ -24,6 +23,7 @@ from data.order_intent_store import (
 )
 from data.trade_db import DB_PATH
 from execution.order_intent import OrderIntent, OrderSide
+from utils.datetime_utils import utc_now_naive_iso
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ class IntentDispatcher:
         intent_id = str(row["intent_id"])
         attempt = int(row.get("latest_attempt", 0) or 0) + 1
         max_attempts = int(row.get("max_attempts", 1) or 1)
-        dispatch_at = datetime.utcnow().isoformat()
+        dispatch_at = utc_now_naive_iso()
 
         request_payload = {
             "dispatch_at": dispatch_at,

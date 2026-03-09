@@ -30,7 +30,6 @@ import sys
 from typing import Any
 
 import pytest
-from fastapi.testclient import TestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -52,6 +51,7 @@ from intelligence.jobs.signal_layer_jobs import (
     summarize_freshness_diagnostics,
     Tier1ShadowJobsConfig,
 )
+from tests.asgi_client import ASGITestClient
 
 
 # ── Timestamps ────────────────────────────────────────────────────────────
@@ -610,7 +610,7 @@ class TestOperatorSurface:
             lambda: signal_shadow.get_signal_shadow_report(db_path=db_path),
         )
 
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/signal-shadow")
 
         assert resp.status_code == 200
@@ -642,7 +642,7 @@ class TestOperatorSurface:
             lambda: signal_shadow.get_signal_shadow_report(db_path=db_path),
         )
 
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/signal-shadow")
 
         assert resp.status_code == 200
@@ -667,7 +667,7 @@ class TestOperatorSurface:
             },
         )
 
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.post("/api/actions/signal-shadow-run")
 
         assert resp.status_code == 200
@@ -742,7 +742,7 @@ class TestOperatorSurface:
             },
         )
 
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/fragments/signal-engine")
 
         assert resp.status_code == 200
@@ -770,7 +770,7 @@ class TestOperatorSurface:
             },
         )
 
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/fragments/signal-engine")
 
         assert resp.status_code == 200
@@ -954,8 +954,8 @@ class TestFullTier1Composite:
         assert result.action == DecisionAction.FLAG_FOR_REVIEW
         assert len(result.layer_scores) == 8
 
-    def test_eight_layer_weight_sum_equals_one(self):
-        """Full tier-1 active weights sum to exactly 1.0."""
+    def test_active_layer_weight_sum_equals_one(self):
+        """All active composite weights sum to exactly 1.0."""
         layers = [_layer("SPY", layer_id, 75.0) for layer_id in LAYER_ORDER]
         request = CompositeRequest(
             ticker="SPY", as_of=AS_OF, layer_scores=tuple(layers),
@@ -963,7 +963,7 @@ class TestFullTier1Composite:
         from app.signal.composite import _active_weights
         weights = _active_weights(request)
         assert pytest.approx(sum(weights.values()), abs=1e-6) == 1.0
-        assert len(weights) == 8
+        assert len(weights) == len(LAYER_ORDER)
 
     def test_eight_layer_equal_scores_preserves_value(self):
         """All 8 layers at 75.0 → weighted = 75.0 regardless of weights."""
@@ -1193,7 +1193,7 @@ class TestShadowFreshnessEnforcement:
 
         report = signal_shadow.run_signal_shadow_cycle(
             db_path=db_path,
-            required_layers=LAYER_ORDER,  # All 8 required
+            required_layers=LAYER_ORDER,
             min_layers_for_score=2,
             enforce_required_layers=True,
             now_fn=lambda: AS_OF,
@@ -1221,7 +1221,7 @@ class TestShadowFreshnessEnforcement:
 
         report = signal_shadow.run_signal_shadow_cycle(
             db_path=db_path,
-            required_layers=LAYER_ORDER,  # All 8 required
+            required_layers=LAYER_ORDER,
             min_layers_for_score=2,
             enforce_required_layers=False,
             now_fn=lambda: AS_OF,
@@ -1230,7 +1230,7 @@ class TestShadowFreshnessEnforcement:
         # Scored but with missing-required noted
         assert aapl["status"].startswith("scored")
         assert aapl["final_score"] > 0
-        assert len(aapl["missing_required_layers"]) == 5  # 8 - 3 present
+        assert len(aapl["missing_required_layers"]) == len(LAYER_ORDER) - 3
 
 
 # ── 12. Tier-1 Ranked Candidates (F-007) ──────────────────────────────────
@@ -1437,6 +1437,8 @@ class TestEnrichedPayload:
                      "action": "auto_execute_buy",
                      "final_score": 82.0, "weighted_score": 80.0,
                      "layer_count": 8, "missing_required_layers": [],
+                     "vetoes": ["research_blocking_objections"],
+                     "layer_scores": {"l9_research": 35.0},
                      "freshness": {"warning_layers": [], "stale_layers": []},
                      "notes": []},
                 ],
@@ -1445,7 +1447,11 @@ class TestEnrichedPayload:
         enriched = enrich_signal_shadow_payload(payload)
         assert "ranked_candidates" in enriched["report"]
         assert enriched["report"]["ranked_candidates"][0]["ticker"] == "AAPL"
+        assert enriched["report"]["ranked_candidates"][0]["research_layer_score"] == 35.0
+        assert enriched["report"]["ranked_candidates"][0]["research_vetoes"] == ["research_blocking_objections"]
+        assert enriched["report"]["results"][0]["blocked_by_research"] is True
         assert "freshness_diagnostics" in enriched
+        assert enriched["research_overlay_diagnostics"]["tickers_blocked_by_research"] == 1
 
     def test_enrich_idle_payload_unchanged(self):
         """Idle/no-report payload passes through without modification."""

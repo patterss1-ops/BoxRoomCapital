@@ -67,6 +67,16 @@ After each session, reflect on what went well and what could be improved. Update
 - When doing multi-step work (e.g., building + testing a scraper), write a checkpoint entry after each step completes, not just at the end
 - SA_RAPIDAPI_KEY dropped — user considers the API dodgy; will use webscraping instead
 
+### Autonomous execution mode (project default)
+- Execute backlog tasks end-to-end without asking for approval on implementation details.
+- Do not pause for progress check-ins; only stop for true blockers:
+  1) missing credentials/access,
+  2) destructive action requiring explicit approval,
+  3) conflicting requirements that could cause data loss.
+- When blocked, choose the safest reasonable assumption and continue.
+- Persist checkpoint updates to `.claude/history/SESSION_LOG.md` every 10 minutes and after each completed task.
+- If interrupted, resume from the latest checkpoint automatically.
+
 ### What to anticipate
 - After any infrastructure work, user will want to **see it running** — always do a live test/demo
 - User cares about **real connectivity**, not mocks — verify external API calls work

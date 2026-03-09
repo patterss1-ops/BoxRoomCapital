@@ -78,7 +78,7 @@ class ScheduleWindow:
 # Conservative defaults — weekday-only, after US market close
 DEFAULT_SCHEDULE: list[ScheduleWindow] = [
     ScheduleWindow(name="us_close_orchestration", hour=21, minute=30),
-    # Full signal layer ingestion (L1-L8 batch)
+    # Full signal layer ingestion (L1-L9 batch)
     ScheduleWindow(name="tier1_full_ingest", hour=21, minute=0),
     # News sentiment refresh (L6 only, 4x daily)
     ScheduleWindow(name="news_refresh_morning", hour=8, minute=0),
@@ -165,6 +165,7 @@ class DailyWorkflowScheduler:
         dry_run: bool = False,
         tick_interval: float = 30.0,
         rebalance_check_fn: Optional[Callable[..., Any]] = None,
+        window_handlers: Optional[dict[str, Callable[..., Any]]] = None,
     ):
         self._dispatch_fn = dispatch_fn
         self._schedule = list(schedule if schedule is not None else DEFAULT_SCHEDULE)
@@ -172,6 +173,7 @@ class DailyWorkflowScheduler:
         self._dry_run = dry_run
         self._tick_interval = max(5.0, tick_interval)
         self._rebalance_check_fn = rebalance_check_fn
+        self._window_handlers = dict(window_handlers or {})
 
         # Thread-safe state
         self._lock = threading.RLock()
@@ -321,6 +323,12 @@ class DailyWorkflowScheduler:
         logger.info("Added schedule window: %s at %02d:%02d UTC",
                      window.name, window.hour, window.minute)
 
+    def set_window_handler(self, window_name: str, handler: Callable[..., Any]) -> None:
+        """Register a dedicated dispatch handler for a named window."""
+        with self._lock:
+            self._window_handlers[window_name] = handler
+        logger.info("Registered handler for schedule window: %s", window_name)
+
     def remove_window(self, name: str) -> bool:
         """Remove a schedule window by name. Returns True if found."""
         with self._lock:
@@ -410,6 +418,7 @@ class DailyWorkflowScheduler:
                 "Dispatching window '%s' — job %s (dry_run=%s)",
                 window.name, job_id, self._dry_run,
             )
+            handler = self._resolve_dispatch_handler(window.name)
 
             # Create job record
             create_job(
@@ -428,7 +437,7 @@ class DailyWorkflowScheduler:
                 db_path=self._db_path,
             )
 
-            orch_result = self._dispatch_fn(
+            orch_result = handler(
                 window_name=window.name,
                 db_path=self._db_path,
                 dry_run=self._dry_run,
@@ -441,10 +450,20 @@ class DailyWorkflowScheduler:
                 else orch_result
             )
             result.success = True
-            result.signals_total = summary.get("signals_total", 0)
-            result.intents_created = summary.get("intents_created", 0)
-            result.intents_rejected = summary.get("intents_rejected", 0)
-            result.errors_total = summary.get("errors", 0)
+            result.signals_total = int(
+                summary.get(
+                    "signals_total",
+                    summary.get("artifacts_created", summary.get("items_processed", 0)),
+                )
+            )
+            result.intents_created = int(
+                summary.get(
+                    "intents_created",
+                    summary.get("actions_taken", summary.get("pending_reviews", 0)),
+                )
+            )
+            result.intents_rejected = int(summary.get("intents_rejected", summary.get("skipped", 0)))
+            result.errors_total = int(summary.get("errors", summary.get("error_count", 0)))
 
             update_job(
                 job_id=job_id,
@@ -558,6 +577,10 @@ class DailyWorkflowScheduler:
                 if w.name == name:
                     return w
         return None
+
+    def _resolve_dispatch_handler(self, window_name: str) -> Callable[..., Any]:
+        with self._lock:
+            return self._window_handlers.get(window_name, self._dispatch_fn)
 
     def _run_rebalance_check(self, window_name: str) -> None:
         """Best-effort hook for post-dispatch sleeve drift evaluation."""

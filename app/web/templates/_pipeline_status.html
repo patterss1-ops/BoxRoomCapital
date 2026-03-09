@@ -43,6 +43,77 @@
     </div>
   </div>
 
+  <!-- Engine A State -->
+  <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5">
+    <span class="text-[11px] text-gray-400">Engine A</span>
+    <div class="flex items-center gap-1.5">
+      {% if pipeline.engine_a.running %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">RUN</span>
+      {% elif pipeline.engine_a.enabled and pipeline.engine_a.configured %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">OFF</span>
+      {% elif pipeline.engine_a.enabled %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">UNCFG</span>
+      {% else %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">DISABLED</span>
+      {% endif %}
+      <div class="flex gap-1">
+        <form hx-post="/api/actions/engine-a-start" hx-target="#action-result" hx-swap="innerHTML">
+          <button type="submit" class="bg-transparent hover:bg-gray-100 text-gray-500 hover:text-emerald-400 px-1 py-0.5 rounded text-[9px] border border-gray-300 transition-colors">Start</button>
+        </form>
+        <form hx-post="/api/actions/engine-a-stop" hx-target="#action-result" hx-swap="innerHTML">
+          <button type="submit" class="bg-transparent hover:bg-gray-100 text-gray-500 hover:text-red-400 px-1 py-0.5 rounded text-[9px] border border-gray-300 transition-colors">Stop</button>
+        </form>
+      </div>
+      {% if pipeline.engine_a.last_result %}
+      <span class="text-[10px] font-mono {% if pipeline.engine_a.last_result.status == 'ok' %}text-emerald-400{% else %}text-red-400{% endif %}">
+        {{ pipeline.engine_a.last_result.status|upper }}
+      </span>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Engine B State -->
+  <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5">
+    <span class="text-[11px] text-gray-400">Engine B</span>
+    <div class="flex items-center gap-1.5">
+      {% if pipeline.engine_b.running %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">RUN</span>
+      {% elif pipeline.engine_b.enabled and pipeline.engine_b.configured %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">IDLE</span>
+      {% elif pipeline.engine_b.enabled %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-400 border-amber-500/30">UNCFG</span>
+      {% else %}
+      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">DISABLED</span>
+      {% endif %}
+      <div class="flex gap-1">
+        <form hx-post="/api/actions/engine-b-start" hx-target="#action-result" hx-swap="innerHTML">
+          <button type="submit" class="bg-transparent hover:bg-gray-100 text-gray-500 hover:text-emerald-400 px-1 py-0.5 rounded text-[9px] border border-gray-300 transition-colors">Start</button>
+        </form>
+        <form hx-post="/api/actions/engine-b-stop" hx-target="#action-result" hx-swap="innerHTML">
+          <button type="submit" class="bg-transparent hover:bg-gray-100 text-gray-500 hover:text-red-400 px-1 py-0.5 rounded text-[9px] border border-gray-300 transition-colors">Stop</button>
+        </form>
+      </div>
+      {% if pipeline.engine_b.queue_depth %}
+      <span class="text-[10px] font-mono text-gray-400">Q{{ pipeline.engine_b.queue_depth }}</span>
+      {% endif %}
+      {% if pipeline.engine_b.last_result %}
+      <span class="text-[10px] font-mono {% if pipeline.engine_b.last_result.status == 'ok' %}text-emerald-400{% else %}text-red-400{% endif %}">
+        {{ pipeline.engine_b.last_result.status|upper }}
+      </span>
+      {% if pipeline.engine_b.last_result.current_stage %}
+      <span class="text-[10px] font-mono text-gray-400">
+        {{ pipeline.engine_b.last_result.current_stage }}
+      </span>
+      {% endif %}
+      {% if pipeline.engine_b.last_result.next_stage %}
+      <span class="text-[10px] font-mono text-blue-500">
+        {{ pipeline.engine_b.last_result.next_stage }}
+      </span>
+      {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
   <!-- Config Flags -->
   <div class="grid grid-cols-[110px_1fr] gap-1 items-baseline border-b border-gray-200 py-0.5">
     <span class="text-[11px] text-gray-400">Dry Run</span>

@@ -1,7 +1,7 @@
 <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-gray-800">Research Job Output</h2>
-    <p class="text-gray-400 text-sm">Selected job payload, result, and errors.</p>
+    <h2 class="text-lg font-semibold text-gray-800">Job Output</h2>
+    <p class="text-gray-400 text-sm">Selected job payload, derived summary, and errors.</p>
   </div>
   {% if job %}
     <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5"><span class="text-gray-400 text-sm">Job ID</span><span class="font-mono text-gray-700 text-xs">{{ job.id[:8] }}</span></div>
@@ -12,6 +12,124 @@
     </div>
     <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5"><span class="text-gray-400 text-sm">Updated</span><span class="font-mono text-gray-700 text-xs">{{ job.updated_at }}</span></div>
     <div class="grid grid-cols-[160px_1fr] gap-2 items-start py-1.5"><span class="text-gray-400 text-sm">Detail</span><span class="text-gray-700 text-sm">{{ job.detail or "-" }}</span></div>
+    <div class="mt-3 bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <div class="flex justify-between items-baseline gap-3">
+        <p class="text-sm font-semibold text-gray-800">Research Routing</p>
+        <p class="text-xs text-gray-400">{{ research_route_label }}</p>
+      </div>
+      <p class="mt-1 text-xs text-gray-500">{{ research_route_detail }}</p>
+      <div class="mt-3 flex flex-wrap gap-2 text-xs">
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-gray-300 bg-white text-gray-600">{{ research_route_label }}</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full border {% if engine_b_state.running %}border-emerald-300 bg-emerald-50 text-emerald-700{% else %}border-amber-300 bg-amber-50 text-amber-700{% endif %}">
+          Engine B {{ engine_b_state.status }}
+        </span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full border border-gray-300 bg-white text-gray-600">Queue {{ engine_b_state.queue_depth }}</span>
+      </div>
+    </div>
+
+    {% if job_summary %}
+      <h3 class="text-gray-800 font-semibold mt-4 mb-2">{{ job_summary.title }}</h3>
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Run</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ job_summary.run_id[:8] if job_summary.run_id else "-" }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Scored</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ job_summary.tickers_scored }}/{{ job_summary.tickers_total }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Ranked</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ job_summary.ranked_count }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Research Blocks</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ job_summary.research_overlay.tickers_blocked_by_research or 0 }}</p>
+        </div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <div class="flex justify-between items-baseline gap-3 mb-2">
+            <p class="text-sm font-semibold text-gray-800">Research Overlay</p>
+            <p class="text-xs text-gray-400 font-mono">{{ job_summary.run_at or "-" }}</p>
+          </div>
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="border border-gray-200 rounded-lg p-2 bg-white">
+              <p class="text-[11px] uppercase tracking-wide text-gray-400">Covered</p>
+              <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_overlay.tickers_with_research_layer or 0 }}</p>
+            </div>
+            <div class="border border-gray-200 rounded-lg p-2 bg-white">
+              <p class="text-[11px] uppercase tracking-wide text-gray-400">Blocked</p>
+              <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_overlay.tickers_blocked_by_research or 0 }}</p>
+            </div>
+            <div class="border border-gray-200 rounded-lg p-2 bg-white">
+              <p class="text-[11px] uppercase tracking-wide text-gray-400">Rejected</p>
+              <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_overlay.tickers_research_rejected or 0 }}</p>
+            </div>
+            <div class="border border-gray-200 rounded-lg p-2 bg-white">
+              <p class="text-[11px] uppercase tracking-wide text-gray-400">Objections</p>
+              <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_overlay.tickers_research_blocking_objections or 0 }}</p>
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-gray-400">
+            missing_blocked={{ job_summary.blocked_missing or 0 }},
+            stale_blocked={{ job_summary.blocked_stale or 0 }}
+          </p>
+        </div>
+
+        {% if job_summary.research_job %}
+          <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+            <div class="flex justify-between items-baseline gap-3 mb-2">
+              <p class="text-sm font-semibold text-gray-800">L9 Research Job</p>
+              <p class="text-xs text-gray-400 font-mono">{{ job_summary.research_job.job_id[:8] if job_summary.research_job.job_id else "-" }}</p>
+            </div>
+            <p class="text-sm text-gray-700">{{ job_summary.research_job.status or "-" }}</p>
+            <p class="mt-1 text-xs text-gray-400">{{ job_summary.research_job.detail or "-" }}</p>
+            <div class="mt-3 grid grid-cols-3 gap-2 text-sm">
+              <div class="border border-gray-200 rounded-lg p-2 bg-white">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">Success</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_job.tickers_success or 0 }}</p>
+              </div>
+              <div class="border border-gray-200 rounded-lg p-2 bg-white">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">Failed</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_job.tickers_failed or 0 }}</p>
+              </div>
+              <div class="border border-gray-200 rounded-lg p-2 bg-white">
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">Skipped</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ job_summary.research_job.tickers_skipped or 0 }}</p>
+              </div>
+            </div>
+          </div>
+        {% endif %}
+      </div>
+
+      {% if job_summary.top_candidates %}
+        <h3 class="text-gray-800 font-semibold mt-4 mb-2">Top Candidates</h3>
+        <table class="w-full text-sm text-left">
+          <thead>
+            <tr>
+              <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Ticker</th>
+              <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Action</th>
+              <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Final</th>
+              <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Research</th>
+              <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Research Vetoes</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for row in job_summary.top_candidates %}
+            <tr>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.ticker or "-" }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.action or "-" }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.final_score) if row.final_score is not none else "-" }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.research_layer_score) if row.research_layer_score is not none else "-" }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ row.research_vetoes|join(", ") if row.research_vetoes else "-" }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    {% endif %}
 
     <h3 class="text-gray-800 font-semibold mt-4 mb-2">Result</h3>
     {% if parsed_result is mapping or parsed_result is sequence and parsed_result is not string %}
@@ -29,6 +147,6 @@
       <p class="text-sm text-gray-400">No error payload.</p>
     {% endif %}
   {% else %}
-    <p class="text-sm text-gray-400">No research job selected yet.</p>
+    <p class="text-sm text-gray-400">No job selected yet.</p>
   {% endif %}
 </section>

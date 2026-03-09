@@ -15,7 +15,7 @@ import uuid
 from typing import Any, Callable, Mapping, Optional, Sequence
 
 import config
-from app.engine.signal_shadow import run_signal_shadow_cycle
+from app.engine.signal_shadow import DEFAULT_REQUIRED_LAYERS, run_signal_shadow_cycle
 from app.signal.types import LAYER_ORDER, DecisionAction, LayerId
 from data.trade_db import DB_PATH
 from intelligence.jobs.sa_quant_job import SAQuantJobRunner
@@ -28,7 +28,7 @@ from utils.datetime_utils import utc_now_iso as _utc_now_iso
 class Tier1ShadowJobsConfig:
     """Configuration for tier-1 shadow job orchestration."""
 
-    required_layers: tuple[LayerId, ...] = LAYER_ORDER
+    required_layers: tuple[LayerId, ...] = DEFAULT_REQUIRED_LAYERS
     min_layers_for_score: int = 2
     enforce_required_layers: bool = True
     ranking_limit: int = 20
@@ -56,6 +56,38 @@ def _parse_quality_penalty(notes: Sequence[Any]) -> float:
     return 0.0
 
 
+def _extract_research_layer_score(row: Mapping[str, Any]) -> float | None:
+    layer_scores = row.get("layer_scores")
+    if not isinstance(layer_scores, Mapping):
+        return None
+    raw = layer_scores.get(LayerId.L9_RESEARCH.value)
+    if raw is None:
+        return None
+    try:
+        return round(float(raw), 4)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_vetoes(row: Mapping[str, Any]) -> list[str]:
+    return [str(code) for code in (row.get("vetoes") or []) if str(code or "").strip()]
+
+
+def enrich_shadow_result_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Attach research-overlay metadata to one shadow-result row."""
+    enriched = dict(row)
+    vetoes = _normalize_vetoes(row)
+    research_layer_score = _extract_research_layer_score(row)
+    research_vetoes = [code for code in vetoes if code.startswith("research_")]
+
+    enriched["vetoes"] = vetoes
+    enriched["research_layer_score"] = research_layer_score
+    enriched["research_vetoes"] = research_vetoes
+    enriched["has_research_layer"] = research_layer_score is not None
+    enriched["blocked_by_research"] = bool(research_vetoes)
+    return enriched
+
+
 def build_ranked_candidates(report: Mapping[str, Any], limit: int = 20) -> list[dict[str, Any]]:
     """Build sorted candidates from a shadow report.
 
@@ -70,6 +102,7 @@ def build_ranked_candidates(report: Mapping[str, Any], limit: int = 20) -> list[
     for row in rows:
         if not isinstance(row, Mapping):
             continue
+        enriched_row = enrich_shadow_result_row(row)
         status = str(row.get("status") or "")
         if not status.startswith("scored"):
             continue
@@ -105,6 +138,10 @@ def build_ranked_candidates(report: Mapping[str, Any], limit: int = 20) -> list[
                 "missing_required_layers": missing_required,
                 "warning_layers": warning_layers,
                 "stale_layers": stale_layers,
+                "vetoes": list(enriched_row.get("vetoes") or []),
+                "research_vetoes": list(enriched_row.get("research_vetoes") or []),
+                "research_layer_score": enriched_row.get("research_layer_score"),
+                "has_research_layer": bool(enriched_row.get("has_research_layer")),
                 "quality_penalty_pct": quality_penalty_pct,
                 "rank_score": round(directional_score, 4),
             }
@@ -182,6 +219,43 @@ def summarize_freshness_diagnostics(report: Mapping[str, Any]) -> dict[str, Any]
     }
 
 
+def summarize_research_overlay(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Aggregate L9 research-layer coverage and veto diagnostics."""
+    rows = report.get("results") if isinstance(report, Mapping) else None
+    if not isinstance(rows, list):
+        return {
+            "tickers_with_research_layer": 0,
+            "tickers_blocked_by_research": 0,
+            "tickers_research_rejected": 0,
+            "tickers_research_blocking_objections": 0,
+        }
+
+    with_layer = 0
+    blocked = 0
+    rejected = 0
+    blocking_objections = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        enriched = enrich_shadow_result_row(row)
+        if enriched["has_research_layer"]:
+            with_layer += 1
+        research_vetoes = set(enriched["research_vetoes"])
+        if research_vetoes:
+            blocked += 1
+        if "research_rejected" in research_vetoes:
+            rejected += 1
+        if "research_blocking_objections" in research_vetoes:
+            blocking_objections += 1
+
+    return {
+        "tickers_with_research_layer": with_layer,
+        "tickers_blocked_by_research": blocked,
+        "tickers_research_rejected": rejected,
+        "tickers_research_blocking_objections": blocking_objections,
+    }
+
+
 def enrich_signal_shadow_payload(payload: Mapping[str, Any], ranking_limit: int = 20) -> dict[str, Any]:
     """Attach ranking and freshness diagnostics to the shadow payload."""
     output = dict(payload or {})
@@ -193,11 +267,19 @@ def enrich_signal_shadow_payload(payload: Mapping[str, Any], ranking_limit: int 
         return output
 
     report_copy = dict(report)
+    rows = report_copy.get("results")
+    if isinstance(rows, list):
+        report_copy["results"] = [
+            enrich_shadow_result_row(row) if isinstance(row, Mapping) else row
+            for row in rows
+        ]
     ranked = build_ranked_candidates(report_copy, limit=ranking_limit)
     freshness = summarize_freshness_diagnostics(report_copy)
+    research_overlay = summarize_research_overlay(report_copy)
     report_copy["ranked_candidates"] = ranked
     output["report"] = report_copy
     output["freshness_diagnostics"] = freshness
+    output["research_overlay_diagnostics"] = research_overlay
     return output
 
 
@@ -227,6 +309,7 @@ def run_tier1_shadow_jobs(
     # ── L8: SA Quant ────────────────────────────────────────────────────
     runner = sa_quant_runner or SAQuantJobRunner(db_path=db_path)
     sa_quant_summary: dict[str, Any] = {}
+    research_summary: dict[str, Any] = {}
     try:
         sa_quant_summary = runner.run(tickers=normalized_tickers, as_of=run_at)
         layer_jobs[LayerId.L8_SA_QUANT.value] = {
@@ -242,6 +325,32 @@ def run_tier1_shadow_jobs(
         }
     except Exception as exc:  # noqa: BLE001
         layer_jobs[LayerId.L8_SA_QUANT.value] = {
+            "status": "failed",
+            "detail": str(exc),
+        }
+
+    # ── L9: Research Overlay ──────────────────────────────────────────
+    try:
+        from intelligence.jobs.research_signal_job import ResearchSignalJobRunner
+
+        research_summary = ResearchSignalJobRunner(db_path=db_path).run(
+            tickers=normalized_tickers,
+            as_of=run_at,
+        )
+        layer_jobs[LayerId.L9_RESEARCH.value] = {
+            "status": "completed",
+            "detail": (
+                f"success={int(research_summary.get('tickers_success', 0))}, "
+                f"failed={int(research_summary.get('tickers_failed', 0))}, "
+                f"skipped={int(research_summary.get('tickers_skipped', 0))}"
+            ),
+            "job_id": research_summary.get("job_id"),
+            "tickers_success": int(research_summary.get("tickers_success", 0)),
+            "tickers_failed": int(research_summary.get("tickers_failed", 0)),
+            "tickers_skipped": int(research_summary.get("tickers_skipped", 0)),
+        }
+    except Exception as exc:  # noqa: BLE001
+        layer_jobs[LayerId.L9_RESEARCH.value] = {
             "status": "failed",
             "detail": str(exc),
         }
@@ -347,6 +456,7 @@ def run_tier1_shadow_jobs(
         "required_layers": [layer.value for layer in config_obj.required_layers],
         "layer_jobs": layer_jobs,
         "sa_quant_summary": sa_quant_summary,
+        "research_summary": research_summary,
         "shadow_report": shadow_report,
         "ranked_candidates": ranked,
         "freshness_diagnostics": freshness,

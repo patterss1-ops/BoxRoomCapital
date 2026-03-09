@@ -1,0 +1,162 @@
+ # Next Workphase Plan: Operational Activation and Real-Data Validation
+
+  ## Summary
+
+  Front-load the three blockers that currently keep the research system from being operational: PostgreSQL provisioning, real experiment backtesting, and seeded market
+  data. After that, validate Engine A and Engine B on real data end-to-end, then close the remaining operator/spec gaps that matter for moving from research output to
+  paper-trading readiness.
+
+  This phase is intentionally not another UI-first tranche. The repo already has the artifact model, pipeline orchestration, stage-aware scoring, and control-plane
+  surfaces. What is still missing is real storage, real historical inputs, and a real experiment runner behind Engine B.
+
+  ## Backlog and Execution Order
+
+  ### WF-1: PostgreSQL Activation
+
+  - WF-1A Replit PostgreSQL provisioning
+      - User-owned prerequisite.
+      - Provision the database, set RESEARCH_DB_DSN, and run init_research_schema().
+      - Acceptance: research.* tables exist and ArtifactStore can read/write without fallback or runtime error.
+  - WF-1B Runtime bootstrap guardrails
+      - Add one startup-time health check for research DB reachability and schema readiness.
+      - Expose the result in existing control/status surfaces so operators can see db_ready before trying Engine A/B.
+      - Acceptance: app surfaces clearly distinguish dsn missing, connect failed, and schema ready.
+
+  ### WF-2: Market Data Seeding and Canonicalization
+
+  - WF-2A Implement seed_mvp_universe()
+      - Create the missing seed module for the MVP universe.
+      - Default scope:
+          - Futures roots for Engine A: ES, NQ, YM, RTY, ZN, ZB, ZF, GC, SI, CL, NG, HG, ZC, ZS, ZW, 6E, 6B, 6J
+          - ETF proxies for near-term validation: SPY, QQQ, TLT, GLD, USO, SLV, DBC
+      - Seed research.instruments, research.universe_membership, and initial research.roll_calendar / research.futures_contracts records idempotently.
+      - Acceptance: rerun-safe; no duplicate instruments; front contracts and initial rolls exist for seeded roots.
+  - WF-2B Add an idempotent historical ingest command
+      - Build one script/entrypoint that:
+          - resolves seeded instruments
+          - fetches 3-5 years of daily bars via IBKRAdapter, using its yfinance fallback
+          - stores raw bars
+          - materializes canonical bars where required by Engine A
+      - Default date range: 5 years for ETF proxies, 3 years minimum acceptable for futures roots if data coverage is incomplete.
+      - Acceptance: research.raw_bars and canonical bars are populated for the MVP set; reruns only append/fill missing history.
+  - WF-2C Data quality checks
+      - Add a verification routine that reports per-symbol coverage, latest bar date, missing-date gaps, and bar counts.
+      - Acceptance: operators can tell which symbols are ready for Engine A and which are proxy-only.
+
+  ### WF-3: Real Backtester Integration for Engine B
+
+  - WF-3A Build a research backtest adapter
+      - Add research/shared/backtest_adapter.py.
+      - Convert analytics.backtester.Backtester.run() output into VariantResult objects accepted by ExperimentService.
+      - The adapter must normalize:
+          - trade list into gross_return, gross_pnl, notional, holding_days
+          - best-available instrument_type, broker, and asset_class
+          - variant metadata and caveats
+      - Use deterministic defaults when the test spec lacks full strategy metadata.
+  - WF-3B Wire the adapter into runtime
+      - Update build_engine_b_pipeline() so live/manual Engine B uses the adapter instead of _default_backtest_runner().
+      - Keep explicit dependency injection support for tests.
+  - WF-3C Define first-pass strategy mapping
+      - For this phase, use a constrained mapping:
+          - equity/index mean-reversion hypotheses -> IBS++ v3
+          - trend/macro hypotheses -> Trend Following v2
+          - allocation/rotation hypotheses -> SPY/TLT Rotation v3
+      - If a hypothesis cannot be mapped confidently, mark the experiment with implementation caveats and stop at experiment rather than fabricating a tradesheet.
+      - Acceptance: no stub variants remain on the live runtime path.
+
+  ### WF-4: Real-Data Engine Validation
+
+  - WF-4A Engine A validation run
+      - Run the full Engine A pipeline against seeded historical data.
+      - Validate:
+          - regime snapshot is generated from DB-backed inputs
+          - signal scores are bounded and non-empty
+          - portfolio targets are sane
+          - rebalance output is produced
+          - artifact chain is persisted
+      - Default validation universe: ETF proxies first, futures roots second once coverage is sufficient.
+  - WF-4B Engine B validation run
+      - Run at least three real/manual events through the full Engine B chain:
+          - one expected park/reject
+          - one expected test
+          - one expected pilot
+      - Validate:
+          - artifact chain completeness
+          - stage-aware routing behavior
+          - experiment reports use real backtest outputs
+          - pilot path sets sign-off required only when a tradesheet exists
+  - WF-4C Operator validation checklist
+      - Add a compact validation report surface or runbook entry summarizing readiness:
+          - DB ready
+          - data seeded
+          - Engine A last successful run
+          - Engine B last successful run
+          - pilot items awaiting sign-off
+
+  ### WF-5: Pilot Sign-Off Workflow
+
+  - WF-5A Add explicit approval state transitions
+      - Add:
+          - POST /api/actions/research/pilot-approve
+          - POST /api/actions/research/pilot-reject
+      - Input: chain_id or trade_sheet_id, actor, optional note.
+      - Persist an operator decision artifact/event that promotion gating can read.
+  - WF-5B Enforce sign-off in gating
+      - Extend the research-side gate so requires_human_signoff=true is not just advisory.
+      - pilot chains remain blocked from downstream promotion/paper execution until a positive approval event exists.
+      - Rejection should mark the chain as rejected/held with audit history.
+  - WF-5C Surface sign-off state in UI
+      - Show pending / approved / rejected pilot state in the chain viewer and relevant operator panels.
+      - Acceptance: there is no pilot-ready ambiguity in the UI.
+
+  ### WF-6: Remaining Spec-Critical Gaps
+
+  - WF-6A INT-3 end-to-end tests
+      - Add full app-level coverage for:
+          - Engine A successful historical cycle
+          - Engine B test path
+          - Engine B experiment path
+          - Engine B pilot path with sign-off required
+          - pilot approval and rejection
+          - cutover/routing behavior when research system is active
+  - WF-6B Missing operator action endpoints
+      - Add:
+          - POST /api/actions/research/confirm-kill
+          - POST /api/actions/research/override-kill
+          - POST /api/actions/research/execute-rebalance
+          - POST /api/actions/research/dismiss-rebalance
+      - Each action must produce an auditable event and update the relevant fragment surfaces.
+  - WF-6C Deferred UX completion
+      - Only after operational flows are working:
+          - hypothesis board / review queue
+          - chart JSON endpoints
+          - strategy health grid
+          - LLM cost views
+          - top-bar KPIs
+
+
+  - New script/module entrypoints:
+      - seed_mvp_universe() for idempotent instrument/universe/roll seeding
+      - one historical ingest entrypoint for raw/canonical bar population
+      - one readiness/data-quality check entrypoint
+
+  ## Test Plan
+
+  - Unit tests
+      - universe seeding is idempotent
+      - ingest command stores expected raw/canonical bars
+      - backtest adapter converts BacktestResult into valid VariantResult
+      - pilot sign-off gate blocks until approval exists
+      - research DB health visible in status surfaces
+      - archive/chain viewer shows sign-off state
+      - research cutover + operator actions work through the ASGI test harness
+  - Manual acceptance
+      - one successful Engine A historical run
+      - three Engine B real/manual events covering reject, test, and pilot
+      - one approved pilot and one rejected pilot visible in UI
+
+  ## Assumptions and Defaults
+
+  - Replit PostgreSQL provisioning is a user prerequisite and blocks the operational part of this phase.
+  - Near-term market-data validation will use ETF proxies where futures coverage is weak; this is acceptable for proving the pipeline, not for final futures production
+• Model changed to gpt-5.4 xhigh for Default mode.

@@ -9,6 +9,7 @@ fastapi>=0.116.0
 uvicorn>=0.35.0
 jinja2>=3.1.4
 python-multipart>=0.0.9
+psycopg2-binary>=2.9.11
 pytest>=8.4.0
 httpx>=0.28.0
 fastapi
@@ -16,6 +17,7 @@ httpx
 jinja2
 numpy
 pandas
+psycopg2-binary
 pytest
 python-dotenv
 python-multipart

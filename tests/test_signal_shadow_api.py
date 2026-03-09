@@ -5,8 +5,6 @@ from __future__ import annotations
 import os
 import sys
 
-from fastapi.testclient import TestClient
-
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.api import server
@@ -16,6 +14,7 @@ from app.signal.types import LayerId
 from data import trade_db
 from intelligence.event_store import EventRecord, EventStore
 from intelligence.jobs import signal_layer_jobs
+from tests.asgi_client import ASGITestClient
 
 
 class ImmediateThread:
@@ -104,7 +103,7 @@ def test_api_signal_shadow_snapshot_route(monkeypatch):
     }
     monkeypatch.setattr(server, "get_signal_shadow_report", lambda: payload)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/signal-shadow")
 
     assert response.status_code == 200
@@ -127,7 +126,7 @@ def test_signal_shadow_action_persists_job_lifecycle(tmp_path, monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post("/api/actions/signal-shadow-run")
 
     assert response.status_code == 200
@@ -158,7 +157,7 @@ def test_signal_tier1_action_persists_job_lifecycle(tmp_path, monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.post("/api/actions/signal-tier1-run")
 
     assert response.status_code == 200
@@ -196,6 +195,8 @@ def test_api_signal_shadow_enriches_with_rankings(monkeypatch):
                         "weighted_score": 78.0,
                         "layer_count": 8,
                         "missing_required_layers": [],
+                        "vetoes": ["research_blocking_objections"],
+                        "layer_scores": {"l9_research": 35.0},
                         "freshness": {"warning_layers": [], "stale_layers": []},
                         "notes": ["quality_penalty_pct=0.0"],
                     }
@@ -204,14 +205,16 @@ def test_api_signal_shadow_enriches_with_rankings(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/signal-shadow")
 
     assert response.status_code == 200
     body = response.json()
     assert body["has_report"] is True
     assert body["report"]["ranked_candidates"][0]["ticker"] == "AAPL"
+    assert body["report"]["ranked_candidates"][0]["research_layer_score"] == 35.0
     assert body["freshness_diagnostics"]["tickers_with_stale"] == 0
+    assert body["research_overlay_diagnostics"]["tickers_with_research_layer"] == 1
 
 
 def test_signal_engine_fragment_renders(monkeypatch):
@@ -243,6 +246,8 @@ def test_signal_engine_fragment_renders(monkeypatch):
                         "action": "auto_execute_buy",
                         "layer_count": 2,
                         "missing_required_layers": ["l2_insider", "l4_analyst_revisions"],
+                        "vetoes": ["research_blocking_objections"],
+                        "layer_scores": {"l9_research": 35.0},
                     }
                 ],
                 "ranked_candidates": [
@@ -261,7 +266,7 @@ def test_signal_engine_fragment_renders(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/fragments/signal-engine")
 
     assert response.status_code == 200
@@ -271,6 +276,9 @@ def test_signal_engine_fragment_renders(monkeypatch):
     assert "auto_execute_buy" in response.text
     assert "Ranked Candidates" in response.text
     assert "Freshness diagnostics" in response.text
+    assert "Research overlay" in response.text
+    assert "research_blocking_objections" in response.text
+    assert "35.00" in response.text
 
 
 def test_run_signal_shadow_cycle_uses_latest_layer_events(tmp_path, monkeypatch):

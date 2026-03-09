@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime
 from typing import Any, Optional, Type
 
 from app.signal.ai_confidence import AIConfidenceGateConfig, ExecutionQualitySnapshot
@@ -36,6 +35,7 @@ from data.trade_db import DB_PATH, get_conn
 from execution.policy.capability_policy import StrategyRequirements
 from execution.signal_adapter import StrategySlotConfig
 from strategies.base import BaseStrategy
+from utils.datetime_utils import utc_now_naive_iso
 
 logger = logging.getLogger(__name__)
 
@@ -376,12 +376,12 @@ def dispatch_orchestration(
         )
         return OrchestrationResult(
             run_id="empty",
-            run_at=datetime.utcnow().isoformat(),
+            run_at=utc_now_naive_iso(),
         )
 
     # Resolve equity: explicit override > DB lookup > 0 (risk gate skipped)
     resolved_equity = equity if equity is not None else _get_fund_equity(db_path)
-    as_of = datetime.utcnow().isoformat()
+    as_of = utc_now_naive_iso()
 
     resolved_ai_consensus = ai_consensus_by_ticker
     if resolved_ai_consensus is None and ai_panel_enabled:

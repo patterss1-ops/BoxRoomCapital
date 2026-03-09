@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from fastapi.testclient import TestClient
+from tests.asgi_client import ASGITestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -21,7 +21,7 @@ def test_api_broker_health_endpoint_uses_builder(monkeypatch):
     }
     monkeypatch.setattr(server, "build_broker_health_payload", lambda: expected)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/api/broker-health")
 
     assert response.status_code == 200
@@ -50,7 +50,7 @@ def test_order_intents_api_and_detail_routes(monkeypatch):
     monkeypatch.setattr(server, "get_order_intent_items", lambda limit=50, status="": items)
     monkeypatch.setattr(server, "get_order_intent_detail", lambda intent_id: detail if intent_id == "intent-1" else None)
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         list_response = client.get("/api/order-intents")
         assert list_response.status_code == 200
         assert list_response.json()["items"][0]["intent_id"] == "intent-1"
@@ -148,7 +148,7 @@ def test_fragments_render_broker_health_and_intent_audit(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         broker_fragment = client.get("/fragments/broker-health")
         assert broker_fragment.status_code == 200
         assert "Broker Health" in broker_fragment.text
@@ -205,7 +205,7 @@ def test_ledger_fragment_renders_snapshot_and_reconcile(monkeypatch):
         },
     )
 
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         response = client.get("/fragments/ledger")
 
     assert response.status_code == 200
@@ -214,7 +214,7 @@ def test_ledger_fragment_renders_snapshot_and_reconcile(monkeypatch):
 
 
 def test_overview_and_trading_pages_include_ledger_panel():
-    with TestClient(server.app) as client:
+    with ASGITestClient(server.app) as client:
         overview = client.get("/overview")
         trading = client.get("/trading")
 

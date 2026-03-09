@@ -6,7 +6,7 @@ configurable soak period and stale-set detection.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -16,6 +16,7 @@ from data.trade_db import (
     get_strategy_promotions,
 )
 import config
+from research.artifacts import ArtifactType, Engine, ProgressionStage, PromotionOutcome
 from utils.datetime_utils import parse_iso_utc
 
 
@@ -212,6 +213,18 @@ class PromotionGateDecision:
     live_set_id: Optional[str] = None
     live_version: Optional[int] = None
     soak_remaining_hours: Optional[float] = None
+    outcome: PromotionOutcome = PromotionOutcome.PROMOTE
+    artifact_refs: list[str] = field(default_factory=list)
+    blocking_objections: list[str] = field(default_factory=list)
+    research_stage: Optional[str] = None
+    requires_human_signoff: bool = False
+
+    def __post_init__(self) -> None:
+        if isinstance(self.outcome, str):
+            self.outcome = PromotionOutcome(self.outcome)
+        if self.outcome == PromotionOutcome.PROMOTE and not self.allowed:
+            self.outcome = PromotionOutcome.REJECT
+        self.allowed = self.outcome == PromotionOutcome.PROMOTE
 
 
 def evaluate_promotion_gate(
@@ -247,6 +260,7 @@ def evaluate_promotion_gate(
             reason_code="EXIT_BYPASS",
             message="Exits bypass promotion gate.",
             strategy_key=clean_strategy,
+            outcome=PromotionOutcome.PROMOTE,
         )
 
     # Gate disabled — pass through
@@ -256,6 +270,7 @@ def evaluate_promotion_gate(
             reason_code="GATE_DISABLED",
             message="Promotion gate is disabled.",
             strategy_key=clean_strategy,
+            outcome=PromotionOutcome.PROMOTE,
         )
 
     # Check for active live set
@@ -270,6 +285,7 @@ def evaluate_promotion_gate(
             message=f"Strategy '{clean_strategy}' has no active live-lane parameter set. "
                     "Complete the promotion pipeline (shadow → staged → live) first.",
             strategy_key=clean_strategy,
+            outcome=PromotionOutcome.REJECT,
         )
 
     if not live:
@@ -279,6 +295,7 @@ def evaluate_promotion_gate(
             reason_code="LIVE_NOT_REQUIRED",
             message="Live set not required by config.",
             strategy_key=clean_strategy,
+            outcome=PromotionOutcome.PROMOTE,
         )
 
     live_set_id = live.get("id")
@@ -312,6 +329,7 @@ def evaluate_promotion_gate(
                 live_set_id=live_set_id,
                 live_version=live_version,
                 soak_remaining_hours=round(remaining, 2),
+                outcome=PromotionOutcome.PARK,
             )
 
     # Stale set check
@@ -326,6 +344,7 @@ def evaluate_promotion_gate(
                 strategy_key=clean_strategy,
                 live_set_id=live_set_id,
                 live_version=live_version,
+                outcome=PromotionOutcome.REVISE,
             )
 
     # All checks passed
@@ -336,4 +355,153 @@ def evaluate_promotion_gate(
         strategy_key=clean_strategy,
         live_set_id=live_set_id,
         live_version=live_version,
+        outcome=PromotionOutcome.PROMOTE,
     )
+
+
+def evaluate_with_artifacts(
+    strategy_key: str,
+    artifact_store: Any,
+    chain_id: Optional[str] = None,
+    is_exit: bool = False,
+    config: Optional[PromotionGateConfig] = None,
+    now_utc: Optional[datetime] = None,
+    db_path: str = DB_PATH,
+) -> PromotionGateDecision:
+    """Combine live-lane gate checks with artifact-driven promotion outcomes."""
+    base_decision = evaluate_promotion_gate(
+        strategy_key=strategy_key,
+        is_exit=is_exit,
+        config=config,
+        now_utc=now_utc,
+        db_path=db_path,
+    )
+    if not base_decision.allowed:
+        return base_decision
+
+    active_reviews = artifact_store.query(
+        artifact_type=ArtifactType.REVIEW_TRIGGER,
+        engine=Engine.ENGINE_B,
+        ticker=strategy_key,
+        limit=20,
+    )
+    pending_reviews = [artifact for artifact in active_reviews if not artifact.body.get("operator_ack", False)]
+    if pending_reviews:
+        return PromotionGateDecision(
+            allowed=False,
+            reason_code="DECAY_REVIEW_PENDING",
+            message=f"Decay review pending operator acknowledgement: {pending_reviews[0].body.get('flags', [])}",
+            strategy_key=strategy_key,
+            live_set_id=base_decision.live_set_id,
+            live_version=base_decision.live_version,
+            soak_remaining_hours=base_decision.soak_remaining_hours,
+            outcome=PromotionOutcome.PARK,
+            artifact_refs=[artifact.artifact_id for artifact in pending_reviews if artifact.artifact_id],
+        )
+
+    if chain_id is None:
+        return base_decision
+
+    chain = artifact_store.get_chain(chain_id)
+    if not chain:
+        return base_decision
+
+    artifact_refs = [artifact.artifact_id for artifact in chain if artifact.artifact_id]
+    latest_scoring = next(
+        (artifact for artifact in reversed(chain) if str(artifact.artifact_type) == "ArtifactType.SCORING_RESULT" or getattr(artifact.artifact_type, "value", None) == "scoring_result"),
+        None,
+    )
+    latest_falsification = next(
+        (artifact for artifact in reversed(chain) if str(artifact.artifact_type) == "ArtifactType.FALSIFICATION_MEMO" or getattr(artifact.artifact_type, "value", None) == "falsification_memo"),
+        None,
+    )
+    latest_trade_sheet = next(
+        (artifact for artifact in reversed(chain) if str(artifact.artifact_type) == "ArtifactType.TRADE_SHEET" or getattr(artifact.artifact_type, "value", None) == "trade_sheet"),
+        None,
+    )
+
+    blocking_objections: list[str] = []
+    if latest_scoring:
+        blocking_objections = list(latest_scoring.body.get("blocking_objections", []))
+        outcome = PromotionOutcome(latest_scoring.body.get("outcome", PromotionOutcome.PROMOTE.value))
+        next_stage_text = str(latest_scoring.body.get("next_stage") or "").strip().lower()
+        if outcome == PromotionOutcome.PROMOTE and next_stage_text:
+            try:
+                next_stage = ProgressionStage(next_stage_text)
+            except ValueError:
+                next_stage = None
+            if next_stage == ProgressionStage.TEST:
+                return PromotionGateDecision(
+                    allowed=False,
+                    reason_code="ARTIFACT_STAGE_TEST_PENDING",
+                    message="Artifact chain is test-ready but has not advanced beyond the research sandbox.",
+                    strategy_key=strategy_key,
+                    live_set_id=base_decision.live_set_id,
+                    live_version=base_decision.live_version,
+                    soak_remaining_hours=base_decision.soak_remaining_hours,
+                    outcome=PromotionOutcome.REVISE,
+                    artifact_refs=artifact_refs,
+                    blocking_objections=blocking_objections,
+                    research_stage=next_stage.value,
+                )
+            if next_stage == ProgressionStage.EXPERIMENT:
+                return PromotionGateDecision(
+                    allowed=False,
+                    reason_code="ARTIFACT_STAGE_EXPERIMENT_PENDING",
+                    message="Artifact chain is experiment-ready but not yet pilot-ready for live capital.",
+                    strategy_key=strategy_key,
+                    live_set_id=base_decision.live_set_id,
+                    live_version=base_decision.live_version,
+                    soak_remaining_hours=base_decision.soak_remaining_hours,
+                    outcome=PromotionOutcome.REVISE,
+                    artifact_refs=artifact_refs,
+                    blocking_objections=blocking_objections,
+                    research_stage=next_stage.value,
+                )
+            if next_stage == ProgressionStage.PILOT and latest_trade_sheet is None:
+                return PromotionGateDecision(
+                    allowed=False,
+                    reason_code="ARTIFACT_PILOT_CHAIN_INCOMPLETE",
+                    message="Artifact chain targets pilot but does not yet include a TradeSheet.",
+                    strategy_key=strategy_key,
+                    live_set_id=base_decision.live_set_id,
+                    live_version=base_decision.live_version,
+                    soak_remaining_hours=base_decision.soak_remaining_hours,
+                    outcome=PromotionOutcome.REVISE,
+                    artifact_refs=artifact_refs,
+                    blocking_objections=blocking_objections,
+                    research_stage=next_stage.value,
+                )
+        return PromotionGateDecision(
+            allowed=outcome == PromotionOutcome.PROMOTE,
+            reason_code=f"ARTIFACT_{outcome.value.upper()}",
+            message=f"Artifact chain evaluated to {outcome.value}.",
+            strategy_key=strategy_key,
+            live_set_id=base_decision.live_set_id,
+            live_version=base_decision.live_version,
+            soak_remaining_hours=base_decision.soak_remaining_hours,
+            outcome=outcome,
+            artifact_refs=artifact_refs,
+            blocking_objections=blocking_objections,
+            research_stage=next_stage_text or None,
+            requires_human_signoff=(next_stage_text == ProgressionStage.PILOT.value and latest_trade_sheet is not None),
+        )
+
+    if latest_falsification:
+        blocking_objections = list(latest_falsification.body.get("unresolved_objections", []))
+        if blocking_objections:
+            return PromotionGateDecision(
+                allowed=False,
+                reason_code="ARTIFACT_UNRESOLVED_OBJECTIONS",
+                message="Artifact chain has unresolved objections.",
+                strategy_key=strategy_key,
+                live_set_id=base_decision.live_set_id,
+                live_version=base_decision.live_version,
+                soak_remaining_hours=base_decision.soak_remaining_hours,
+                outcome=PromotionOutcome.REVISE,
+                artifact_refs=artifact_refs,
+                blocking_objections=blocking_objections,
+            )
+
+    base_decision.artifact_refs = artifact_refs
+    return base_decision

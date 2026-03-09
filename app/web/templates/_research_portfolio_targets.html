@@ -1,0 +1,42 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-800">Portfolio Targets</h2>
+      <p class="text-gray-400 text-sm">Current versus target Engine A positions.</p>
+    </div>
+    {% if created_at %}
+      <p class="text-xs text-gray-400 font-mono">{{ created_at }}</p>
+    {% endif %}
+  </div>
+  {% if error %}
+    <p class="text-sm text-amber-600">{{ error }}</p>
+  {% elif rows %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Instrument</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Current</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Target</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Delta</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.instrument }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.current_position) }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.target_position) }}</td>
+              <td class="px-2 py-2 border-b border-gray-200 {% if row.delta > 0 %}text-emerald-600{% elif row.delta < 0 %}text-red-600{% else %}text-gray-600{% endif %}">
+                {{ "%.2f"|format(row.delta) }}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-gray-400">No target positions available.</p>
+  {% endif %}
+  <p class="mt-3 text-xs text-gray-400 font-mono">{{ generated_at }}</p>
+</section>

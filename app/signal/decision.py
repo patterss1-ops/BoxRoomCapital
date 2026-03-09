@@ -56,6 +56,8 @@ class VetoPolicy:
         "risk_hard_stop",
         "kill_switch_active",
         "account_router_reject",
+        "research_blocking_objections",
+        "research_rejected",
     )
     force_short_vetoes: Tuple[str, ...] = ()
 

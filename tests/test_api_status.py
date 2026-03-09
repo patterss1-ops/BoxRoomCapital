@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
+from tests.asgi_client import ASGITestClient
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -36,7 +36,7 @@ def _stub_status(monkeypatch):
 
 class TestHealthEndpoint:
     def test_health_returns_ok(self):
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/health")
         assert resp.status_code == 200
         assert resp.json() == {"status": "ok"}
@@ -45,7 +45,7 @@ class TestHealthEndpoint:
 class TestApiStatus:
     def test_api_status_returns_payload(self, monkeypatch):
         _stub_status(monkeypatch)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/status")
         assert resp.status_code == 200
         body = resp.json()
@@ -55,7 +55,7 @@ class TestApiStatus:
 
     def test_api_status_engine_fields(self, monkeypatch):
         _stub_status(monkeypatch)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/status")
         engine = resp.json()["engine"]
         assert engine["running"] is False
@@ -69,7 +69,7 @@ class TestApiHealth:
             "build_api_health_payload",
             lambda: {"status": "healthy", "uptime": 123},
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/health")
         assert resp.status_code == 200
         assert resp.json()["status"] == "healthy"
@@ -86,7 +86,7 @@ class TestEquityCurve:
                 {"report_date": "2026-01-03", "total_nav": 10200.0},
             ],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/charts/equity-curve?days=90")
         assert resp.status_code == 200
         data = resp.json()
@@ -98,7 +98,7 @@ class TestEquityCurve:
 
     def test_equity_curve_empty_data(self, monkeypatch):
         monkeypatch.setattr(server, "get_fund_daily_reports", lambda days=90: [])
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/charts/equity-curve")
         assert resp.status_code == 200
         assert resp.json() == []
@@ -113,7 +113,7 @@ class TestEquityCurve:
                 {"report_date": None, "total_nav": 10100.0},
             ],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/charts/equity-curve")
         data = resp.json()
         assert len(data) == 1
@@ -125,7 +125,7 @@ class TestEquityCurve:
             captured["days"] = days
             return []
         monkeypatch.setattr(server, "get_fund_daily_reports", fake_reports)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             client.get("/api/charts/equity-curve?days=30")
         assert captured["days"] == 30
 
@@ -138,7 +138,7 @@ class TestLogTail:
             tmp_path = Path(f.name)
         try:
             monkeypatch.setattr(server.control, "process_log", tmp_path)
-            with TestClient(server.app) as client:
+            with ASGITestClient(server.app) as client:
                 resp = client.get("/api/log-tail?lines=10")
             assert resp.status_code == 200
             body = resp.json()
@@ -149,7 +149,7 @@ class TestLogTail:
 
     def test_log_tail_missing_file(self, monkeypatch):
         monkeypatch.setattr(server.control, "process_log", Path("/nonexistent/log.log"))
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/log-tail")
         assert resp.status_code == 200
         assert resp.json()["log"] == ""
@@ -162,14 +162,14 @@ class TestApiEvents:
             "get_bot_events",
             lambda limit=50: [{"id": 1, "category": "STARTUP", "headline": "Bot started"}],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/events?limit=10")
         assert resp.status_code == 200
         assert len(resp.json()["items"]) == 1
 
     def test_events_empty(self, monkeypatch):
         monkeypatch.setattr(server, "get_bot_events", lambda limit=50: [])
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/events")
         assert resp.json()["items"] == []
 
@@ -181,7 +181,7 @@ class TestApiJobs:
             "get_jobs",
             lambda limit=50: [{"id": "j1", "job_type": "start_bot", "status": "completed"}],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/jobs?limit=5")
         assert resp.status_code == 200
         assert resp.json()["items"][0]["id"] == "j1"
@@ -192,14 +192,14 @@ class TestApiJobs:
             "get_job",
             lambda job_id: {"id": job_id, "status": "completed"},
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/jobs/j1")
         assert resp.status_code == 200
         assert resp.json()["item"]["id"] == "j1"
 
     def test_job_detail_not_found(self, monkeypatch):
         monkeypatch.setattr(server, "get_job", lambda job_id: None)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/jobs/nonexistent")
         assert resp.status_code == 404
         assert resp.json()["error"] == "job_not_found"
@@ -212,7 +212,7 @@ class TestApiIncidents:
             "get_incidents",
             lambda limit=50: [{"id": 1, "severity": "warn", "message": "spike"}],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/incidents?limit=10")
         assert resp.status_code == 200
         assert len(resp.json()["items"]) == 1
@@ -238,7 +238,7 @@ class TestApiIncidents:
                 },
             ],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/incidents?limit=10")
         assert resp.status_code == 200
         items = resp.json()["items"]
@@ -269,7 +269,7 @@ class TestTopStrip:
                 },
             ],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/fragments/top-strip")
         assert resp.status_code == 200
         assert "Startup recovery left unresolved actions" in resp.text
@@ -283,7 +283,7 @@ class TestApiControlActions:
             "get_control_actions",
             lambda limit=50: [{"action": "kill_switch", "value": "on"}],
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/control-actions?limit=5")
         assert resp.status_code == 200
         assert resp.json()["items"][0]["action"] == "kill_switch"
@@ -296,7 +296,7 @@ class TestApiReconcileReport:
             "reconcile_report",
             lambda: {"report": {"ok": True, "mismatches": 0}},
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/reconcile-report")
         assert resp.status_code == 200
 
@@ -308,7 +308,7 @@ class TestApiRiskBriefing:
             "build_risk_briefing_payload",
             lambda: {"ok": True, "state": "ok", "summary": {}, "limits": [], "alerts": []},
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/risk/briefing")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -318,7 +318,7 @@ class TestApiSignalShadow:
     def test_signal_shadow_returns_data(self, monkeypatch):
         monkeypatch.setattr(server, "get_signal_shadow_report", lambda: {"tickers": []})
         monkeypatch.setattr(server, "enrich_signal_shadow_payload", lambda report: {"enriched": True, **report})
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/signal-shadow")
         assert resp.status_code == 200
         assert resp.json()["enriched"] is True
@@ -331,7 +331,7 @@ class TestApiExecutionQuality:
             "get_execution_quality_payload",
             lambda days=30: {"fills": 10, "slippage_avg": 0.02},
         )
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/api/execution-quality?days=7")
         assert resp.status_code == 200
         assert resp.json()["fills"] == 10
@@ -340,25 +340,25 @@ class TestApiExecutionQuality:
 class TestPages:
     def test_overview_page_renders(self, monkeypatch):
         _stub_status(monkeypatch)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/overview")
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
 
     def test_root_renders_overview(self, monkeypatch):
         _stub_status(monkeypatch)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/")
         assert resp.status_code == 200
 
     def test_trading_page_renders(self, monkeypatch):
         _stub_status(monkeypatch)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/trading")
         assert resp.status_code == 200
 
     def test_settings_page_renders(self, monkeypatch):
         _stub_status(monkeypatch)
-        with TestClient(server.app) as client:
+        with ASGITestClient(server.app) as client:
             resp = client.get("/settings")
         assert resp.status_code == 200

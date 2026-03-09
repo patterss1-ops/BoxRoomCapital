@@ -6,9 +6,24 @@ from datetime import datetime, timezone
 from typing import Optional
 
 
+def utc_now() -> datetime:
+    """Return the current UTC time as a timezone-aware datetime."""
+    return datetime.now(timezone.utc)
+
+
+def utc_now_naive() -> datetime:
+    """Return the current UTC time as a naive datetime for legacy storage paths."""
+    return utc_now().replace(tzinfo=None)
+
+
+def utc_now_naive_iso() -> str:
+    """Return current UTC time as a naive ISO-8601 string."""
+    return utc_now_naive().isoformat()
+
+
 def utc_now_iso() -> str:
     """Return current UTC time as a compact ISO-8601 string (no microseconds)."""
-    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return utc_now().replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def parse_iso_utc(raw: Optional[str]) -> Optional[datetime]:

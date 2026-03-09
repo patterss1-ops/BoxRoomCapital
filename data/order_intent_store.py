@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from data.trade_db import DB_PATH, create_order_action, get_conn, update_order_action
 from execution.order_intent import OrderIntent, OrderIntentStatus, normalize_actor, normalize_status
-from utils.datetime_utils import parse_iso_utc
+from utils.datetime_utils import parse_iso_utc, utc_now_naive, utc_now_naive_iso
 
 
 _TRANSITION_RULES: dict[OrderIntentStatus, set[OrderIntentStatus]] = {
@@ -56,7 +56,7 @@ def _json_load(value: Optional[str]) -> Any:
 
 
 def _utc_now() -> str:
-    return datetime.utcnow().isoformat()
+    return utc_now_naive_iso()
 
 
 _REFERENCE_PRICE_KEYS: tuple[str, ...] = (
@@ -119,7 +119,7 @@ def _compute_latency_ms(dispatch_at: Optional[str], broker_timestamp: Optional[s
 
 
 def _default_correlation_id(action_type: str, instrument: str) -> str:
-    stamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    stamp = utc_now_naive().strftime("%Y%m%d%H%M%S")
     return f"{action_type}:{instrument}:{stamp}:{uuid.uuid4().hex[:8]}"
 
 

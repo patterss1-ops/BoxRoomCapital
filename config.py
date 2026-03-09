@@ -68,6 +68,13 @@ def _env_float(
         value = min(max_value, value)
     return value
 
+
+def _env_str(name: str, default: str = "") -> str:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip() or default
+
 # ─── BROKER CONFIG ───────────────────────────────────────────────────────────
 
 BROKER_MODE = _runtime_overrides.get("broker_mode", os.getenv("BROKER_MODE", "paper"))
@@ -78,6 +85,12 @@ IG_PASSWORD = os.getenv("IG_PASSWORD", "")
 IG_API_KEY = os.getenv("IG_API_KEY", "")
 IG_ACC_TYPE = os.getenv("IG_ACC_TYPE", "DEMO")  # "DEMO" or "LIVE"
 IG_ACC_NUMBER = os.getenv("IG_ACC_NUMBER", "")   # Your spread bet account number
+
+# PostgreSQL research database
+RESEARCH_DB_DSN = _env_str(
+    "RESEARCH_DB_DSN",
+    "postgresql://localhost:5432/boxroom_research",
+)
 
 # ─── MARKET MAPPING ──────────────────────────────────────────────────────────
 # yfinance ticker → IG EPIC code for spread betting
@@ -685,12 +698,124 @@ IDEA_DYNAMIC_BT_WF_STATUS = os.getenv("IDEA_DYNAMIC_BT_WF_STATUS", "marginal")
 COUNCIL_MODEL_TIMEOUT = _runtime_overrides.get("council_model_timeout", _env_int("COUNCIL_MODEL_TIMEOUT", 90, min_value=15, max_value=300))
 COUNCIL_ROUND_TIMEOUT = _runtime_overrides.get("council_round_timeout", _env_int("COUNCIL_ROUND_TIMEOUT", 100, min_value=20, max_value=600))
 
+RESEARCH_MODEL_CONFIG = {
+    "signal_extraction": {
+        "provider": "anthropic",
+        "model_id": "claude-opus-4-6",
+        "timeout_s": 120.0,
+        "max_retries": 2,
+        "backoff_s": 1.0,
+        "thinking": True,
+        "thinking_budget": 10000,
+        "temperature": 1.0,
+        "max_tokens": 16000,
+        "prompt_version": "v1",
+        "fallback": "signal_extraction_fallback",
+    },
+    "signal_extraction_fallback": {
+        "provider": "openai",
+        "model_id": "gpt-5.4",
+        "timeout_s": 120.0,
+        "max_retries": 1,
+        "backoff_s": 1.0,
+        "temperature": 0.2,
+        "max_tokens": 16000,
+        "prompt_version": "v1",
+    },
+    "hypothesis_formation": {
+        "provider": "anthropic",
+        "model_id": "claude-opus-4-6",
+        "timeout_s": 120.0,
+        "max_retries": 2,
+        "backoff_s": 1.0,
+        "thinking": True,
+        "thinking_budget": 10000,
+        "temperature": 1.0,
+        "max_tokens": 16000,
+        "prompt_version": "v1",
+        "fallback": "hypothesis_formation_fallback",
+    },
+    "hypothesis_formation_fallback": {
+        "provider": "openai",
+        "model_id": "gpt-5.4",
+        "timeout_s": 120.0,
+        "max_retries": 1,
+        "backoff_s": 1.0,
+        "temperature": 0.2,
+        "max_tokens": 16000,
+        "prompt_version": "v1",
+    },
+    "hypothesis_challenge": {
+        "provider": "openai",
+        "model_id": "gpt-5.4",
+        "timeout_s": 120.0,
+        "max_retries": 2,
+        "backoff_s": 1.0,
+        "temperature": 0.2,
+        "max_tokens": 16000,
+        "prompt_version": "v1_challenge",
+        "fallback": "hypothesis_challenge_fallback",
+    },
+    "hypothesis_challenge_fallback": {
+        "provider": "xai",
+        "model_id": "grok-3",
+        "timeout_s": 120.0,
+        "max_retries": 1,
+        "backoff_s": 1.0,
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "prompt_version": "v1_challenge",
+    },
+    "post_mortem": {
+        "provider": "google",
+        "model_id": "gemini-2.5-pro",
+        "timeout_s": 120.0,
+        "max_retries": 1,
+        "backoff_s": 1.0,
+        "thinking": True,
+        "thinking_budget": 8000,
+        "temperature": 0.2,
+        "max_tokens": 8192,
+        "prompt_version": "v1",
+    },
+    "research_synthesis": {
+        "provider": "openai",
+        "model_id": "gpt-5.4",
+        "timeout_s": 90.0,
+        "max_retries": 1,
+        "backoff_s": 1.0,
+        "temperature": 0.2,
+        "max_tokens": 4096,
+        "prompt_version": "v1",
+    },
+    "regime_journal": {
+        "provider": "google",
+        "model_id": "gemini-2.5-pro",
+        "timeout_s": 60.0,
+        "max_retries": 1,
+        "backoff_s": 1.0,
+        "thinking": False,
+        "temperature": 0.2,
+        "max_tokens": 2048,
+        "prompt_version": "v1",
+    },
+}
+
 # ─── PIPELINE & ORCHESTRATOR ─────────────────────────────────────────────────
 
 ORCHESTRATOR_ENABLED = _env_bool("ORCHESTRATOR_ENABLED", False)
 ORCHESTRATOR_DRY_RUN = _env_bool("ORCHESTRATOR_DRY_RUN", True)
 AI_PANEL_ENABLED = _env_bool("AI_PANEL_ENABLED", False)
 DISPATCHER_ENABLED = _env_bool("DISPATCHER_ENABLED", False)
+ENGINE_A_ENABLED = _env_bool("ENGINE_A_ENABLED", False)
+ENGINE_B_ENABLED = _env_bool("ENGINE_B_ENABLED", False)
+RESEARCH_SYSTEM_ACTIVE = _env_bool("RESEARCH_SYSTEM_ACTIVE", False)
+ENGINE_A_INTERVAL_SECONDS = _env_int(
+    "ENGINE_A_INTERVAL_SECONDS", 300, min_value=5, max_value=86400
+)
+ENGINE_A_CAPITAL_BASE = _env_float(
+    "ENGINE_A_CAPITAL_BASE", 100000.0, min_value=1000.0, max_value=100000000.0
+)
 DISPATCHER_INTERVAL_SECONDS = _env_int(
     "DISPATCHER_INTERVAL_SECONDS", 60, min_value=10, max_value=600
 )

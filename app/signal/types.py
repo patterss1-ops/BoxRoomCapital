@@ -18,6 +18,7 @@ class LayerId(str, Enum):
     L6_NEWS_SENTIMENT = "l6_news_sentiment"
     L7_TECHNICAL = "l7_technical"
     L8_SA_QUANT = "l8_sa_quant"
+    L9_RESEARCH = "l9_research"
 
 
 LAYER_ORDER: Tuple[LayerId, ...] = (
@@ -29,6 +30,7 @@ LAYER_ORDER: Tuple[LayerId, ...] = (
     LayerId.L6_NEWS_SENTIMENT,
     LayerId.L7_TECHNICAL,
     LayerId.L8_SA_QUANT,
+    LayerId.L9_RESEARCH,
 )
 
 
@@ -58,13 +60,13 @@ class ScoreThresholds:
 
 
 DEFAULT_LAYER_WEIGHTS: Dict[LayerId, float] = {
-    LayerId.L1_PEAD: 0.22,
-    LayerId.L2_INSIDER: 0.18,
-    LayerId.L3_SHORT_INTEREST: 0.13,
-    LayerId.L4_ANALYST_REVISIONS: 0.13,
-    LayerId.L5_CONGRESSIONAL: 0.09,
-    LayerId.L6_NEWS_SENTIMENT: 0.10,
+    LayerId.L1_PEAD: 0.20,
+    LayerId.L2_INSIDER: 0.16,
+    LayerId.L3_SHORT_INTEREST: 0.12,
+    LayerId.L4_ANALYST_REVISIONS: 0.12,
+    LayerId.L5_CONGRESSIONAL: 0.08,
+    LayerId.L6_NEWS_SENTIMENT: 0.09,
     LayerId.L7_TECHNICAL: 0.05,
     LayerId.L8_SA_QUANT: 0.10,
+    LayerId.L9_RESEARCH: 0.08,
 }
-

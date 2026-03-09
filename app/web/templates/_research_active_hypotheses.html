@@ -1,0 +1,48 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <h2 class="text-lg font-semibold text-gray-800">Active Hypotheses</h2>
+    <p class="text-gray-400 text-sm">Engine B chains still in flight.</p>
+  </div>
+  {% if error %}
+    <p class="text-sm text-amber-600 mb-3">{{ error }}</p>
+  {% endif %}
+  {% if rows %}
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm text-left">
+        <thead>
+          <tr>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Ticker</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Edge</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Stage</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Outcome</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Score</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Updated</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">View</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono">{{ row.ticker }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.edge_family }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.stage }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ row.outcome or "-" }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.1f"|format(row.score) if row.score is not none else "-" }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200 font-mono text-xs">{{ row.updated_at }}</td>
+              <td class="text-gray-700 px-2 py-2 border-b border-gray-200">
+                <button
+                  class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+                  hx-get="/fragments/research/artifact-chain/{{ row.chain_id }}"
+                  hx-target="#research-artifact-chain-viewer"
+                  hx-swap="innerHTML"
+                >View chain</button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="text-sm text-gray-400">No active hypotheses yet.</p>
+  {% endif %}
+</section>

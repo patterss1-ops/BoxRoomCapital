@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 import re as _re
 
 
-from fastapi import FastAPI, Form, Request
+from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,8 +38,10 @@ from analytics.portfolio_analytics import (
 from fund.promotion_gate import build_promotion_gate_report, validate_lane_transition
 from fund.nav import calculate_fund_nav
 from intelligence.jobs.signal_layer_jobs import (
+    build_ranked_candidates,
     enrich_signal_shadow_payload,
     run_tier1_shadow_jobs,
+    summarize_research_overlay,
 )
 from data.trade_db import (
     DB_PATH,
@@ -100,6 +102,16 @@ from fund.execution_quality import get_execution_quality_payload
 from fund.promotion_gate import PromotionGateConfig, evaluate_promotion_gate
 from app.metrics import build_api_health_payload, build_prometheus_metrics_payload
 from broker.ig import IGBroker
+from research.artifact_store import ArtifactStore
+from research.artifacts import ArtifactEnvelope, ArtifactType, Engine, PromotionOutcome
+from research.dashboard import ResearchDashboardService
+from research.engine_b.source_scoring import SourceScoringService
+from research.model_router import ModelRouter
+from research.shared.decay_review import DecayReviewService
+from research.shared.kill_monitor import KillMonitor
+from research.shared.post_mortem import PostMortemService
+from research.shared.synthesis import SynthesisService
+from research.runtime import build_engine_a_pipeline, build_engine_b_pipeline
 from intelligence.event_store import EventRecord, EventStore, compute_event_id
 from intelligence.feature_store import FeatureStore
 from risk.pre_trade_gate import RiskContext, RiskLimits, RiskOrderRequest, evaluate_pre_trade_risk
@@ -123,6 +135,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TEMPLATES = Jinja2Templates(directory=str(PROJECT_ROOT / "app" / "web" / "templates"))
 control = BotControlService(PROJECT_ROOT)
 research = ResearchService(PROJECT_ROOT)
+research_dashboard = ResearchDashboardService()
+control.configure_research_services(
+    engine_a_factory=lambda: build_engine_a_pipeline(),
+    engine_b_factory=lambda: build_engine_b_pipeline(),
+    decay_review_factory=lambda: DecayReviewService(artifact_store=ArtifactStore()),
+    kill_monitor_factory=lambda: KillMonitor(artifact_store=ArtifactStore()),
+)
 logger = logging.getLogger(__name__)
 
 _TRADINGVIEW_RISK_LIMITS = RiskLimits(
@@ -145,9 +164,20 @@ _PORTFOLIO_ANALYTICS_CACHE_TTL_SECONDS = 30.0
 _RESEARCH_CACHE_TTL_SECONDS = 15.0
 _LEDGER_CACHE_TTL_SECONDS = 15.0
 _EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
+_RESEARCH_FRAGMENT_CACHE_KEYS = (
+    "research-pipeline-funnel",
+    "research-active-hypotheses",
+    "research-recent-decisions",
+    "research-alerts",
+    "research-engine-status",
+)
 _FRAGMENT_CACHE: dict[str, dict[str, Any]] = {}
 _FRAGMENT_CACHE_LOCK = threading.Lock()
 _FRAGMENT_CACHE_REFRESH_LOCKS: dict[str, threading.Lock] = {}
+_ENGINE_B_SOURCE_SCORING = SourceScoringService()
+_RESEARCH_SYNTHESIS_EVENT_TYPE = "research_synthesis"
+_RESEARCH_OPERATOR_SOURCE = "research_ui"
+_RESEARCH_ARCHIVE_VIEWS = {"all", "completed", "synthesis", "post_mortem", "retirement"}
 
 
 def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
@@ -243,6 +273,920 @@ def _get_cached_value(
     return value
 
 
+def _invalidate_cached_values(*keys: str) -> None:
+    with _FRAGMENT_CACHE_LOCK:
+        for key in keys:
+            _FRAGMENT_CACHE.pop(key, None)
+            _FRAGMENT_CACHE_REFRESH_LOCKS.pop(key, None)
+
+
+def _invalidate_research_cached_values() -> None:
+    _invalidate_cached_values(*_RESEARCH_FRAGMENT_CACHE_KEYS)
+
+
+def _build_engine_b_submission_content(submission: IntelSubmission) -> str:
+    lines: list[str] = []
+    if submission.title:
+        lines.append(f"Title: {submission.title}")
+    if submission.author:
+        lines.append(f"Author: {submission.author}")
+    if submission.tickers:
+        lines.append(f"Tickers: {', '.join(submission.tickers[:10])}")
+    if submission.url:
+        lines.append(f"URL: {submission.url}")
+    metadata = dict(submission.metadata or {})
+    for key in (
+        "sa_page_type",
+        "sa_excerpt",
+        "sa_published_at",
+        "sa_canonical_url",
+    ):
+        value = metadata.get(key)
+        if value not in (None, "", [], {}):
+            label = key.replace("sa_", "SA ").replace("_", " ").title()
+            lines.append(f"{label}: {value}")
+    if lines:
+        lines.append("")
+    lines.append(submission.content.strip())
+    return "\n".join(part for part in lines if part).strip()
+
+
+def _queue_council_analysis(submission: IntelSubmission, *, detail: str) -> str:
+    job_id = str(uuid.uuid4())
+    create_job(job_id=job_id, job_type="intel_analysis", status="queued", detail=detail)
+    analyze_intel_async(submission, job_id)
+    return job_id
+
+
+def _queue_engine_b_intake(
+    *,
+    raw_content: str,
+    source_class: str,
+    source_ids: list[str],
+    detail: str,
+    job_type: str = "engine_b_intake",
+    source_credibility: float | None = None,
+    allow_ad_hoc: bool = True,
+) -> dict[str, Any]:
+    content = raw_content.strip()
+    if not content:
+        return {"ok": False, "error": "missing_content", "detail": "Raw content is required."}
+
+    normalized_ids = [str(item).strip() for item in source_ids if str(item).strip()]
+    if not normalized_ids:
+        normalized_ids = [f"{source_class}:{uuid.uuid4().hex[:8]}"]
+
+    try:
+        credibility = (
+            max(0.0, min(1.0, float(source_credibility)))
+            if source_credibility is not None
+            else _ENGINE_B_SOURCE_SCORING.score_source(
+                source_class=source_class,
+                source_ids=normalized_ids,
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": "invalid_source_class", "detail": str(exc)}
+
+    job_id = str(uuid.uuid4())
+    create_job(job_id=job_id, job_type=job_type, status="queued", detail=detail[:500])
+
+    def _on_success(summary: dict[str, Any]) -> None:
+        update_job(job_id, status="completed", result=json.dumps(summary))
+        _invalidate_research_cached_values()
+
+    def _on_error(exc: Exception) -> None:
+        update_job(job_id, status="failed", error=str(exc))
+
+    result = control.submit_engine_b_event(
+        job_id=job_id,
+        raw_content=content,
+        source_class=source_class,
+        source_credibility=credibility,
+        source_ids=normalized_ids,
+        on_success=_on_success,
+        on_error=_on_error,
+        allow_ad_hoc=allow_ad_hoc,
+    )
+    if result.get("status") != "queued":
+        error_detail = result.get("detail") or result.get("status", "unknown")
+        update_job(job_id, status="failed", error=error_detail)
+        return {
+            "ok": False,
+            "job_id": job_id,
+            "error": "enqueue_failed",
+            "detail": error_detail,
+        }
+
+    return {
+        "ok": True,
+        "job_id": job_id,
+        "queue_depth": result.get("queue_depth", 0),
+        "source_credibility": credibility,
+    }
+
+
+def _build_sa_quant_engine_b_content(payload: dict[str, Any]) -> str:
+    ticker = str(payload.get("ticker") or "").strip().upper()
+    grades = payload.get("grades") if isinstance(payload.get("grades"), dict) else {}
+    grade_summary = ", ".join(
+        f"{key}={value}" for key, value in grades.items() if value not in (None, "", [], {})
+    )
+    lines = [f"Seeking Alpha quant snapshot for {ticker or 'unknown'}"]
+    for label, value in (
+        ("Title", payload.get("title")),
+        ("URL", payload.get("url")),
+        ("Rating", payload.get("rating")),
+        ("Quant score", payload.get("quant_score")),
+        ("Author rating", payload.get("author_rating")),
+        ("Wall St rating", payload.get("wall_st_rating")),
+        ("Captured at", payload.get("captured_at")),
+    ):
+        if value not in (None, "", [], {}):
+            lines.append(f"{label}: {value}")
+    if grade_summary:
+        lines.append(f"Factor grades: {grade_summary}")
+    return "\n".join(lines)
+
+
+def _build_finnhub_engine_b_content(payload: dict[str, Any]) -> str:
+    lines = []
+    for label, value in (
+        ("Event type", payload.get("event_type") or payload.get("type")),
+        ("Ticker", payload.get("ticker") or payload.get("symbol")),
+        ("Title", payload.get("title") or payload.get("headline")),
+        ("URL", payload.get("url")),
+        ("Published at", payload.get("published_at") or payload.get("datetime")),
+        ("Source", payload.get("source")),
+    ):
+        if value not in (None, "", [], {}):
+            lines.append(f"{label}: {value}")
+    body = str(payload.get("content") or payload.get("summary") or payload.get("text") or "").strip()
+    if body:
+        lines.extend(["", body])
+    return "\n".join(lines).strip()
+
+
+def _finnhub_source_class(payload: dict[str, Any]) -> str:
+    raw_type = str(payload.get("event_type") or payload.get("type") or "").strip().lower()
+    if "transcript" in raw_type:
+        return "transcript"
+    if "filing" in raw_type or payload.get("form") or payload.get("filing_type"):
+        return "filing"
+    if "revision" in raw_type or "estimate" in raw_type:
+        return "analyst_revision"
+    return "news_wire"
+
+
+def _artifact_body_summary_fields(artifact_type: ArtifactType) -> list[tuple[str, str]]:
+    return {
+        ArtifactType.EVENT_CARD: [
+            ("Source", "source_class"),
+            ("Materiality", "materiality"),
+            ("Sensitivity", "time_sensitivity"),
+            ("Instruments", "affected_instruments"),
+            ("Claims", "claims"),
+        ],
+        ArtifactType.HYPOTHESIS_CARD: [
+            ("Direction", "direction"),
+            ("Horizon", "horizon"),
+            ("Confidence", "confidence"),
+            ("Catalyst", "catalyst"),
+            ("Expressions", "candidate_expressions"),
+        ],
+        ArtifactType.FALSIFICATION_MEMO: [
+            ("Alternative", "cheapest_alternative"),
+            ("Unresolved", "unresolved_objections"),
+            ("Resolved", "resolved_objections"),
+            ("Crowding", "crowding_check.crowding_level"),
+            ("Challenge Model", "challenge_model"),
+        ],
+        ArtifactType.SCORING_RESULT: [
+            ("Outcome", "outcome"),
+            ("Next Stage", "next_stage"),
+            ("Final Score", "final_score"),
+            ("Raw Total", "raw_total"),
+            ("Blocking", "blocking_objections"),
+            ("Reason", "outcome_reason"),
+        ],
+        ArtifactType.REVIEW_TRIGGER: [
+            ("Strategy", "strategy_id"),
+            ("Health", "health_status"),
+            ("Recommended", "recommended_action"),
+            ("Flags", "flags"),
+            ("Ack", "operator_ack"),
+        ],
+        ArtifactType.RETIREMENT_MEMO: [
+            ("Trigger", "trigger"),
+            ("Final Status", "final_status"),
+            ("Hypothesis", "hypothesis_ref"),
+            ("Lessons", "lessons"),
+        ],
+        ArtifactType.REGIME_SNAPSHOT: [
+            ("Macro", "macro_regime"),
+            ("Vol", "vol_regime"),
+            ("Trend", "trend_regime"),
+            ("Carry", "carry_regime"),
+            ("Sizing", "sizing_factor"),
+        ],
+        ArtifactType.REGIME_JOURNAL: [
+            ("As Of", "as_of"),
+            ("Summary", "summary"),
+            ("Key Changes", "key_changes"),
+            ("Risks", "risks"),
+        ],
+        ArtifactType.TEST_SPEC: [
+            ("Budget", "search_budget"),
+            ("Datasets", "datasets"),
+            ("Metrics", "eval_metrics"),
+            ("Frozen", "frozen_at"),
+        ],
+        ArtifactType.EXPERIMENT_REPORT: [
+            ("Variants", "variants_tested"),
+            ("Net Sharpe", "net_metrics.sharpe"),
+            ("Profit Factor", "net_metrics.profit_factor"),
+            ("Caveats", "implementation_caveats"),
+        ],
+        ArtifactType.TRADE_SHEET: [
+            ("Holding", "holding_period_target"),
+            ("Instruments", "instruments"),
+            ("Entry Rules", "entry_rules"),
+            ("Kill Criteria", "kill_criteria"),
+        ],
+        ArtifactType.REBALANCE_SHEET: [
+            ("Approval", "approval_status"),
+            ("Cost", "estimated_cost"),
+            ("Targets", "target_positions"),
+            ("Deltas", "deltas"),
+        ],
+        ArtifactType.ENGINE_A_SIGNAL_SET: [
+            ("As Of", "as_of"),
+            ("Signals", "signals"),
+            ("Forecasts", "combined_forecast"),
+            ("Regime Ref", "regime_ref"),
+        ],
+        ArtifactType.EXECUTION_REPORT: [
+            ("Trades Submitted", "trades_submitted"),
+            ("Trades Filled", "trades_filled"),
+            ("Venue", "venue"),
+            ("Cost", "cost"),
+        ],
+        ArtifactType.POST_MORTEM_NOTE: [
+            ("Thesis", "thesis_assessment"),
+            ("Worked", "what_worked"),
+            ("Failed", "what_failed"),
+            ("Lessons", "lessons"),
+        ],
+    }.get(artifact_type, [])
+
+
+def _artifact_value_from_path(payload: dict[str, Any], path: str) -> Any:
+    current: Any = payload
+    for part in path.split("."):
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+    return current
+
+
+def _format_artifact_summary_value(value: Any) -> str:
+    if value is None or value == "":
+        return ""
+    if isinstance(value, list):
+        if not value:
+            return ""
+        preview = ", ".join(str(item) for item in value[:4])
+        if len(value) > 4:
+            preview = f"{preview}, +{len(value) - 4} more"
+        return preview
+    if isinstance(value, dict):
+        keys = list(value.keys())
+        if not keys:
+            return ""
+        preview = ", ".join(str(key) for key in keys[:4])
+        if len(keys) > 4:
+            preview = f"{preview}, +{len(keys) - 4} more"
+        return preview
+    if isinstance(value, float):
+        return f"{value:.3f}"
+    text = str(value)
+    return text if len(text) <= 160 else f"{text[:157]}..."
+
+
+def _serialize_research_artifact(envelope: ArtifactEnvelope) -> dict[str, Any]:
+    body = envelope.body if isinstance(envelope.body, dict) else {}
+    summary = []
+    for label, path in _artifact_body_summary_fields(envelope.artifact_type):
+        value = _format_artifact_summary_value(_artifact_value_from_path(body, path))
+        if value:
+            summary.append({"label": label, "value": value})
+    return {
+        "artifact_id": envelope.artifact_id,
+        "artifact_type": envelope.artifact_type.value,
+        "artifact_label": envelope.artifact_type.value.replace("_", " ").title(),
+        "chain_id": envelope.chain_id,
+        "version": envelope.version,
+        "parent_id": envelope.parent_id,
+        "engine": envelope.engine.value,
+        "ticker": envelope.ticker or "",
+        "edge_family": envelope.edge_family.value if envelope.edge_family else "",
+        "status": envelope.status.value,
+        "created_at": envelope.created_at or "",
+        "created_by": envelope.created_by,
+        "tags": list(envelope.tags or []),
+        "summary": summary,
+        "body": body,
+    }
+
+
+def _build_research_artifact_chain_context(
+    chain_id: str,
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    store = artifact_store or ArtifactStore()
+    chain = store.get_chain(chain_id)
+    artifacts = [_serialize_research_artifact(envelope) for envelope in chain]
+    latest = artifacts[-1] if artifacts else None
+    latest_scoring = next(
+        (
+            item
+            for item in reversed(artifacts)
+            if item.get("artifact_type") == ArtifactType.SCORING_RESULT.value
+        ),
+        None,
+    )
+    return {
+        "chain_id": chain_id,
+        "artifacts": artifacts,
+        "artifact_count": len(artifacts),
+        "latest": latest,
+        "latest_scoring": latest_scoring,
+        "can_generate_post_mortem": any(
+            envelope.artifact_type == ArtifactType.HYPOTHESIS_CARD for envelope in chain
+        ),
+        "post_mortem_count": sum(
+            1 for envelope in chain if envelope.artifact_type == ArtifactType.POST_MORTEM_NOTE
+        ),
+        "error": "" if artifacts else f"No research artifacts found for chain {chain_id[:8]}.",
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _build_research_artifact_detail(
+    artifact_id: str,
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any] | None:
+    store = artifact_store or ArtifactStore()
+    artifact = store.get(artifact_id)
+    if artifact is None:
+        return None
+    return _serialize_research_artifact(artifact)
+
+
+def _find_chain_artifact(
+    chain_id: str,
+    artifact_type: ArtifactType,
+    *,
+    artifact_store: ArtifactStore | None = None,
+) -> ArtifactEnvelope | None:
+    store = artifact_store or ArtifactStore()
+    chain = store.get_chain(chain_id)
+    for envelope in reversed(chain):
+        if envelope.artifact_type == artifact_type:
+            return envelope
+    return None
+
+
+def _serialize_research_synthesis_event(event: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(event.get("payload") or {})
+    descriptor = dict(event.get("provenance_descriptor") or {})
+    return {
+        "event_id": event.get("event_id") or event.get("id") or "",
+        "chain_id": payload.get("chain_id") or event.get("source_ref") or descriptor.get("chain_id") or "",
+        "ticker": payload.get("ticker") or event.get("symbol") or "",
+        "artifact_count": int(payload.get("artifact_count") or descriptor.get("artifact_count") or 0),
+        "latest_artifact_id": payload.get("latest_artifact_id") or descriptor.get("latest_artifact_id") or "",
+        "latest_artifact_type": payload.get("latest_artifact_type") or "",
+        "summary": str(payload.get("summary") or event.get("detail") or "").strip(),
+        "created_at": str(event.get("event_timestamp") or event.get("retrieved_at") or ""),
+    }
+
+
+_RESEARCH_CHAIN_LIFECYCLE_STAGES: tuple[tuple[str, str, tuple[ArtifactType, ...]], ...] = (
+    ("event", "Event", (ArtifactType.EVENT_CARD,)),
+    ("hypothesis", "Hypothesis", (ArtifactType.HYPOTHESIS_CARD,)),
+    ("challenge", "Challenge", (ArtifactType.FALSIFICATION_MEMO,)),
+    ("test_spec", "Test Spec", (ArtifactType.TEST_SPEC,)),
+    ("experiment", "Experiment", (ArtifactType.EXPERIMENT_REPORT,)),
+    ("trade", "Trade", (ArtifactType.TRADE_SHEET,)),
+    ("score", "Score", (ArtifactType.SCORING_RESULT,)),
+    ("review", "Review", (ArtifactType.REVIEW_TRIGGER,)),
+    ("post_mortem", "Post-Mortem", (ArtifactType.POST_MORTEM_NOTE,)),
+    ("retirement", "Retirement", (ArtifactType.RETIREMENT_MEMO,)),
+)
+
+
+def _extract_research_artifact_note(envelope: ArtifactEnvelope) -> str:
+    serialized = _serialize_research_artifact(envelope)
+    summary = serialized.get("summary") if isinstance(serialized.get("summary"), list) else []
+    for item in summary:
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value") or "").strip()
+        if value:
+            return value
+    body = envelope.body if isinstance(envelope.body, dict) else {}
+    for key in ("summary", "thesis_assessment", "trigger_detail", "outcome_reason", "diagnosis", "mechanism"):
+        value = body.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _build_research_chain_lifecycle(chain: list[ArtifactEnvelope]) -> dict[str, Any]:
+    counts: dict[ArtifactType, int] = {}
+    for envelope in chain:
+        counts[envelope.artifact_type] = counts.get(envelope.artifact_type, 0) + 1
+
+    milestones: list[dict[str, Any]] = []
+    summary_parts: list[str] = []
+    completed_count = 0
+    for key, label, artifact_types in _RESEARCH_CHAIN_LIFECYCLE_STAGES:
+        count = sum(counts.get(artifact_type, 0) for artifact_type in artifact_types)
+        present = count > 0
+        if present:
+            completed_count += 1
+            summary_parts.append(f"{label} x{count}" if count > 1 else label)
+        milestones.append(
+            {
+                "key": key,
+                "label": label,
+                "count": count,
+                "present": present,
+            }
+        )
+
+    summary = " -> ".join(summary_parts[:6])
+    if len(summary_parts) > 6:
+        suffix = f"+{len(summary_parts) - 6} more"
+        summary = f"{summary} -> {suffix}" if summary else suffix
+
+    return {
+        "milestones": milestones,
+        "completed_count": completed_count,
+        "total_count": len(_RESEARCH_CHAIN_LIFECYCLE_STAGES),
+        "summary": summary,
+    }
+
+
+def _build_research_operator_output_context(
+    *,
+    chain_id: str = "",
+    synthesis: dict[str, Any] | None = None,
+    post_mortem: dict[str, Any] | None = None,
+    error: str = "",
+) -> dict[str, Any]:
+    active_chain_id = chain_id
+    if not active_chain_id and synthesis:
+        active_chain_id = str(synthesis.get("chain_id") or "")
+    if not active_chain_id and post_mortem:
+        active_chain_id = str(post_mortem.get("chain_id") or "")
+    return {
+        "chain_id": active_chain_id,
+        "synthesis": synthesis,
+        "post_mortem": post_mortem,
+        "error": error,
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _build_research_archive_context(
+    *,
+    limit: int = 6,
+    ticker: str = "",
+    search_text: str = "",
+    view: str = "all",
+    artifact_store: ArtifactStore | None = None,
+    event_store: EventStore | None = None,
+) -> dict[str, Any]:
+    store = artifact_store or ArtifactStore()
+    events = event_store or EventStore()
+    errors: list[str] = []
+    clamped_limit = max(1, min(int(limit), 20))
+    scan_limit = max(clamped_limit * 5, 20)
+    normalized_ticker = str(ticker or "").strip().upper()
+    normalized_search = str(search_text or "").strip()
+    normalized_view = str(view or "all").strip().lower()
+    if normalized_view not in _RESEARCH_ARCHIVE_VIEWS:
+        normalized_view = "all"
+
+    try:
+        synthesis_events = [
+            _serialize_research_synthesis_event(row)
+            for row in events.list_events(limit=scan_limit, event_type=_RESEARCH_SYNTHESIS_EVENT_TYPE)
+        ]
+    except Exception as exc:
+        synthesis_events = []
+        errors.append(f"synthesis history unavailable: {exc}")
+
+    try:
+        post_mortems = [
+            _serialize_research_artifact(envelope)
+            for envelope in store.query(
+                artifact_type=ArtifactType.POST_MORTEM_NOTE,
+                engine=Engine.ENGINE_B,
+                ticker=normalized_ticker or None,
+                limit=scan_limit,
+            )
+        ]
+    except Exception as exc:
+        post_mortems = []
+        errors.append(f"post-mortems unavailable: {exc}")
+
+    try:
+        retirements = [
+            _serialize_research_artifact(envelope)
+            for envelope in store.query(
+                artifact_type=ArtifactType.RETIREMENT_MEMO,
+                engine=Engine.ENGINE_B,
+                ticker=normalized_ticker or None,
+                limit=scan_limit,
+            )
+        ]
+    except Exception as exc:
+        retirements = []
+        errors.append(f"retirements unavailable: {exc}")
+
+    def _matches_filters(row: dict[str, Any]) -> bool:
+        row_ticker = str(row.get("ticker") or "").strip().upper()
+        if normalized_ticker and normalized_ticker not in row_ticker:
+            return False
+        if normalized_search:
+            haystack = json.dumps(row, sort_keys=True, default=str).lower()
+            if normalized_search.lower() not in haystack:
+                return False
+        return True
+
+    synthesis_events = [row for row in synthesis_events if _matches_filters(row)][:clamped_limit]
+    post_mortems = [row for row in post_mortems if _matches_filters(row)][:clamped_limit]
+    retirements = [row for row in retirements if _matches_filters(row)][:clamped_limit]
+
+    completed_index: dict[str, dict[str, Any]] = {}
+
+    def _touch_completed_chain(
+        chain_id: str,
+        *,
+        ticker_value: str = "",
+        created_at: str = "",
+        note: str = "",
+        artifact_label: str = "",
+        final_status: str = "",
+        retirement_trigger: str = "",
+        synthesis_hit: bool = False,
+        post_mortem_hit: bool = False,
+        retirement_hit: bool = False,
+    ) -> None:
+        if not chain_id:
+            return
+        entry = completed_index.setdefault(
+            chain_id,
+            {
+                "chain_id": chain_id,
+                "ticker": ticker_value or "-",
+                "artifact_count": 0,
+                "latest_artifact_label": artifact_label or "-",
+                "latest_artifact_status": "",
+                "last_activity_at": created_at or "",
+                "latest_note": note or "",
+                "final_status": final_status or "",
+                "retirement_trigger": retirement_trigger or "",
+                "synthesis_count": 0,
+                "post_mortem_count": 0,
+                "retirement_count": 0,
+                "lifecycle": {
+                    "milestones": [],
+                    "completed_count": 0,
+                    "total_count": len(_RESEARCH_CHAIN_LIFECYCLE_STAGES),
+                    "summary": "",
+                },
+            },
+        )
+        if ticker_value and (entry["ticker"] in {"", "-"}):
+            entry["ticker"] = ticker_value
+        if synthesis_hit:
+            entry["synthesis_count"] += 1
+        if post_mortem_hit:
+            entry["post_mortem_count"] += 1
+        if retirement_hit:
+            entry["retirement_count"] += 1
+        if final_status:
+            entry["final_status"] = final_status
+        if retirement_trigger:
+            entry["retirement_trigger"] = retirement_trigger
+        if created_at and created_at >= str(entry.get("last_activity_at") or ""):
+            entry["last_activity_at"] = created_at
+            if artifact_label:
+                entry["latest_artifact_label"] = artifact_label
+            if note:
+                entry["latest_note"] = note
+
+    for row in synthesis_events:
+        _touch_completed_chain(
+            str(row.get("chain_id") or ""),
+            ticker_value=str(row.get("ticker") or ""),
+            created_at=str(row.get("created_at") or ""),
+            note=str(row.get("summary") or ""),
+            artifact_label="Research Synthesis",
+            synthesis_hit=True,
+        )
+    for row in post_mortems:
+        body = row.get("body") if isinstance(row.get("body"), dict) else {}
+        _touch_completed_chain(
+            str(row.get("chain_id") or ""),
+            ticker_value=str(row.get("ticker") or ""),
+            created_at=str(row.get("created_at") or ""),
+            note=str(body.get("thesis_assessment") or ""),
+            artifact_label=str(row.get("artifact_label") or "Post Mortem Note"),
+            post_mortem_hit=True,
+        )
+    for row in retirements:
+        body = row.get("body") if isinstance(row.get("body"), dict) else {}
+        _touch_completed_chain(
+            str(row.get("chain_id") or ""),
+            ticker_value=str(row.get("ticker") or ""),
+            created_at=str(row.get("created_at") or ""),
+            note=str(body.get("trigger_detail") or ""),
+            artifact_label=str(row.get("artifact_label") or "Retirement Memo"),
+            final_status=str(body.get("final_status") or ""),
+            retirement_trigger=str(body.get("trigger") or ""),
+            retirement_hit=True,
+        )
+
+    completed_chains: list[dict[str, Any]] = []
+    for chain_id, entry in completed_index.items():
+        try:
+            chain = store.get_chain(chain_id)
+        except Exception:
+            chain = []
+        if chain:
+            latest = chain[-1]
+            entry["artifact_count"] = len(chain)
+            entry["lifecycle"] = _build_research_chain_lifecycle(chain)
+            entry["latest_artifact_label"] = latest.artifact_type.value.replace("_", " ").title()
+            entry["latest_artifact_status"] = latest.status.value
+            latest_created_at = str(latest.created_at or "")
+            latest_note = _extract_research_artifact_note(latest)
+            if latest_created_at and latest_created_at >= str(entry.get("last_activity_at") or ""):
+                entry["last_activity_at"] = latest_created_at
+                if latest_note:
+                    entry["latest_note"] = latest_note
+            elif not entry["latest_note"] and latest_note:
+                entry["latest_note"] = latest_note
+        else:
+            entry["artifact_count"] = max(
+                int(entry["post_mortem_count"]) + int(entry["retirement_count"]),
+                int(entry["artifact_count"]),
+            )
+        completed_chains.append(entry)
+
+    completed_chains.sort(
+        key=lambda row: (str(row.get("last_activity_at") or ""), str(row.get("chain_id") or "")),
+        reverse=True,
+    )
+    completed_chains = completed_chains[:clamped_limit]
+
+    return {
+        "filters": {
+            "limit": clamped_limit,
+            "ticker": normalized_ticker,
+            "q": normalized_search,
+            "view": normalized_view,
+        },
+        "completed_chains": completed_chains,
+        "synthesis_events": synthesis_events,
+        "post_mortems": post_mortems,
+        "retirements": retirements,
+        "show_completed_chains": normalized_view in {"all", "completed"},
+        "show_syntheses": normalized_view in {"all", "synthesis"},
+        "show_post_mortems": normalized_view in {"all", "post_mortem"},
+        "show_retirements": normalized_view in {"all", "retirement"},
+        "error": "; ".join(errors),
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _render_research_operator_output(
+    request: Request,
+    *,
+    chain_id: str = "",
+    synthesis: dict[str, Any] | None = None,
+    post_mortem: dict[str, Any] | None = None,
+    error: str = "",
+):
+    return TEMPLATES.TemplateResponse(
+        request,
+        "_research_operator_output.html",
+        {
+            "request": request,
+            **_build_research_operator_output_context(
+                chain_id=chain_id,
+                synthesis=synthesis,
+                post_mortem=post_mortem,
+                error=error,
+            ),
+        },
+    )
+
+
+def _latest_artifact_by_type(
+    artifact_type: ArtifactType,
+    *,
+    engine: Engine,
+    artifact_store: ArtifactStore | None = None,
+) -> ArtifactEnvelope | None:
+    store = artifact_store or ArtifactStore()
+    rows = store.query(
+        artifact_type=artifact_type,
+        engine=engine,
+        limit=1,
+    )
+    return rows[0] if rows else None
+
+
+def _build_engine_a_regime_panel_context(
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    artifact = _latest_artifact_by_type(
+        ArtifactType.REGIME_SNAPSHOT,
+        engine=Engine.ENGINE_A,
+        artifact_store=artifact_store,
+    )
+    if artifact is None:
+        return {"regime": None, "error": "No Engine A regime snapshot yet.", "generated_at": _utc_now_iso()}
+
+    payload = dict(artifact.body)
+    payload["artifact_id"] = artifact.artifact_id
+    payload["chain_id"] = artifact.chain_id
+    payload["created_at"] = artifact.created_at
+    return {"regime": payload, "error": "", "generated_at": _utc_now_iso()}
+
+
+def _build_engine_a_signal_heatmap_context(
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    artifact = _latest_artifact_by_type(
+        ArtifactType.ENGINE_A_SIGNAL_SET,
+        engine=Engine.ENGINE_A,
+        artifact_store=artifact_store,
+    )
+    if artifact is None:
+        return {
+            "rows": [],
+            "signal_columns": ["trend", "carry", "value", "momentum"],
+            "as_of": "",
+            "error": "No Engine A signal set yet.",
+            "generated_at": _utc_now_iso(),
+        }
+
+    body = artifact.body
+    signal_columns = ["trend", "carry", "value", "momentum"]
+    grouped: dict[str, dict[str, Any]] = {}
+    for key, payload in body.get("signals", {}).items():
+        instrument, _, signal_type = key.partition(":")
+        row = grouped.setdefault(
+            instrument,
+            {
+                "instrument": instrument,
+                "combined_forecast": None,
+                "signals": {column: None for column in signal_columns},
+            },
+        )
+        row["signals"][signal_type] = payload.get("normalized_value")
+    for instrument, forecast in body.get("combined_forecast", {}).items():
+        row = grouped.setdefault(
+            instrument,
+            {
+                "instrument": instrument,
+                "combined_forecast": None,
+                "signals": {column: None for column in signal_columns},
+            },
+        )
+        row["combined_forecast"] = forecast
+
+    rows = sorted(
+        grouped.values(),
+        key=lambda row: abs(float(row["combined_forecast"] or 0.0)),
+        reverse=True,
+    )
+    return {
+        "rows": rows,
+        "signal_columns": signal_columns,
+        "as_of": body.get("as_of", ""),
+        "artifact_id": artifact.artifact_id,
+        "chain_id": artifact.chain_id,
+        "error": "",
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _build_engine_a_portfolio_targets_context(
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    artifact = _latest_artifact_by_type(
+        ArtifactType.REBALANCE_SHEET,
+        engine=Engine.ENGINE_A,
+        artifact_store=artifact_store,
+    )
+    if artifact is None:
+        return {"rows": [], "error": "No Engine A rebalance sheet yet.", "generated_at": _utc_now_iso()}
+
+    body = artifact.body
+    instruments = sorted(
+        set(body.get("current_positions", {}).keys())
+        | set(body.get("target_positions", {}).keys())
+        | set(body.get("deltas", {}).keys())
+    )
+    rows = [
+        {
+            "instrument": instrument,
+            "current_position": body.get("current_positions", {}).get(instrument, 0.0),
+            "target_position": body.get("target_positions", {}).get(instrument, 0.0),
+            "delta": body.get("deltas", {}).get(instrument, 0.0),
+        }
+        for instrument in instruments
+    ]
+    return {
+        "rows": rows,
+        "approval_status": body.get("approval_status", ""),
+        "estimated_cost": body.get("estimated_cost"),
+        "artifact_id": artifact.artifact_id,
+        "chain_id": artifact.chain_id,
+        "created_at": artifact.created_at,
+        "error": "",
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _build_engine_a_rebalance_panel_context(
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    artifact = _latest_artifact_by_type(
+        ArtifactType.REBALANCE_SHEET,
+        engine=Engine.ENGINE_A,
+        artifact_store=artifact_store,
+    )
+    if artifact is None:
+        return {"rebalance": None, "error": "No Engine A rebalance proposal yet.", "generated_at": _utc_now_iso()}
+
+    body = artifact.body
+    non_zero = {
+        instrument: delta
+        for instrument, delta in body.get("deltas", {}).items()
+        if abs(float(delta or 0.0)) > 0
+    }
+    top_moves = sorted(non_zero.items(), key=lambda item: abs(float(item[1])), reverse=True)[:5]
+    rebalance = {
+        "artifact_id": artifact.artifact_id,
+        "chain_id": artifact.chain_id,
+        "created_at": artifact.created_at,
+        "approval_status": body.get("approval_status", ""),
+        "estimated_cost": body.get("estimated_cost"),
+        "move_count": len(non_zero),
+        "top_moves": [{"instrument": instrument, "delta": delta} for instrument, delta in top_moves],
+    }
+    return {"rebalance": rebalance, "error": "", "generated_at": _utc_now_iso()}
+
+
+def _build_engine_a_regime_journal_context(
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    store = artifact_store or ArtifactStore()
+    rows = store.query(
+        artifact_type=ArtifactType.REGIME_JOURNAL,
+        engine=Engine.ENGINE_A,
+        limit=5,
+    )
+    entries = []
+    for envelope in rows:
+        body = envelope.body
+        entries.append(
+            {
+                "artifact_id": envelope.artifact_id,
+                "chain_id": envelope.chain_id,
+                "as_of": body.get("as_of", ""),
+                "summary": body.get("summary", ""),
+                "key_changes": list(body.get("key_changes", [])),
+                "risks": list(body.get("risks", [])),
+                "created_at": envelope.created_at,
+            }
+        )
+    return {
+        "entries": entries,
+        "error": "" if entries else "No regime journal entries yet.",
+        "generated_at": _utc_now_iso(),
+    }
+
+
 def _get_broker_snapshot() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
         connected = _broker is not None and _broker.is_connected()
@@ -332,6 +1276,204 @@ def _get_research_fragment_context() -> dict[str, Any]:
         "research-fragment",
         _RESEARCH_CACHE_TTL_SECONDS,
         _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_pipeline_funnel_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        try:
+            stages = research_dashboard.pipeline_funnel()
+            return {
+                "stages": stages,
+                "total": sum(int(stage.get("total", 0)) for stage in stages),
+                "error": "",
+            }
+        except Exception as exc:
+            logger.debug("Research pipeline funnel unavailable: %s", exc)
+            return {"stages": [], "total": 0, "error": str(exc)}
+
+    return _get_cached_value(
+        "research-pipeline-funnel",
+        15.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_active_hypotheses_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        try:
+            rows = research_dashboard.active_hypotheses(limit=20)
+            return {"rows": rows, "error": ""}
+        except Exception as exc:
+            logger.debug("Research active hypotheses unavailable: %s", exc)
+            return {"rows": [], "error": str(exc)}
+
+    return _get_cached_value(
+        "research-active-hypotheses",
+        10.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_engine_status_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        pipeline = control.pipeline_status()
+        try:
+            funnel = research_dashboard.pipeline_funnel()
+            funnel_total = sum(int(stage.get("total", 0)) for stage in funnel)
+        except Exception as exc:
+            logger.debug("Research engine status counts unavailable: %s", exc)
+            funnel_total = 0
+        engine_cards = [
+            {
+                "name": "Scheduler",
+                "key": "scheduler",
+                "running": bool(pipeline["scheduler"].get("running")),
+                "configured": True,
+                "status_detail": "Daily orchestration windows",
+                "last_result": (pipeline["scheduler"].get("recent_results") or [{}])[-1],
+            },
+            {
+                "name": "Engine A",
+                "key": "engine_a",
+                "running": bool(pipeline["engine_a"].get("running")),
+                "configured": bool(pipeline["engine_a"].get("configured")),
+                "enabled": bool(pipeline["engine_a"].get("enabled")),
+                "status_detail": "Deterministic futures pipeline",
+                "last_result": pipeline["engine_a"].get("last_result"),
+            },
+            {
+                "name": "Engine B",
+                "key": "engine_b",
+                "running": bool(pipeline["engine_b"].get("running")),
+                "configured": bool(pipeline["engine_b"].get("configured")),
+                "enabled": bool(pipeline["engine_b"].get("enabled")),
+                "status_detail": (
+                    f"Event-driven research intake worker"
+                    f" | q={pipeline['engine_b'].get('queue_depth', 0)}"
+                ),
+                "last_result": pipeline["engine_b"].get("last_result"),
+            },
+            {
+                "name": "Dispatcher",
+                "key": "dispatcher",
+                "running": bool(pipeline["dispatcher"].get("running")),
+                "configured": True,
+                "enabled": bool(pipeline["config"].get("dispatcher_enabled")),
+                "status_detail": "Intent routing loop",
+                "last_result": None,
+            },
+            {
+                "name": "Decay Review",
+                "key": "decay_review",
+                "running": False,
+                "configured": bool(pipeline["decay_review"].get("configured")),
+                "status_detail": "6-hourly decay audit windows",
+                "last_result": pipeline["decay_review"].get("last_result"),
+            },
+            {
+                "name": "Kill Check",
+                "key": "kill_check",
+                "running": False,
+                "configured": bool(pipeline["kill_check"].get("configured")),
+                "status_detail": "Hourly live-strategy kill scan",
+                "last_result": pipeline["kill_check"].get("last_result"),
+            },
+        ]
+        return {
+            "engine_cards": engine_cards,
+            "pipeline": pipeline,
+            "funnel_total": funnel_total,
+            "generated_at": _utc_now_iso(),
+        }
+
+    return _get_cached_value(
+        "research-engine-status",
+        5.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_recent_decisions_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        try:
+            rows = research_dashboard.recent_decisions(limit=20)
+            return {"rows": rows, "error": ""}
+        except Exception as exc:
+            logger.debug("Research recent decisions unavailable: %s", exc)
+            return {"rows": [], "error": str(exc)}
+
+    return _get_cached_value(
+        "research-recent-decisions",
+        15.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_alerts_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        try:
+            alerts = research_dashboard.alerts(limit=20)
+            alerts["error"] = ""
+            return alerts
+        except Exception as exc:
+            logger.debug("Research alerts unavailable: %s", exc)
+            return {"pending_reviews": [], "kill_alerts": [], "error": str(exc)}
+
+    return _get_cached_value(
+        "research-alerts",
+        5.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
+def _get_research_regime_panel_context() -> dict[str, Any]:
+    return _get_cached_value(
+        "research-regime-panel",
+        10.0,
+        _build_engine_a_regime_panel_context,
+        stale_on_error=True,
+    )
+
+
+def _get_research_signal_heatmap_context() -> dict[str, Any]:
+    return _get_cached_value(
+        "research-signal-heatmap",
+        10.0,
+        _build_engine_a_signal_heatmap_context,
+        stale_on_error=True,
+    )
+
+
+def _get_research_portfolio_targets_context() -> dict[str, Any]:
+    return _get_cached_value(
+        "research-portfolio-targets",
+        10.0,
+        _build_engine_a_portfolio_targets_context,
+        stale_on_error=True,
+    )
+
+
+def _get_research_rebalance_panel_context() -> dict[str, Any]:
+    return _get_cached_value(
+        "research-rebalance-panel",
+        10.0,
+        _build_engine_a_rebalance_panel_context,
+        stale_on_error=True,
+    )
+
+
+def _get_research_regime_journal_context() -> dict[str, Any]:
+    return _get_cached_value(
+        "research-regime-journal",
+        15.0,
+        _build_engine_a_regime_journal_context,
         stale_on_error=True,
     )
 
@@ -1757,6 +2899,202 @@ def create_app() -> FastAPI:
         result = control.stop_dispatcher()
         return action_message(f"Dispatcher: {result['status']}", ok=True)
 
+    @app.post("/api/actions/engine-a-start", response_class=HTMLResponse)
+    def engine_a_start_action():
+        result = control.start_engine_a()
+        ok = result.get("status") not in {"error", "disabled", "unavailable"}
+        return action_message(f"Engine A: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/engine-a-stop", response_class=HTMLResponse)
+    def engine_a_stop_action():
+        result = control.stop_engine_a()
+        ok = result.get("status") != "error"
+        return action_message(f"Engine A: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/engine-b-start", response_class=HTMLResponse)
+    def engine_b_start_action():
+        result = control.start_engine_b()
+        ok = result.get("status") not in {"error", "disabled", "unavailable"}
+        return action_message(f"Engine B: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/engine-b-stop", response_class=HTMLResponse)
+    def engine_b_stop_action():
+        result = control.stop_engine_b()
+        ok = result.get("status") != "error"
+        return action_message(f"Engine B: {result['status']}", ok=ok)
+
+    @app.post("/api/actions/research/review-ack", response_class=HTMLResponse)
+    def research_review_ack_action(
+        chain_id: str = Form(default=""),
+        decision: str = Form(default="park"),
+        notes: str = Form(default="Acknowledged from research dashboard"),
+    ):
+        clean_chain_id = chain_id.strip()
+        if not clean_chain_id:
+            return action_message("Review chain_id is required.", ok=False)
+        try:
+            outcome = PromotionOutcome(decision.strip().lower())
+        except ValueError:
+            return action_message("Decision must be promote, revise, park, or reject.", ok=False)
+
+        try:
+            service = DecayReviewService(artifact_store=ArtifactStore())
+            service.acknowledge_review(
+                chain_id=clean_chain_id,
+                operator_decision=outcome,
+                notes=notes.strip() or "Acknowledged from research dashboard",
+            )
+        except Exception as exc:
+            return action_message(f"Review acknowledgement failed: {exc}", ok=False)
+
+        _invalidate_research_cached_values()
+        return action_message(f"Review {clean_chain_id[:8]} acknowledged: {outcome.value}.", ok=True)
+
+    @app.post("/api/actions/research/engine-b-run", response_class=HTMLResponse)
+    def research_engine_b_run_action(
+        raw_content: str = Form(default=""),
+        source_class: str = Form(default="news_wire"),
+        source_credibility: float = Form(default=0.7),
+        source_ids: str = Form(default=""),
+    ):
+        content = raw_content.strip()
+        if not content:
+            return action_message("Raw content is required.", ok=False)
+        source_id_list = [item.strip() for item in source_ids.split(",") if item.strip()]
+        if not source_id_list:
+            source_id_list = [f"manual:{uuid.uuid4().hex[:8]}"]
+        result = _queue_engine_b_intake(
+            raw_content=content,
+            source_class=source_class.strip() or "news_wire",
+            source_credibility=max(0.0, min(1.0, float(source_credibility))),
+            source_ids=source_id_list,
+            detail=f"manual Engine B intake ({source_class}, ids={len(source_id_list)})",
+            job_type="engine_b_manual",
+            allow_ad_hoc=True,
+        )
+        if not result.get("ok"):
+            return action_message(
+                f"Engine B enqueue failed: {result.get('detail') or result.get('error', 'unknown')}.",
+                ok=False,
+            )
+        return action_message(f"Queued Engine B research job {str(result['job_id'])[:8]}.", ok=True)
+
+    @app.post("/api/actions/research/synthesize", response_class=HTMLResponse)
+    def research_synthesize_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        if not clean_chain_id:
+            return _render_research_operator_output(
+                request,
+                error="Research chain_id is required for synthesis.",
+            )
+
+        store = ArtifactStore()
+        try:
+            chain_context = _build_research_artifact_chain_context(clean_chain_id, artifact_store=store)
+            if not chain_context["artifacts"]:
+                return _render_research_operator_output(
+                    request,
+                    chain_id=clean_chain_id,
+                    error=chain_context["error"],
+                )
+
+            summary = SynthesisService(ModelRouter(artifact_store=store), store).synthesize(clean_chain_id)
+            latest = chain_context["latest"] or {}
+            event_result = EventStore().write_event(
+                EventRecord(
+                    event_type=_RESEARCH_SYNTHESIS_EVENT_TYPE,
+                    source=_RESEARCH_OPERATOR_SOURCE,
+                    retrieved_at=_utc_now_iso(),
+                    event_timestamp=_utc_now_iso(),
+                    source_ref=clean_chain_id,
+                    symbol=str(latest.get("ticker") or ""),
+                    headline=f"Research synthesis {clean_chain_id[:8]}",
+                    detail=summary[:240],
+                    provenance_descriptor={
+                        "chain_id": clean_chain_id,
+                        "artifact_count": chain_context["artifact_count"],
+                        "latest_artifact_id": latest.get("artifact_id") or "",
+                    },
+                    payload={
+                        "chain_id": clean_chain_id,
+                        "artifact_count": chain_context["artifact_count"],
+                        "latest_artifact_id": latest.get("artifact_id") or "",
+                        "latest_artifact_type": latest.get("artifact_type") or "",
+                        "ticker": latest.get("ticker") or "",
+                        "summary": summary,
+                    },
+                )
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Synthesis failed: {exc}",
+            )
+
+        return _render_research_operator_output(
+            request,
+            chain_id=clean_chain_id,
+            synthesis={
+                "event_id": str(event_result.get("id") or ""),
+                "chain_id": clean_chain_id,
+                "ticker": str(latest.get("ticker") or ""),
+                "artifact_count": chain_context["artifact_count"],
+                "latest_artifact_id": str(latest.get("artifact_id") or ""),
+                "latest_artifact_type": str(latest.get("artifact_label") or latest.get("artifact_type") or ""),
+                "summary": summary,
+            },
+        )
+
+    @app.post("/api/actions/research/post-mortem", response_class=HTMLResponse)
+    def research_post_mortem_action(
+        request: Request,
+        chain_id: str = Form(default=""),
+        hypothesis_id: str = Form(default=""),
+    ):
+        clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
+        clean_hypothesis_id = hypothesis_id.strip() if isinstance(hypothesis_id, str) else ""
+        store = ArtifactStore()
+
+        if not clean_hypothesis_id:
+            if not clean_chain_id:
+                return _render_research_operator_output(
+                    request,
+                    error="Provide chain_id or hypothesis_id to generate a post-mortem.",
+                )
+            hypothesis = _find_chain_artifact(
+                clean_chain_id,
+                ArtifactType.HYPOTHESIS_CARD,
+                artifact_store=store,
+            )
+            if hypothesis is None:
+                return _render_research_operator_output(
+                    request,
+                    chain_id=clean_chain_id,
+                    error=f"No hypothesis artifact found for chain {clean_chain_id[:8]}.",
+                )
+            clean_hypothesis_id = str(hypothesis.artifact_id or "")
+
+        try:
+            artifact = PostMortemService(ModelRouter(artifact_store=store), store).generate_post_mortem(
+                clean_hypothesis_id
+            )
+        except Exception as exc:
+            return _render_research_operator_output(
+                request,
+                chain_id=clean_chain_id,
+                error=f"Post-mortem generation failed: {exc}",
+            )
+
+        return _render_research_operator_output(
+            request,
+            chain_id=str(artifact.chain_id or clean_chain_id),
+            post_mortem=_serialize_research_artifact(artifact),
+        )
+
     @app.post("/api/actions/run-daily-dag", response_class=HTMLResponse)
     def run_daily_dag_action():
         job_id = str(uuid.uuid4())
@@ -1776,6 +3114,20 @@ def create_app() -> FastAPI:
     @app.get("/api/pipeline-status")
     def pipeline_status_api():
         return control.pipeline_status()
+
+    @app.get("/api/research/artifact-chain/{chain_id}")
+    def research_artifact_chain_api(chain_id: str):
+        context = _build_research_artifact_chain_context(chain_id)
+        if not context["artifacts"]:
+            raise HTTPException(status_code=404, detail=context["error"])
+        return context
+
+    @app.get("/api/research/artifact/{artifact_id}")
+    def research_artifact_detail_api(artifact_id: str):
+        artifact = _build_research_artifact_detail(artifact_id)
+        if artifact is None:
+            raise HTTPException(status_code=404, detail=f"Research artifact not found: {artifact_id}")
+        return artifact
 
     @app.post("/api/actions/discover-options", response_class=HTMLResponse)
     def discover_options_action(
@@ -2090,7 +3442,7 @@ def create_app() -> FastAPI:
         return TEMPLATES.TemplateResponse(
             request,
             "_jobs.html",
-            {"request": request, "jobs": get_jobs(limit=20)},
+            {"request": request, "jobs": get_jobs(limit=20), **_build_research_system_state_context()},
         )
 
     @app.get("/fragments/job-detail", response_class=HTMLResponse)
@@ -2098,11 +3450,19 @@ def create_app() -> FastAPI:
         selected_id = job_id.strip()
         if not selected_id:
             for row in get_jobs(limit=40):
-                if row.get("job_type") in {"discover_options", "calibrate_options"}:
+                if row.get("job_type") in {
+                    "signal_tier1_shadow_run",
+                    "signal_shadow_run",
+                    "engine_b_manual",
+                    "engine_b_intake",
+                    "discover_options",
+                    "calibrate_options",
+                }:
                     selected_id = row.get("id", "")
                     break
         item = get_job(selected_id) if selected_id else None
         parsed_result = _parse_job_result(item.get("result", "")) if item else None
+        job_summary = _build_job_detail_summary(item.get("job_type", ""), parsed_result) if item else None
         return TEMPLATES.TemplateResponse(
             request,
             "_job_detail.html",
@@ -2110,6 +3470,8 @@ def create_app() -> FastAPI:
                 "request": request,
                 "job": item,
                 "parsed_result": parsed_result,
+                "job_summary": job_summary,
+                **_build_research_system_state_context(),
             },
         )
 
@@ -2677,10 +4039,10 @@ def create_app() -> FastAPI:
             title=f"Challenge: {original.get('title', '')[:60]}",
         )
 
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
-                    detail=f"Challenge: {challenge_text[:80]}")
-        analyze_intel_async(submission, job_id)
+        job_id = _queue_council_analysis(
+            submission,
+            detail=f"Challenge: {challenge_text[:80]}",
+        )
 
         return HTMLResponse(
             f'<span class="text-[11px] text-emerald-400">Challenge sent to council (job {job_id[:8]}). '
@@ -2716,11 +4078,49 @@ def create_app() -> FastAPI:
             url=url,
             title="Manual submission" if not is_x else "Forwarded via UI",
         )
+        engine_b_result = None
 
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
-                    detail=f"UI intel: {content[:80]}")
-        analyze_intel_async(submission, job_id)
+        if config.RESEARCH_SYSTEM_ACTIVE:
+            engine_b_result = _queue_engine_b_intake(
+                raw_content=_build_engine_b_submission_content(submission),
+                source_class="social_curated",
+                source_ids=[
+                    submission.url or "",
+                    *submission.tickers,
+                    f"ui:{uuid.uuid4().hex[:8]}",
+                ],
+                detail=f"UI research intake: {content[:80]}",
+            )
+            if not engine_b_result.get("ok"):
+                return HTMLResponse(
+                    f'<span class="text-[11px] text-red-400">Engine B enqueue failed: '
+                    f'{html.escape(engine_b_result.get("detail") or engine_b_result.get("error", "unknown"))}.</span>'
+                )
+            return HTMLResponse(
+                f'<span class="text-[11px] text-emerald-400">Queued for Engine B research '
+                f'(job {str(engine_b_result["job_id"])[:8]}). Results will appear in /research.</span>'
+            )
+
+        job_id = _queue_council_analysis(
+            submission,
+            detail=f"UI intel: {content[:80]}",
+        )
+        engine_b_result = _queue_engine_b_intake(
+            raw_content=_build_engine_b_submission_content(submission),
+            source_class="social_curated",
+            source_ids=[
+                submission.url or "",
+                *submission.tickers,
+                f"ui:{job_id[:8]}",
+            ],
+            detail=f"UI research intake mirror: {content[:80]}",
+        )
+        if not engine_b_result.get("ok"):
+            logger.warning(
+                "Engine B mirror enqueue failed for UI intel job %s: %s",
+                job_id,
+                engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
+            )
 
         return HTMLResponse(
             f'<span class="text-[11px] text-emerald-400">Queued for analysis (job {job_id[:8]}). '
@@ -2992,6 +4392,139 @@ def create_app() -> FastAPI:
                 "request": request,
                 **context,
             },
+        )
+
+    @app.get("/fragments/research/artifact-chain", response_class=HTMLResponse)
+    def research_artifact_chain_placeholder_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_artifact_chain.html",
+            {
+                "request": request,
+                "chain_id": "",
+                "artifacts": [],
+                "artifact_count": 0,
+                "latest": None,
+                "error": "",
+                "generated_at": _utc_now_iso(),
+            },
+        )
+
+    @app.get("/fragments/research/artifact-chain/{chain_id}", response_class=HTMLResponse)
+    def research_artifact_chain_fragment(request: Request, chain_id: str):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_artifact_chain.html",
+            {
+                "request": request,
+                **_build_research_artifact_chain_context(chain_id),
+            },
+        )
+
+    @app.get("/fragments/research/operator-output", response_class=HTMLResponse)
+    def research_operator_output_fragment(request: Request):
+        return _render_research_operator_output(request)
+
+    @app.get("/fragments/research/archive", response_class=HTMLResponse)
+    def research_archive_fragment(
+        request: Request,
+        limit: int = 6,
+        ticker: str = "",
+        q: str = "",
+        view: str = "all",
+    ):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_archive.html",
+            {
+                "request": request,
+                **_build_research_archive_context(
+                    limit=max(1, min(limit, 20)),
+                    ticker=ticker,
+                    search_text=q,
+                    view=view,
+                ),
+            },
+        )
+
+    @app.get("/fragments/research/regime-panel", response_class=HTMLResponse)
+    def research_regime_panel_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_regime_panel.html",
+            {"request": request, **_get_research_regime_panel_context()},
+        )
+
+    @app.get("/fragments/research/signal-heatmap", response_class=HTMLResponse)
+    def research_signal_heatmap_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_signal_heatmap.html",
+            {"request": request, **_get_research_signal_heatmap_context()},
+        )
+
+    @app.get("/fragments/research/portfolio-targets", response_class=HTMLResponse)
+    def research_portfolio_targets_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_portfolio_targets.html",
+            {"request": request, **_get_research_portfolio_targets_context()},
+        )
+
+    @app.get("/fragments/research/rebalance-panel", response_class=HTMLResponse)
+    def research_rebalance_panel_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_rebalance_panel.html",
+            {"request": request, **_get_research_rebalance_panel_context()},
+        )
+
+    @app.get("/fragments/research/regime-journal", response_class=HTMLResponse)
+    def research_regime_journal_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_regime_journal.html",
+            {"request": request, **_get_research_regime_journal_context()},
+        )
+
+    @app.get("/fragments/research/pipeline-funnel", response_class=HTMLResponse)
+    def research_pipeline_funnel_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_pipeline_funnel.html",
+            {"request": request, **_get_research_pipeline_funnel_context()},
+        )
+
+    @app.get("/fragments/research/active-hypotheses", response_class=HTMLResponse)
+    def research_active_hypotheses_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_active_hypotheses.html",
+            {"request": request, **_get_research_active_hypotheses_context()},
+        )
+
+    @app.get("/fragments/research/engine-status", response_class=HTMLResponse)
+    def research_engine_status_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_engine_status.html",
+            {"request": request, **_get_research_engine_status_context()},
+        )
+
+    @app.get("/fragments/research/recent-decisions", response_class=HTMLResponse)
+    def research_recent_decisions_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_recent_decisions.html",
+            {"request": request, **_get_research_recent_decisions_context()},
+        )
+
+    @app.get("/fragments/research/alerts", response_class=HTMLResponse)
+    def research_alerts_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_alerts.html",
+            {"request": request, **_get_research_alerts_context()},
         )
 
     @app.get("/fragments/signal-engine", response_class=HTMLResponse)
@@ -3353,7 +4886,7 @@ def create_app() -> FastAPI:
 
             active = conn.execute(
                 """SELECT id FROM jobs
-                   WHERE job_type = 'intel_analysis'
+                   WHERE job_type IN ('intel_analysis', 'engine_b_intake')
                      AND status IN ('queued', 'running')
                      AND detail LIKE ?
                    ORDER BY created_at DESC
@@ -3468,16 +5001,53 @@ def create_app() -> FastAPI:
                 "tickers": tickers,
                 "message": duplicate_message,
             }
-
-        job_id = str(uuid.uuid4())
         job_detail_ref = submission.url or url or title or f"sa-{page_type}"
-        create_job(
-            job_id=job_id,
-            job_type="intel_analysis",
-            status="queued",
-            detail=f"SA intel: {job_detail_ref} | {(title or url)[:80]}",
-        )
-        analyze_intel_async(submission, job_id)
+        engine_b_content = _build_engine_b_submission_content(submission)
+
+        if config.RESEARCH_SYSTEM_ACTIVE:
+            engine_b_result = _queue_engine_b_intake(
+                raw_content=engine_b_content,
+                source_class="news_wire",
+                source_ids=[
+                    submission.url or "",
+                    *submission.tickers,
+                    f"sa:{page_type}",
+                ],
+                detail=f"SA intel: {job_detail_ref} | {(title or url)[:80]}",
+            )
+            if not engine_b_result.get("ok"):
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": engine_b_result.get("error", "enqueue_failed"),
+                        "detail": engine_b_result.get("detail") or "Engine B enqueue failed.",
+                    },
+                    status_code=503,
+                )
+            job_id = str(engine_b_result["job_id"])
+            message = f"SA {page_type} queued for Engine B research."
+        else:
+            job_id = _queue_council_analysis(
+                submission,
+                detail=f"SA intel: {job_detail_ref} | {(title or url)[:80]}",
+            )
+            engine_b_result = _queue_engine_b_intake(
+                raw_content=engine_b_content,
+                source_class="news_wire",
+                source_ids=[
+                    submission.url or "",
+                    *submission.tickers,
+                    f"sa:{page_type}",
+                ],
+                detail=f"SA intel: {job_detail_ref} | {(title or url)[:80]}",
+            )
+            if not engine_b_result.get("ok"):
+                logger.warning(
+                    "Engine B mirror enqueue failed for SA intel %s: %s",
+                    job_id,
+                    engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
+                )
+            message = f"SA {page_type} queued for LLM analysis."
 
         _safe_log_event(
             category="SIGNAL",
@@ -3494,9 +5064,14 @@ def create_app() -> FastAPI:
         return {
             "ok": True,
             "job_id": job_id,
+            "research_job_id": (
+                str(engine_b_result["job_id"])
+                if not config.RESEARCH_SYSTEM_ACTIVE and engine_b_result.get("ok")
+                else None
+            ),
             "page_type": page_type,
             "tickers": tickers,
-            "message": f"SA {page_type} queued for LLM analysis.",
+            "message": message,
         }
 
     def _handle_sa_symbol_capture_payload(payload: dict[str, Any]):
@@ -3739,6 +5314,22 @@ def create_app() -> FastAPI:
             capture_source=capture_source,
             log_strategy="sa_quant_capture",
         )
+        engine_b_result = _queue_engine_b_intake(
+            raw_content=_build_sa_quant_engine_b_content(payload),
+            source_class="sa_quant",
+            source_ids=[
+                capture.url or str(payload.get("url") or ""),
+                capture.ticker,
+                str(payload.get("captured_at") or retrieved_at),
+            ],
+            detail=f"SA quant capture: {capture.ticker}",
+        )
+        if not engine_b_result.get("ok"):
+            logger.warning(
+                "Engine B enqueue failed for SA quant capture %s: %s",
+                capture.ticker,
+                engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
+            )
 
         return {
             "ok": True,
@@ -3748,6 +5339,8 @@ def create_app() -> FastAPI:
             "factor_grades": capture.factor_grades,
             "feature_count": stored_feature_count,
             "layer_score": layer_score_payload,
+            "research_job_id": str(engine_b_result["job_id"]) if engine_b_result.get("ok") else None,
+            "research_error": None if engine_b_result.get("ok") else engine_b_result.get("detail"),
             "message": "SA browser capture stored.",
         }
 
@@ -3785,6 +5378,57 @@ def create_app() -> FastAPI:
             store_page_capture_event=True,
         )
 
+    @app.post("/api/webhooks/finnhub")
+    async def finnhub_webhook(request: Request):
+        """Receive structured Finnhub article/transcript payloads for Engine B."""
+        payload = await _decode_json_request(request, max_bytes=256_000)
+        if isinstance(payload, JSONResponse):
+            return payload
+
+        content = _build_finnhub_engine_b_content(payload)
+        if not content:
+            return JSONResponse(
+                {"ok": False, "error": "missing_content", "detail": "No content or summary field in payload."},
+                status_code=422,
+            )
+
+        ticker = str(payload.get("ticker") or payload.get("symbol") or "").strip().upper()
+        title = str(payload.get("title") or payload.get("headline") or "").strip()
+        result = _queue_engine_b_intake(
+            raw_content=content,
+            source_class=_finnhub_source_class(payload),
+            source_ids=[
+                str(payload.get("url") or "").strip(),
+                ticker,
+                str(payload.get("published_at") or payload.get("datetime") or "").strip(),
+            ],
+            detail=f"Finnhub intake: {(title or ticker or 'event')[:80]}",
+        )
+        if not result.get("ok"):
+            return JSONResponse(
+                {
+                    "ok": False,
+                    "error": result.get("error", "enqueue_failed"),
+                    "detail": result.get("detail") or "Engine B enqueue failed.",
+                },
+                status_code=503,
+            )
+
+        _safe_log_event(
+            category="SIGNAL",
+            headline=f"Finnhub intake received: {(title or ticker or 'event')[:60]}",
+            detail=f"ticker={ticker or '-'}, source_class={_finnhub_source_class(payload)}",
+            ticker=ticker or None,
+            strategy="finnhub_webhook",
+        )
+
+        return {
+            "ok": True,
+            "job_id": result["job_id"],
+            "ticker": ticker,
+            "message": "Finnhub event queued for Engine B research.",
+        }
+
     @app.post("/api/webhooks/x_intel")
     async def x_intel_webhook(request: Request):
         """Receive X/Twitter content for LLM analysis.
@@ -3815,11 +5459,54 @@ def create_app() -> FastAPI:
             author=str(payload.get("author", "")),
             tickers=tickers_raw,
         )
+        engine_b_content = _build_engine_b_submission_content(submission)
 
-        job_id = str(uuid.uuid4())
-        create_job(job_id=job_id, job_type="intel_analysis", status="queued",
-                    detail=f"X intel: {submission.title[:80]}")
-        analyze_intel_async(submission, job_id)
+        if config.RESEARCH_SYSTEM_ACTIVE:
+            engine_b_result = _queue_engine_b_intake(
+                raw_content=engine_b_content,
+                source_class="social_curated",
+                source_ids=[
+                    submission.url or "",
+                    submission.author or "",
+                    *submission.tickers,
+                ],
+                detail=f"X intel: {submission.title[:80]}",
+            )
+            if not engine_b_result.get("ok"):
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": engine_b_result.get("error", "enqueue_failed"),
+                        "detail": engine_b_result.get("detail") or "Engine B enqueue failed.",
+                    },
+                    status_code=503,
+                )
+            job_id = str(engine_b_result["job_id"])
+            research_job_id = None
+            message = "X intel queued for Engine B research."
+        else:
+            job_id = _queue_council_analysis(
+                submission,
+                detail=f"X intel: {submission.title[:80]}",
+            )
+            engine_b_result = _queue_engine_b_intake(
+                raw_content=engine_b_content,
+                source_class="social_curated",
+                source_ids=[
+                    submission.url or "",
+                    submission.author or "",
+                    *submission.tickers,
+                ],
+                detail=f"X intel: {submission.title[:80]}",
+            )
+            if not engine_b_result.get("ok"):
+                logger.warning(
+                    "Engine B mirror enqueue failed for X intel %s: %s",
+                    job_id,
+                    engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
+                )
+            research_job_id = str(engine_b_result["job_id"]) if engine_b_result.get("ok") else None
+            message = "X intel queued for LLM analysis."
 
         _safe_log_event(
             category="SIGNAL",
@@ -3828,7 +5515,12 @@ def create_app() -> FastAPI:
             strategy="x_intel",
         )
 
-        return {"ok": True, "job_id": job_id, "message": "X intel queued for LLM analysis."}
+        return {
+            "ok": True,
+            "job_id": job_id,
+            "research_job_id": research_job_id,
+            "message": message,
+        }
 
     @app.post("/api/webhooks/telegram")
     async def telegram_webhook(request: Request):
@@ -3887,14 +5579,40 @@ def create_app() -> FastAPI:
                 url=url,
                 title=f"Forwarded via Telegram",
             )
+            engine_b_content = _build_engine_b_submission_content(submission)
 
-            job_id = str(uuid.uuid4())
-            create_job(job_id=job_id, job_type="intel_analysis", status="queued",
-                        detail=f"Telegram intel: {content[:80]}")
-            analyze_intel_async(submission, job_id)
-
-            # Reply to the user
-            _telegram_reply(chat_id, f"Queued for LLM analysis (job {job_id[:8]})")
+            if config.RESEARCH_SYSTEM_ACTIVE:
+                engine_b_result = _queue_engine_b_intake(
+                    raw_content=engine_b_content,
+                    source_class="social_curated",
+                    source_ids=[url, f"telegram:{chat_id}"],
+                    detail=f"Telegram intel: {content[:80]}",
+                )
+                if not engine_b_result.get("ok"):
+                    _telegram_reply(
+                        chat_id,
+                        f"Engine B enqueue failed: {engine_b_result.get('detail') or engine_b_result.get('error', 'unknown')}",
+                    )
+                    return JSONResponse({"ok": False}, status_code=503)
+                _telegram_reply(chat_id, f"Queued for Engine B research (job {str(engine_b_result['job_id'])[:8]})")
+            else:
+                job_id = _queue_council_analysis(
+                    submission,
+                    detail=f"Telegram intel: {content[:80]}",
+                )
+                engine_b_result = _queue_engine_b_intake(
+                    raw_content=engine_b_content,
+                    source_class="social_curated",
+                    source_ids=[url, f"telegram:{chat_id}", f"legacy:{job_id[:8]}"],
+                    detail=f"Telegram intel: {content[:80]}",
+                )
+                if not engine_b_result.get("ok"):
+                    logger.warning(
+                        "Engine B mirror enqueue failed for Telegram intel %s: %s",
+                        job_id,
+                        engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
+                    )
+                _telegram_reply(chat_id, f"Queued for LLM analysis (job {job_id[:8]})")
         elif text == "/status":
             status = control.status()
             mode = status.get("mode", "unknown")
@@ -3916,11 +5634,39 @@ def create_app() -> FastAPI:
                 url=url,
                 title="Telegram message",
             )
-            job_id = str(uuid.uuid4())
-            create_job(job_id=job_id, job_type="intel_analysis", status="queued",
-                        detail=f"Telegram intel: {text[:80]}")
-            analyze_intel_async(submission, job_id)
-            _telegram_reply(chat_id, f"Analyzing... (job {job_id[:8]})")
+            engine_b_content = _build_engine_b_submission_content(submission)
+            if config.RESEARCH_SYSTEM_ACTIVE:
+                engine_b_result = _queue_engine_b_intake(
+                    raw_content=engine_b_content,
+                    source_class="social_curated",
+                    source_ids=[url, f"telegram:{chat_id}"],
+                    detail=f"Telegram intel: {text[:80]}",
+                )
+                if not engine_b_result.get("ok"):
+                    _telegram_reply(
+                        chat_id,
+                        f"Engine B enqueue failed: {engine_b_result.get('detail') or engine_b_result.get('error', 'unknown')}",
+                    )
+                    return JSONResponse({"ok": False}, status_code=503)
+                _telegram_reply(chat_id, f"Queued for Engine B research (job {str(engine_b_result['job_id'])[:8]})")
+            else:
+                job_id = _queue_council_analysis(
+                    submission,
+                    detail=f"Telegram intel: {text[:80]}",
+                )
+                engine_b_result = _queue_engine_b_intake(
+                    raw_content=engine_b_content,
+                    source_class="social_curated",
+                    source_ids=[url, f"telegram:{chat_id}", f"legacy:{job_id[:8]}"],
+                    detail=f"Telegram intel: {text[:80]}",
+                )
+                if not engine_b_result.get("ok"):
+                    logger.warning(
+                        "Engine B mirror enqueue failed for Telegram freeform %s: %s",
+                        job_id,
+                        engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
+                    )
+                _telegram_reply(chat_id, f"Analyzing... (job {job_id[:8]})")
 
         return {"ok": True}
 
@@ -4421,6 +6167,33 @@ def build_portfolio_analytics_payload(days: int = config.PORTFOLIO_ANALYTICS_DEF
     }
 
 
+def _build_research_system_state_context() -> dict[str, Any]:
+    try:
+        pipeline = control.pipeline_status()
+    except Exception:
+        pipeline = {}
+
+    engine_b = pipeline.get("engine_b") if isinstance(pipeline, dict) else {}
+    running = bool(engine_b.get("running"))
+    status = str(engine_b.get("status") or ("running" if running else "stopped"))
+    queue_depth = int(engine_b.get("queue_depth") or 0)
+    active = bool(config.RESEARCH_SYSTEM_ACTIVE)
+    return {
+        "research_system_active": active,
+        "research_route_label": "Engine B Primary" if active else "Council Primary + Engine B Mirror",
+        "research_route_detail": (
+            "New intel intake routes directly into Engine B research."
+            if active
+            else "New intel still enters the legacy council flow while mirroring into Engine B research."
+        ),
+        "engine_b_state": {
+            "running": running,
+            "status": status,
+            "queue_depth": queue_depth,
+        },
+    }
+
+
 def _page_context(request: Request, page_key: str, title: str) -> dict[str, Any]:
     payload = build_status_payload()
     return {
@@ -4431,6 +6204,7 @@ def _page_context(request: Request, page_key: str, title: str) -> dict[str, Any]
         "summary": payload["summary"],
         "open_positions": payload["open_option_positions"],
         "default_mode": config.TRADING_MODE,
+        **_build_research_system_state_context(),
     }
 
 
@@ -4673,6 +6447,91 @@ def _parse_job_result(raw: str) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError:
         return raw
+
+
+def _summarize_top_candidates(rows: Any, limit: int = 3) -> list[dict[str, Any]]:
+    if not isinstance(rows, list):
+        return []
+    top: list[dict[str, Any]] = []
+    for row in rows[: max(1, int(limit))]:
+        if not isinstance(row, dict):
+            continue
+        research_vetoes = [code for code in (row.get("research_vetoes") or []) if str(code or "").strip()]
+        top.append(
+            {
+                "ticker": str(row.get("ticker") or "").upper(),
+                "action": str(row.get("action") or ""),
+                "final_score": row.get("final_score"),
+                "rank_score": row.get("rank_score"),
+                "research_layer_score": row.get("research_layer_score"),
+                "research_vetoes": research_vetoes,
+            }
+        )
+    return top
+
+
+def _build_signal_shadow_job_summary(parsed_result: Any) -> dict[str, Any] | None:
+    if not isinstance(parsed_result, dict):
+        return None
+    report = parsed_result
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    ranked = build_ranked_candidates(report, limit=3)
+    research_overlay = summarize_research_overlay(report)
+    return {
+        "kind": "signal_shadow_run",
+        "title": "Signal Shadow Summary",
+        "run_id": str(report.get("run_id") or ""),
+        "run_at": str(report.get("run_at") or ""),
+        "tickers_total": int(summary.get("tickers_total", 0)),
+        "tickers_scored": int(summary.get("tickers_scored", 0)),
+        "ranked_count": len(build_ranked_candidates(report, limit=20)),
+        "blocked_missing": int(summary.get("tickers_blocked_missing_required_layers", 0)),
+        "blocked_stale": int(summary.get("tickers_blocked_stale_layers", 0)),
+        "research_overlay": research_overlay,
+        "top_candidates": _summarize_top_candidates(ranked, limit=3),
+    }
+
+
+def _build_signal_tier1_job_summary(parsed_result: Any) -> dict[str, Any] | None:
+    if not isinstance(parsed_result, dict):
+        return None
+    report = parsed_result.get("shadow_report") if isinstance(parsed_result.get("shadow_report"), dict) else {}
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    ranked = build_ranked_candidates(report, limit=3) if report else []
+    research_overlay = summarize_research_overlay(report) if report else summarize_research_overlay({})
+    research_summary = parsed_result.get("research_summary") if isinstance(parsed_result.get("research_summary"), dict) else {}
+    layer_jobs = parsed_result.get("layer_jobs") if isinstance(parsed_result.get("layer_jobs"), dict) else {}
+    l9_job = layer_jobs.get("l9_research") if isinstance(layer_jobs.get("l9_research"), dict) else {}
+    return {
+        "kind": "signal_tier1_shadow_run",
+        "title": "Tier-1 Shadow Summary",
+        "run_id": str(parsed_result.get("run_id") or report.get("run_id") or ""),
+        "run_at": str(parsed_result.get("run_at") or report.get("run_at") or ""),
+        "tickers_total": int(summary.get("tickers_total", 0)),
+        "tickers_scored": int(summary.get("tickers_scored", 0)),
+        "ranked_count": len(parsed_result.get("ranked_candidates") or []),
+        "blocked_missing": int(summary.get("tickers_blocked_missing_required_layers", 0)),
+        "blocked_stale": int(summary.get("tickers_blocked_stale_layers", 0)),
+        "research_overlay": research_overlay,
+        "research_job": {
+            "status": str(l9_job.get("status") or ""),
+            "detail": str(l9_job.get("detail") or ""),
+            "job_id": str(l9_job.get("job_id") or ""),
+            "tickers_success": int(research_summary.get("tickers_success", 0)),
+            "tickers_failed": int(research_summary.get("tickers_failed", 0)),
+            "tickers_skipped": int(research_summary.get("tickers_skipped", 0)),
+        },
+        "top_candidates": _summarize_top_candidates(ranked, limit=3),
+    }
+
+
+def _build_job_detail_summary(job_type: str, parsed_result: Any) -> dict[str, Any] | None:
+    clean_job_type = str(job_type or "").strip().lower()
+    if clean_job_type == "signal_shadow_run":
+        return _build_signal_shadow_job_summary(parsed_result)
+    if clean_job_type == "signal_tier1_shadow_run":
+        return _build_signal_tier1_job_summary(parsed_result)
+    return None
 
 
 def _load_order_intent_store():

@@ -1,0 +1,127 @@
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+  <div class="flex justify-between items-baseline gap-4 mb-3">
+    <div>
+      <h2 class="text-lg font-semibold text-gray-800">Research Chain Viewer</h2>
+      <p class="text-gray-400 text-sm">
+        {% if chain_id %}
+          Chain {{ chain_id[:8] }} | {{ artifact_count }} artifacts
+        {% else %}
+          Select a research row to inspect the full artifact lineage.
+        {% endif %}
+      </p>
+    </div>
+    <div class="flex items-center gap-2 flex-wrap justify-end">
+      {% if chain_id and not error %}
+        <button
+          class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+          hx-post="/api/actions/research/synthesize"
+          hx-vals='{"chain_id":"{{ chain_id }}"}'
+          hx-target="#research-operator-output"
+          hx-swap="innerHTML"
+        >Synthesize</button>
+        {% if can_generate_post_mortem %}
+          <button
+            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+            hx-post="/api/actions/research/post-mortem"
+            hx-vals='{"chain_id":"{{ chain_id }}"}'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+          >{% if post_mortem_count %}Regenerate Post-Mortem{% else %}Generate Post-Mortem{% endif %}</button>
+        {% endif %}
+      {% endif %}
+      <p class="text-xs text-gray-400 font-mono">{{ generated_at }}</p>
+    </div>
+  </div>
+
+  {% if error %}
+    <p class="text-sm text-amber-600">{{ error }}</p>
+  {% elif artifacts %}
+    {% if latest %}
+      <div class="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-3">
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Latest Type</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest.artifact_label }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Engine</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest.engine }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Ticker</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest.ticker or "-" }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Status</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest.status }}</p>
+        </div>
+        <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Progression</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">
+            {% if latest_scoring and latest_scoring.body.get("next_stage") %}
+              {{ latest_scoring.body.get("next_stage") }}
+            {% elif latest.artifact_type == "trade_sheet" %}
+              pilot_ready
+            {% else %}
+              -
+            {% endif %}
+          </p>
+        </div>
+      </div>
+    {% endif %}
+
+    <div class="space-y-3">
+      {% for artifact in artifacts %}
+        <article class="border border-gray-200 rounded-lg p-3">
+          <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">
+                  v{{ artifact.version }}
+                </span>
+                <span class="text-sm font-semibold text-gray-800">{{ artifact.artifact_label }}</span>
+                {% if artifact.ticker %}
+                  <span class="text-xs font-mono text-gray-500">{{ artifact.ticker }}</span>
+                {% endif %}
+              </div>
+              <p class="mt-1 text-xs text-gray-400 font-mono">
+                {{ artifact.artifact_id[:8] }}{% if artifact.parent_id %} <- {{ artifact.parent_id[:8] }}{% endif %}
+              </p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ artifact.engine }}</span>
+              {% if artifact.edge_family %}
+                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">{{ artifact.edge_family }}</span>
+              {% endif %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ artifact.status }}</span>
+            </div>
+          </div>
+
+          <div class="mt-3 grid grid-cols-1 lg:grid-cols-[180px_1fr] gap-2 text-sm">
+            <span class="text-gray-400">Created</span>
+            <span class="text-gray-700 font-mono text-xs">{{ artifact.created_at or "-" }}</span>
+          </div>
+          {% if artifact.summary %}
+            <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2">
+              {% for item in artifact.summary %}
+                <div class="grid grid-cols-[110px_1fr] gap-2 items-start">
+                  <span class="text-xs uppercase tracking-wide text-gray-400">{{ item.label }}</span>
+                  <span class="text-sm text-gray-700">{{ item.value }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <details class="mt-3">
+            <summary class="cursor-pointer text-sm font-semibold text-gray-600">Raw Body</summary>
+            <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ artifact.body | tojson(indent=2) }}</pre>
+          </details>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center">
+      <p class="text-sm text-gray-500">No research chain selected.</p>
+      <p class="mt-1 text-xs text-gray-400">Use "View chain" on an active hypothesis or recent decision.</p>
+    </div>
+  {% endif %}
+</section>

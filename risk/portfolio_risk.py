@@ -10,7 +10,7 @@ operator briefings (B-004).
 import logging
 import math
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
 
 from data.trade_db import (
@@ -18,6 +18,7 @@ from data.trade_db import (
     get_conn,
     save_risk_daily_snapshot,
 )
+from utils.datetime_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -375,7 +376,7 @@ def get_risk_briefing(
         "net_exposure_pct": round(net_exposure_pct, 2),
         "cash_buffer_pct": round(cash_buffer_pct, 2),
         "open_risk_pct": round(risk.total_heat_pct, 2),
-        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generated_at": utc_now().isoformat().replace("+00:00", "Z"),
         "status": verdict["status"],
         "alerts": alerts,
         "limits": limits,
