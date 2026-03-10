@@ -7,6 +7,7 @@ import json
 import sys
 import uuid
 from pathlib import Path
+from typing import get_args
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -14,10 +15,16 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.engine.control import BotControlService
 from research.artifact_store import ArtifactStore
+from research.artifacts import EventCard
 from research.readiness import build_research_readiness_report
 from research.runtime import build_engine_a_pipeline, build_engine_b_pipeline
 from research.shared.decay_review import DecayReviewService
 from research.shared.kill_monitor import KillMonitor
+
+EVENT_SOURCE_CLASSES = tuple(
+    str(value)
+    for value in get_args(EventCard.model_fields["source_class"].annotation)
+)
 
 
 def _build_control() -> BotControlService:
@@ -51,6 +58,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--source-class",
+        choices=EVENT_SOURCE_CLASSES,
         default="news_wire",
         help="Engine B source class.",
     )
