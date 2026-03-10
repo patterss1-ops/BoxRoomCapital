@@ -10,14 +10,16 @@
 - Engine A and Engine B both validated against the real DB/runtime on 2026-03-10.
 - No IG demo credentials are configured, so all bounded broker validation was done against live IG at minimum size.
 - One intentional six-symbol held live Engine A batch was opened, inspected, and then flattened on 2026-03-10.
-- The live IG account is currently flat after that held-batch round trip.
-- The local ledger was synced after the close and now also shows no live IG positions.
+- A later one-symbol live `NQ -> QQQ` smoke-close also passed using inline ledger sync on 2026-03-10.
+- The live IG account is currently flat.
+- The local ledger also shows no live IG positions after the latest inline-sync validation.
 - The latest live hardening commits are:
   - `97af3d2` — disable implicit IG protective stops by default
   - `92504e4` — detect live Engine A position mismatches after dispatch
   - `cd82bf6` — reuse connected broker sessions during multi-intent dispatch and fail the CLI when a live batch is partial/incomplete
   - `1fa15aa` — map fresh-session IG positions back to configured tickers
   - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
+  - `256fa10` — allow live Engine A open/close flows to sync the ledger inline via `--sync-ledger`
 
 ## What Is Already Done
 
@@ -66,6 +68,8 @@
 - CLI execution now fails loudly on partial dispatches and exposes per-intent statuses instead of returning a false `ok: true`.
 - Fresh-session IG inspection now maps open positions back to configured tickers instead of surfacing raw EPICs.
 - IG open deals are now persisted into the local `positions` table on fill and reused on reconnect so exact ticker/strategy/deal-id context survives session loss.
+- The main Engine A execution script can now sync the ledger inline after live dispatch or close-only flows via `--sync-ledger`.
+- The preferred bounded live validation path is now one command: `scripts/execute_engine_a_rebalance.py --mode live --symbols NQ --size-mode min --commit --dispatch --allow-live --smoke-close --sync-ledger`.
 
 ## Most Recent Tranches
 
@@ -80,6 +84,8 @@
 - `0deba3f` — persist IG deal mappings across reconnects
 - `d70ea69` — update ops note with the bounded full-batch live validation result
 - `718da26` — refresh restart checkpoint after bounded live validation
+- `256fa10` — add inline ledger sync to Engine A execution
+- later verification: one-symbol live `NQ -> QQQ` smoke-close passed with inline ledger sync, leaving broker + ledger flat
 
 ## Key Files To Re-open First
 
@@ -164,11 +170,30 @@ Run:
 python scripts/execute_engine_a_rebalance.py --mode live --size-mode min
 ```
 
-### 4. If you intentionally want live exposure, use the bounded flow first
+### 4. For bounded live validation, use the inline-sync smoke-close flow
 Run:
 
 ```bash
-python scripts/execute_engine_a_rebalance.py --mode live --size-mode min --commit --dispatch --allow-live
+python scripts/execute_engine_a_rebalance.py --mode live --symbols NQ --size-mode min --commit --dispatch --allow-live --smoke-close --sync-ledger
+```
+
+Expected:
+
+- the order opens and closes in one run
+- `ledger_sync` is present in the result payload
+- a follow-up broker check reports `open_positions: 0`
+
+Then verify broker state:
+
+```bash
+python scripts/check_ig_access.py --mode live --timeout 10
+```
+
+### 5. If you intentionally want to hold exposure, omit `--smoke-close`
+Run:
+
+```bash
+python scripts/execute_engine_a_rebalance.py --mode live --size-mode min --commit --dispatch --allow-live --sync-ledger
 ```
 
 Then verify broker state after the hold window:
@@ -177,13 +202,13 @@ Then verify broker state after the hold window:
 python scripts/check_ig_access.py --mode live --timeout 10
 ```
 
-If the batch is only for validation, flatten it:
+When you are done holding the batch, flatten it with inline sync:
 
 ```bash
-python scripts/execute_engine_a_rebalance.py --mode live --close-instruments CL=F,GC=F,HG=F,NG=F,QQQ,IWM
+python scripts/execute_engine_a_rebalance.py --mode live --close-instruments CL=F,GC=F,HG=F,NG=F,QQQ,IWM --sync-ledger
 ```
 
-Then sync the flat account back into the ledger:
+### 6. Use the standalone sync CLI only for out-of-band reconciliation
 
 ```bash
 python scripts/sync_broker_snapshot.py --broker ig --mode live --account-type SPREADBET --sleeve core

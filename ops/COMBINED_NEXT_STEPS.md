@@ -224,13 +224,16 @@ Items 1-10 complete.
   - `1fa15aa` — map fresh-session IG positions back to configured tickers
   - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
   - `1b205a5` — add a first-class broker-to-ledger sync CLI for post-trade reconciliation
+  - `256fa10` — allow Engine A live execution flows to sync the ledger inline via `--sync-ledger`
 - Current validated live path on 2026-03-10:
   - single-symbol live `CL` open/hold/close passed
   - single-symbol live `GC` open/hold/close passed
   - full six-symbol live Engine A batch opened cleanly, survived the previous failure window with all 6 positions present at IG, and then flattened cleanly
   - one intentional six-symbol held live Engine A batch was opened, inspected, synced into the ledger, and then flattened cleanly
+  - a later one-symbol live `NQ -> QQQ` smoke-close also passed with inline `--sync-ledger`, leaving broker + ledger flat in one run
 - Current operational state:
-  - live IG account flat after the held-batch round trip
-  - local ledger matches the flat broker state after post-close sync
+  - live IG account flat after the held-batch round trip and later inline-sync smoke validation
+  - local ledger matches the flat broker state; latest inline-sync validation also returned `ledger_position_count: 0`
   - the held-batch round trip realized approximately `-0.68` versus the pre-hold cash balance
   - full-batch live validation is complete; any further run should be treated as intentional exposure, not infrastructure proving
+  - the preferred low-friction live validation command is now `python scripts/execute_engine_a_rebalance.py --mode live --symbols NQ --size-mode min --commit --dispatch --allow-live --smoke-close --sync-ledger`
