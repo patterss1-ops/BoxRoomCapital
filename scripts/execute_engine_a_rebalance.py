@@ -185,6 +185,74 @@ def _ig_market_details_from_preview(preview) -> dict[str, dict[str, object]]:
     return details
 
 
+def _ig_open_positions_snapshot(broker) -> list[dict[str, object]]:
+    if hasattr(broker, "get_open_positions_snapshot"):
+        rows = broker.get_open_positions_snapshot()
+        return [dict(row) for row in rows]
+
+    session = getattr(broker, "session", None)
+    base_url = getattr(broker, "base_url", "")
+    headers_fn = getattr(broker, "_headers", None)
+    if session is None or not base_url or not callable(headers_fn):
+        return []
+
+    response = session.get(
+        f"{base_url}/positions",
+        headers=headers_fn("2"),
+        timeout=5,
+    )
+    if response.status_code != 200:
+        return []
+    payload = response.json()
+    rows: list[dict[str, object]] = []
+    for item in payload.get("positions", []):
+        market = item.get("market", {}) if isinstance(item, dict) else {}
+        position = item.get("position", {}) if isinstance(item, dict) else {}
+        rows.append(
+            {
+                "epic": str(market.get("epic") or ""),
+                "deal_id": str(position.get("dealId") or ""),
+                "direction": str(position.get("direction") or ""),
+                "size": float(position.get("size", 0) or 0),
+            }
+        )
+    return rows
+
+
+def _reconcile_live_ig_positions(
+    queued_intents: list[dict[str, object]],
+    *,
+    broker,
+) -> dict[str, object]:
+    requested: list[str] = []
+    for item in queued_intents:
+        instrument = str(item.get("instrument") or "").strip()
+        if instrument and instrument not in requested:
+            requested.append(instrument)
+
+    epic_to_ticker = {
+        str(details.get("epic") or "").strip(): ticker
+        for ticker, details in dict(config.MARKET_MAP or {}).items()
+        if str(details.get("epic") or "").strip()
+    }
+    open_snapshot = _ig_open_positions_snapshot(broker)
+    open_instruments: list[str] = []
+    for row in open_snapshot:
+        epic = str(row.get("epic") or "").strip()
+        instrument = epic_to_ticker.get(epic) or epic
+        if instrument and instrument not in open_instruments:
+            open_instruments.append(instrument)
+
+    requested_set = set(requested)
+    open_set = set(open_instruments)
+    return {
+        "requested": requested,
+        "open": [instrument for instrument in requested if instrument in open_set],
+        "missing": [instrument for instrument in requested if instrument not in open_set],
+        "unexpected": sorted(open_set - requested_set),
+    }
+
+
 def main() -> int:
     args = _parse_args()
     if args.dispatch and not args.commit:
@@ -325,6 +393,24 @@ def main() -> int:
                 payload["dispatch_summary"] = dispatcher.run_intent_ids(
                     [str(item.get("intent_id") or "") for item in result.queued_intents]
                 ).to_dict()
+                if broker_mode == "live" and preview.broker_target == "ig" and not args.smoke_close:
+                    broker = dispatcher._brokers.get("ig")
+                    if broker is not None:
+                        payload["live_position_reconciliation"] = _reconcile_live_ig_positions(
+                            result.queued_intents,
+                            broker=broker,
+                        )
+                        missing = payload["live_position_reconciliation"].get("missing") or []
+                        if missing:
+                            payload["ok"] = False
+                            payload["error"] = "live_position_mismatch"
+                            payload["message"] = (
+                                "Live dispatch completed locally, but some intended instruments are "
+                                "not present in the current IG open-positions snapshot."
+                            )
+                            payload["status"] = "position_mismatch"
+                            print(json.dumps(payload, indent=2, sort_keys=True))
+                            return 1
                 if args.smoke_close:
                     if broker_mode != "live":
                         payload["ok"] = False
