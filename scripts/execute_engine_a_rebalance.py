@@ -25,7 +25,24 @@ from research.manual_execution import (
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Preview or execute the latest Engine A rebalance")
+    parser = argparse.ArgumentParser(
+        description="Preview or execute the latest Engine A rebalance",
+        epilog=(
+            "Examples:\n"
+            "  Preview latest bounded live batch:\n"
+            "    python scripts/execute_engine_a_rebalance.py --mode live --size-mode min\n"
+            "  Bounded live validation with inline ledger sync:\n"
+            "    python scripts/execute_engine_a_rebalance.py --mode live --symbols NQ --size-mode min "
+            "--commit --dispatch --allow-live --smoke-close --sync-ledger\n"
+            "  Intentionally hold the bounded live batch:\n"
+            "    python scripts/execute_engine_a_rebalance.py --mode live --size-mode min "
+            "--commit --dispatch --allow-live --sync-ledger\n"
+            "  Flatten a held live batch with inline sync:\n"
+            "    python scripts/execute_engine_a_rebalance.py --mode live "
+            "--close-instruments CL=F,GC=F,HG=F,NG=F,QQQ,IWM --sync-ledger"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--mode",
         choices=("paper", "demo", "live"),

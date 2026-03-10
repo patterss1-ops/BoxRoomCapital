@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 from broker.base import OrderResult
 from research.manual_execution import ManualEngineAExecutionPreview
@@ -20,6 +21,24 @@ class _FakeInstrument:
         self.broker = broker
         self.instrument_type = "spread_bet" if broker == "ig" else "future"
         self.contract_details = f"ticker={ticker}"
+
+
+def test_parse_args_help_includes_bounded_live_examples(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["execute_engine_a_rebalance.py", "--help"])
+
+    try:
+        script._parse_args()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("Expected argparse help to exit")
+
+    help_text = capsys.readouterr().out
+
+    assert "--sync-ledger" in help_text
+    assert "--smoke-close" in help_text
+    assert "--symbols NQ --size-mode min --commit --dispatch --allow-live --smoke-close --sync-ledger" in help_text
+    assert "--close-instruments CL=F,GC=F,HG=F,NG=F,QQQ,IWM --sync-ledger" in help_text
 
 
 def test_main_mode_override_uses_demo_without_global_config(monkeypatch, capsys):
