@@ -185,3 +185,43 @@ def test_main_close_only_uses_smoke_close_helper(monkeypatch, capsys):
     assert exit_code == 0
     assert payload["status"] == "closed_only"
     assert [item["instrument"] for item in payload["smoke_close_results"]] == ["CL=F", "GC=F"]
+
+
+def test_ig_market_details_from_preview_preserves_reference_price():
+    preview = ManualEngineAExecutionPreview(
+        chain_id="chain-a",
+        rebalance=_FakeRebalance(),
+        deltas={"NQ": 1.0},
+        broker_target="ig",
+        size_mode="min",
+        instruments=[
+            _FakeInstrument(
+                "QQQ",
+                "ig",
+            ),
+        ],
+    )
+    preview.instruments[0].contract_details = (
+        "root_symbol=NQ;"
+        "delta_contracts=1.0000;"
+        "raw_order_qty=1.0000;"
+        "route=ig;"
+        "size_mode=min;"
+        "ig_min_deal_size=0.0100;"
+        "ig_epic=IX.D.NASDAQ.CASH.IP;"
+        "market_status=TRADEABLE;"
+        "reference_price=438.750000;"
+        "order_qty=0.0100;"
+        "proxy_symbol=QQQ"
+    )
+
+    details = script._ig_market_details_from_preview(preview)
+
+    assert details == {
+        "QQQ": {
+            "epic": "IX.D.NASDAQ.CASH.IP",
+            "min_deal_size": 0.01,
+            "market_status": "TRADEABLE",
+            "reference_price": 438.75,
+        }
+    }

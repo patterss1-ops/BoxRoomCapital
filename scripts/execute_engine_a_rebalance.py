@@ -175,6 +175,13 @@ def _ig_market_details_from_preview(preview) -> dict[str, dict[str, object]]:
             "min_deal_size": min_deal_size,
             "market_status": str(parsed.get("market_status") or ""),
         }
+        reference_price = parsed.get("reference_price")
+        try:
+            reference_price_value = float(reference_price)
+        except (TypeError, ValueError):
+            reference_price_value = 0.0
+        if reference_price_value > 0:
+            details[ticker]["reference_price"] = reference_price_value
     return details
 
 

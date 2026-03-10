@@ -202,6 +202,19 @@ def _extract_min_deal_size(market_info: dict[str, Any]) -> float:
     return float(min_size or 0)
 
 
+def _extract_snapshot_reference_price(market_info: dict[str, Any]) -> float | None:
+    snapshot = market_info.get("snapshot", {}) if isinstance(market_info, dict) else {}
+    bid = float(snapshot.get("bid", 0) or 0)
+    offer = float(snapshot.get("offer", 0) or 0)
+    if bid > 0 and offer > 0:
+        return (bid + offer) / 2.0
+    if bid > 0:
+        return bid
+    if offer > 0:
+        return offer
+    return None
+
+
 def fetch_ig_market_details(proxy_tickers: list[str]) -> IGMarketDetailMap:
     is_demo = config.ig_broker_is_demo()
     broker = IGBroker(is_demo=is_demo)
@@ -223,6 +236,7 @@ def fetch_ig_market_details(proxy_tickers: list[str]) -> IGMarketDetailMap:
                 raise ValueError(f"IG market {ticker} did not return a usable min deal size")
             instrument = market_info.get("instrument", {}) if isinstance(market_info, dict) else {}
             snapshot = market_info.get("snapshot", {}) if isinstance(market_info, dict) else {}
+            reference_price = _extract_snapshot_reference_price(market_info)
             details[ticker] = {
                 "epic": epic,
                 "min_deal_size": min_deal_size,
@@ -230,6 +244,8 @@ def fetch_ig_market_details(proxy_tickers: list[str]) -> IGMarketDetailMap:
                 "market_status": str(snapshot.get("marketStatus") or ""),
                 "expiry": str(instrument.get("expiry") or ""),
             }
+            if reference_price is not None and reference_price > 0:
+                details[ticker]["reference_price"] = float(reference_price)
     finally:
         broker.disconnect()
 
@@ -302,6 +318,9 @@ def build_manual_engine_a_trade_instruments(
             contract_details.append(f"ig_epic={market_detail['epic']}")
             if market_detail.get("market_status"):
                 contract_details.append(f"market_status={market_detail['market_status']}")
+            reference_price = float(market_detail.get("reference_price", 0) or 0)
+            if reference_price > 0:
+                contract_details.append(f"reference_price={reference_price:.6f}")
         contract_details.append(f"order_qty={order_qty:.4f}")
         contract_details.append(f"proxy_symbol={proxy_ticker}")
         instruments.append(
@@ -495,6 +514,9 @@ def queue_manual_engine_a_order_intents(
                 "is_exit": False,
             },
         )
+        reference_price = float(details.get("reference_price") or 0.0)
+        if reference_price > 0:
+            intent.metadata["reference_price"] = reference_price
         submitted.append(
             order_intent_creator(
                 intent=intent,

@@ -139,8 +139,8 @@ def test_preview_manual_engine_a_rebalance_uses_min_ig_size(monkeypatch):
         chain_id="chain-a",
         artifact_store=fake_store,
         ig_market_details={
-            "SPY": {"epic": "IX.D.SPTRD.DAILY.IP", "min_deal_size": 0.5, "market_status": "TRADEABLE"},
-            "QQQ": {"epic": "IX.D.NASDAQ.CASH.IP", "min_deal_size": 1.0, "market_status": "TRADEABLE"},
+            "SPY": {"epic": "IX.D.SPTRD.DAILY.IP", "min_deal_size": 0.5, "market_status": "TRADEABLE", "reference_price": 512.25},
+            "QQQ": {"epic": "IX.D.NASDAQ.CASH.IP", "min_deal_size": 1.0, "market_status": "TRADEABLE", "reference_price": 438.75},
         },
     )
 
@@ -151,8 +151,10 @@ def test_preview_manual_engine_a_rebalance_uses_min_ig_size(monkeypatch):
     }
     assert instrument_details["SPY"]["order_qty"] == "0.5000"
     assert instrument_details["SPY"]["ig_min_deal_size"] == "0.5000"
+    assert instrument_details["SPY"]["reference_price"] == "512.250000"
     assert instrument_details["QQQ"]["order_qty"] == "1.0000"
     assert instrument_details["QQQ"]["size_mode"] == "min"
+    assert instrument_details["QQQ"]["reference_price"] == "438.750000"
 
 
 def test_preview_manual_engine_a_rebalance_filters_requested_symbols(monkeypatch):
@@ -229,8 +231,8 @@ def test_execute_manual_engine_a_rebalance_queues_min_sized_live_intents(monkeyp
         order_intent_creator=fake_create_order_intent_envelope,
         db_path="ignored.db",
         ig_market_details={
-            "SPY": {"epic": "IX.D.SPTRD.DAILY.IP", "min_deal_size": 0.5, "market_status": "TRADEABLE"},
-            "QQQ": {"epic": "IX.D.NASDAQ.CASH.IP", "min_deal_size": 1.0, "market_status": "TRADEABLE"},
+            "SPY": {"epic": "IX.D.SPTRD.DAILY.IP", "min_deal_size": 0.5, "market_status": "TRADEABLE", "reference_price": 512.25},
+            "QQQ": {"epic": "IX.D.NASDAQ.CASH.IP", "min_deal_size": 1.0, "market_status": "TRADEABLE", "reference_price": 438.75},
         },
     )
 
@@ -239,3 +241,4 @@ def test_execute_manual_engine_a_rebalance_queues_min_sized_live_intents(monkeyp
     assert {intent["broker_target"] for intent in queued_intents} == {"ig"}
     assert {intent["instrument"] for intent in queued_intents} == {"SPY", "QQQ"}
     assert {intent["qty"] for intent in queued_intents} == {0.5, 1.0}
+    assert {intent["metadata"]["reference_price"] for intent in queued_intents} == {512.25, 438.75}
