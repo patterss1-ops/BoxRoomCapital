@@ -20,6 +20,7 @@ from broker.base import (
     SpreadOrderResult,
 )
 import config
+from data.trade_db import get_open_positions, remove_position, upsert_position
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,28 @@ class IGBroker(BaseBroker):
             if not ticker_value.endswith("_trend"):
                 return ticker_value
         return fallback
+
+    def _persisted_position_for_deal(self, deal_id: str) -> dict | None:
+        deal_id_value = str(deal_id or "").strip()
+        if not deal_id_value:
+            return None
+        for row in get_open_positions():
+            if str(row.get("deal_id") or "").strip() == deal_id_value:
+                return row
+        return None
+
+    def _persisted_position_for_ticker_strategy(self, ticker: str, strategy: str) -> dict | None:
+        ticker_value = str(ticker or "").strip()
+        strategy_value = str(strategy or "").strip()
+        if not ticker_value or not strategy_value:
+            return None
+        for row in get_open_positions():
+            if str(row.get("ticker") or "").strip() != ticker_value:
+                continue
+            if str(row.get("strategy") or "").strip() != strategy_value:
+                continue
+            return row
+        return None
 
     def _protective_stop_distance(self, market_info: dict | None) -> str | None:
         if not config.IG_ATTACH_PROTECTIVE_STOPS:
@@ -235,11 +258,17 @@ class IGBroker(BaseBroker):
                 epic = mkt.get("epic", "")
                 direction = "long" if pos.get("direction") == "BUY" else "short"
 
-                # Look up ticker and strategy from our deal map
-                ticker, strategy = self._deal_map.get(
-                    deal_id,
-                    (self._ticker_from_epic(epic), "unknown"),
-                )
+                # Look up ticker/strategy from current-session memory first, then persisted local state.
+                ticker, strategy = self._deal_map.get(deal_id, ("", ""))
+                if not ticker:
+                    persisted = self._persisted_position_for_deal(deal_id)
+                    if persisted is not None:
+                        ticker = str(persisted.get("ticker") or "").strip()
+                        strategy = str(persisted.get("strategy") or "").strip()
+                if not ticker:
+                    ticker = self._ticker_from_epic(epic)
+                if not strategy:
+                    strategy = "unknown"
 
                 size = float(pos.get("size", pos.get("dealSize", 0)))
                 entry_price = float(pos.get("openLevel", pos.get("level", 0)))
@@ -439,7 +468,21 @@ class IGBroker(BaseBroker):
 
             # Confirm the deal
             time.sleep(1)
-            return self._confirm_deal(deal_ref, ticker, strategy, stake)
+            result = self._confirm_deal(deal_ref, ticker, strategy, stake)
+            if result.success and result.order_id:
+                try:
+                    upsert_position(
+                        deal_id=result.order_id,
+                        ticker=ticker,
+                        strategy=strategy,
+                        direction="long" if direction == "BUY" else "short",
+                        size=float(result.fill_qty or stake),
+                        entry_price=float(result.fill_price or 0.0),
+                        entry_time=(result.timestamp or datetime.now()).isoformat(),
+                    )
+                except Exception as exc:
+                    logger.warning("Could not persist IG open position %s: %s", result.order_id, exc)
+            return result
 
         except Exception as e:
             logger.error(f"Order error: {e}")
@@ -481,9 +524,12 @@ class IGBroker(BaseBroker):
             positions = self.get_positions()
             if positions:
                 # Assume the last position is ours
+                latest = positions[-1]
+                if latest.deal_id:
+                    self._deal_map[latest.deal_id] = (ticker, strategy)
                 return OrderResult(
                     success=True,
-                    order_id=deal_ref,
+                    order_id=latest.deal_id or deal_ref,
                     fill_qty=size,
                     timestamp=datetime.now(),
                     message="Placed (confirm unavailable, position found)",
@@ -876,6 +922,21 @@ class IGBroker(BaseBroker):
                 deal_id = did
                 break
 
+        # Next, recover exact deal_id from persisted local open-position state.
+        if not deal_id:
+            persisted = self._persisted_position_for_ticker_strategy(ticker, strategy)
+            if persisted is not None:
+                deal_id = str(persisted.get("deal_id") or "").strip() or None
+                persisted_direction = str(persisted.get("direction") or "").strip().lower()
+                if persisted_direction == "short":
+                    close_direction = "BUY"
+                elif persisted_direction == "long":
+                    close_direction = "SELL"
+                try:
+                    close_size = float(persisted.get("size") or close_size)
+                except (TypeError, ValueError):
+                    close_size = close_size
+
         # If not in map, search IG's open positions
         if not deal_id:
             epic = self.get_epic(ticker)
@@ -934,6 +995,10 @@ class IGBroker(BaseBroker):
 
             if result.success:
                 self._deal_map.pop(deal_id, None)
+                try:
+                    remove_position(deal_id)
+                except Exception as exc:
+                    logger.warning("Could not remove IG position %s from local state: %s", deal_id, exc)
                 logger.info(f"Position closed: {deal_id}")
 
             return result

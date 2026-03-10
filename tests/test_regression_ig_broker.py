@@ -18,6 +18,7 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime
 
 from broker.ig import IGBroker
+from broker.base import OrderResult
 
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -137,6 +138,35 @@ class TestPositions:
         assert len(positions) == 1
         assert positions[0].ticker == "QQQ"
         assert positions[0].strategy == "unknown"
+
+    def test_get_positions_uses_persisted_local_position_for_strategy_context(self, broker, mock_session, monkeypatch):
+        mock_session.get.return_value.json.return_value = {
+            "positions": [
+                {
+                    "position": {
+                        "dealId": "DEALQQQ",
+                        "direction": "BUY",
+                        "size": 0.01,
+                        "level": 24992.8,
+                    },
+                    "market": {
+                        "epic": "IX.D.NASDAQ.CASH.IP",
+                        "bid": 24995.8,
+                        "offer": 24996.8,
+                    },
+                }
+            ]
+        }
+        monkeypatch.setattr(
+            "broker.ig.get_open_positions",
+            lambda: [{"deal_id": "DEALQQQ", "ticker": "QQQ", "strategy": "research_engine_a_rebalance"}],
+        )
+
+        positions = broker.get_positions()
+
+        assert len(positions) == 1
+        assert positions[0].ticker == "QQQ"
+        assert positions[0].strategy == "research_engine_a_rebalance"
 
     def test_get_positions_network_error_returns_empty(self, broker, mock_session):
         """IG broker catches exceptions and returns empty list on error."""
@@ -269,6 +299,39 @@ class TestOrderPlacement:
         payload = mock_session.post.call_args.kwargs["json"]
         assert payload["stopDistance"] == "8.0"
 
+    def test_place_long_persists_open_position_on_success(self, broker, mock_session, monkeypatch):
+        mock_session.post.return_value.json.return_value = {"dealReference": "REF127"}
+        mock_session.post.return_value.status_code = 200
+        broker.get_epic = lambda ticker: "IX.D.TEST.IP"
+        broker.get_market_info = lambda epic: {"instrument": {"expiry": "DFB"}}
+        monkeypatch.setattr(
+            broker,
+            "_confirm_deal",
+            lambda deal_ref, ticker, strategy, size: OrderResult(
+                success=True,
+                order_id="DEAL127",
+                fill_price=501.25,
+                fill_qty=size,
+                timestamp=datetime(2026, 3, 10, 20, 0, 0),
+            ),
+        )
+        persisted = {}
+        monkeypatch.setattr(
+            "broker.ig.upsert_position",
+            lambda **kwargs: persisted.update(kwargs),
+        )
+        monkeypatch.setattr("time.sleep", lambda _: None)
+
+        result = broker.place_long("FTSE", 1.0, "IBS++")
+
+        assert result.success is True
+        assert persisted["deal_id"] == "DEAL127"
+        assert persisted["ticker"] == "FTSE"
+        assert persisted["strategy"] == "IBS++"
+        assert persisted["direction"] == "long"
+        assert persisted["size"] == 1.0
+        assert persisted["entry_price"] == 501.25
+
 
 # ─── Close position (actual API: close_position(ticker, strategy)) ──────────
 
@@ -283,6 +346,36 @@ class TestClosePosition:
             "dealReference": "CLOSE_REF1"
         }
         mock_session.delete.return_value.status_code = 200
+
+    def test_close_position_uses_persisted_deal_id_when_session_map_missing(self, broker, mock_session, monkeypatch):
+        mock_session.post.return_value.json.return_value = {"dealReference": "CLOSE_REF2"}
+        mock_session.post.return_value.status_code = 200
+        monkeypatch.setattr(
+            "broker.ig.get_open_positions",
+            lambda: [
+                {
+                    "deal_id": "DEAL_PERSISTED",
+                    "ticker": "QQQ",
+                    "strategy": "research_engine_a_rebalance",
+                    "direction": "long",
+                    "size": 0.01,
+                }
+            ],
+        )
+        removed = []
+        monkeypatch.setattr("broker.ig.remove_position", lambda deal_id: removed.append(deal_id))
+        monkeypatch.setattr(
+            broker,
+            "_confirm_deal",
+            lambda deal_ref, ticker, strategy, size: OrderResult(success=True, order_id="CLOSED", fill_qty=size),
+        )
+        monkeypatch.setattr("time.sleep", lambda _: None)
+
+        result = broker.close_position("QQQ", "research_engine_a_rebalance")
+
+        assert result.success is True
+        assert mock_session.post.call_args.kwargs["json"]["dealId"] == "DEAL_PERSISTED"
+        assert removed == ["DEAL_PERSISTED"]
         # _deal_map stores {deal_id: (ticker, strategy)} tuples
         broker._deal_map["DEAL1"] = ("FTSE", "IBS++")
         result = broker.close_position(ticker="FTSE", strategy="IBS++")
