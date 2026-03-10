@@ -43,3 +43,4 @@ run = ["python3", "run_console.py"]
 
 [userenv.shared]
 NOTIFICATIONS_ENABLED = "true"
+RESEARCH_DB_DSN = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
