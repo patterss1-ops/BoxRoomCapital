@@ -1,7 +1,10 @@
 <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-gray-800">Recent Decisions</h2>
-    <p class="text-gray-400 text-sm">Acknowledged decay reviews.</p>
+    <div>
+      <h2 class="text-lg font-semibold text-gray-800">Resolved Decisions</h2>
+      <p class="text-gray-400 text-sm">Recent operator calls that closed the loop on a review or intervention.</p>
+    </div>
+    <p class="text-gray-400 text-sm">{{ rows|length if rows else 0 }} recorded</p>
   </div>
   {% if error %}
     <p class="text-sm text-amber-600 mb-3">{{ error }}</p>
@@ -9,20 +12,26 @@
   {% if rows %}
     <div class="space-y-3">
       {% for row in rows %}
-        <div class="border border-gray-200 rounded-lg p-3">
+        <div class="border border-gray-200 rounded-lg p-3" {% if row.chain_id %}data-research-chain-card="{{ row.chain_id }}"{% endif %}>
           <div class="flex justify-between gap-3">
             <div>
-              <p class="text-sm font-semibold text-gray-800">{{ row.strategy_id }}</p>
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="text-sm font-semibold text-gray-800">{{ row.strategy_id }}</p>
+                {% if row.chain_id %}
+                  <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
+                {% endif %}
+              </div>
               <p class="text-xs text-gray-400">{{ row.health_status or "review" }}</p>
             </div>
             <div class="flex items-center gap-2">
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">{{ row.decision }}</span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if row.decision_tone == 'positive' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif row.decision_tone == 'negative' %}bg-red-500/15 text-red-500 border-red-500/30{% elif row.decision_tone == 'warning' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% else %}bg-blue-500/15 text-blue-500 border-blue-500/30{% endif %}">{{ row.decision }}</span>
               {% if row.chain_id %}
                 <button
                   class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
                   hx-get="/fragments/research/artifact-chain/{{ row.chain_id }}"
                   hx-target="#research-artifact-chain-viewer"
                   hx-swap="innerHTML"
+                  hx-on::after-request="window.syncResearchWorkbench('{{ row.chain_id }}', 'all', 'all')"
                 >View chain</button>
               {% endif %}
             </div>
@@ -30,11 +39,17 @@
           {% if row.notes %}
             <p class="mt-2 text-sm text-gray-600">{{ row.notes }}</p>
           {% endif %}
-          <p class="mt-2 text-xs text-gray-400 font-mono">{{ row.decided_at }}</p>
+          <div class="mt-2 flex justify-between gap-3 text-xs text-gray-400">
+            <span>{% if row.chain_id %}chain {{ row.chain_id[:8] }}{% else %}no chain ref{% endif %}</span>
+            <span>{{ row.decided_label }}</span>
+          </div>
+          <div class="mt-1 flex justify-end gap-3 text-xs text-gray-400">
+            <span class="font-mono">{{ row.decided_at }}</span>
+          </div>
         </div>
       {% endfor %}
     </div>
   {% else %}
-    <p class="text-sm text-gray-400">No operator review decisions yet.</p>
+    <p class="text-sm text-gray-400">No operator decisions have been recorded yet.</p>
   {% endif %}
 </section>

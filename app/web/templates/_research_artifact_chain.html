@@ -4,44 +4,84 @@
       <h2 class="text-lg font-semibold text-gray-800">Research Chain Viewer</h2>
       <p class="text-gray-400 text-sm">
         {% if chain_id %}
-          Chain {{ chain_id[:8] }} | {{ artifact_count }} artifacts
+          Chain {{ chain_id[:8] }} condensed into current state, next action, and raw lineage.
         {% else %}
-          Select a research row to inspect the full artifact lineage.
+          Select a research row to inspect its state first, then expand into raw lineage only where needed.
         {% endif %}
       </p>
     </div>
     <div class="flex items-center gap-2 flex-wrap justify-end">
       {% if chain_id and not error %}
-        <button
-          class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
-          hx-post="/api/actions/research/synthesize"
-          hx-vals='{"chain_id":"{{ chain_id }}"}'
-          hx-target="#research-operator-output"
-          hx-swap="innerHTML"
-        >Synthesize</button>
-        {% if pilot_signoff_pending %}
+        {% if review_ack_pending %}
+          {% for decision in ["revise", "park", "reject", "promote"] %}
+            <form hx-post="/api/actions/research/review-ack" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')">
+              <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+              <input type="hidden" name="decision" value="{{ decision }}" />
+              <input type="hidden" name="notes" value="Chain viewer action: {{ decision }}" />
+              <button type="submit" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs uppercase tracking-wide">{{ decision }}</button>
+            </form>
+          {% endfor %}
+          <form hx-post="/api/actions/research/confirm-kill" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')">
+            <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+            <input type="hidden" name="notes" value="Chain viewer confirm-kill." />
+            <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Confirm Kill</button>
+          </form>
+          <form hx-post="/api/actions/research/override-kill" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')">
+            <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+            <input type="hidden" name="notes" value="Chain viewer override-kill." />
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Override Kill</button>
+          </form>
+        {% elif rebalance_can_execute or rebalance_can_dismiss %}
+          {% if rebalance_can_execute %}
+            <form hx-post="/api/actions/research/execute-rebalance" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')">
+              <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+              <input type="hidden" name="notes" value="Chain viewer execute rebalance." />
+              <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Execute Rebalance</button>
+            </form>
+          {% endif %}
+          {% if rebalance_can_dismiss %}
+            <form hx-post="/api/actions/research/dismiss-rebalance" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')">
+              <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+              <input type="hidden" name="notes" value="Chain viewer dismiss rebalance." />
+              <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Dismiss Rebalance</button>
+            </form>
+          {% endif %}
+        {% else %}
+          <button
+            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+            hx-post="/api/actions/research/synthesize"
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+          >Synthesize</button>
+        {% endif %}
+        {% if not review_ack_pending and not (rebalance_can_execute or rebalance_can_dismiss) and pilot_signoff_pending %}
           <button
             class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs"
             hx-post="/api/actions/research/pilot-approve"
-            hx-vals='{"chain_id":"{{ chain_id }}"}'
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
             hx-target="#research-operator-output"
             hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
           >Approve Pilot</button>
           <button
             class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs"
             hx-post="/api/actions/research/pilot-reject"
-            hx-vals='{"chain_id":"{{ chain_id }}"}'
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
             hx-target="#research-operator-output"
             hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
           >Reject Pilot</button>
         {% endif %}
-        {% if can_generate_post_mortem %}
+        {% if not review_ack_pending and not (rebalance_can_execute or rebalance_can_dismiss) and can_generate_post_mortem %}
           <button
             class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
             hx-post="/api/actions/research/post-mortem"
-            hx-vals='{"chain_id":"{{ chain_id }}"}'
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
             hx-target="#research-operator-output"
             hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
           >{% if post_mortem_count %}Regenerate Post-Mortem{% else %}Generate Post-Mortem{% endif %}</button>
         {% endif %}
       {% endif %}
@@ -53,6 +93,53 @@
     <p class="text-sm text-amber-600">{{ error }}</p>
   {% elif artifacts %}
     {% if latest %}
+      <div class="mb-4 border border-gray-200 rounded-lg bg-gray-50 p-3">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">Chain Activity</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">{{ operator_posture_title }}</p>
+            <p class="mt-1 text-xs text-gray-500">{{ operator_posture_detail }}</p>
+          </div>
+          <div class="flex flex-wrap gap-2 text-xs">
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">Started</span>
+              <span class="text-gray-700">{{ first_created_label }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">Latest</span>
+              <span class="text-gray-700">{{ latest_created_label }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">Artifacts</span>
+              <span class="text-gray-700">{{ artifact_count }}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-2">
+        <div class="rounded-lg border px-3 py-2 {% if artifact_count %}border-blue-200 bg-blue-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">1 Intake</p>
+          <p class="mt-1 text-sm font-semibold {% if artifact_count %}text-blue-700{% else %}text-gray-700{% endif %}">Observed</p>
+        </div>
+        <div class="rounded-lg border px-3 py-2 {% if latest.artifact_type in ['hypothesis_card', 'falsification_memo', 'scoring_result', 'trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}border-blue-200 bg-blue-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">2 Formation</p>
+          <p class="mt-1 text-sm font-semibold {% if latest.artifact_type in ['hypothesis_card', 'falsification_memo', 'scoring_result', 'trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}text-blue-700{% else %}text-gray-700{% endif %}">Hypothesis</p>
+        </div>
+        <div class="rounded-lg border px-3 py-2 {% if latest.artifact_type in ['falsification_memo', 'scoring_result', 'trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}border-amber-200 bg-amber-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">3 Challenge</p>
+          <p class="mt-1 text-sm font-semibold {% if latest.artifact_type in ['falsification_memo', 'scoring_result', 'trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}text-amber-700{% else %}text-gray-700{% endif %}">Stress test</p>
+        </div>
+        <div class="rounded-lg border px-3 py-2 {% if latest_scoring or latest.artifact_type in ['scoring_result', 'trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">4 Decision</p>
+          <p class="mt-1 text-sm font-semibold {% if latest_scoring or latest.artifact_type in ['scoring_result', 'trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}text-emerald-700{% else %}text-gray-700{% endif %}">Scored</p>
+        </div>
+        <div class="rounded-lg border px-3 py-2 {% if pilot_signoff_pending or pilot_decision or can_generate_post_mortem or latest.artifact_type in ['trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}border-purple-200 bg-purple-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">5 Operator</p>
+          <p class="mt-1 text-sm font-semibold {% if pilot_signoff_pending or pilot_decision or can_generate_post_mortem or latest.artifact_type in ['trade_sheet', 'pilot_signoff', 'post_mortem_note', 'retirement_memo', 'synthesis', 'rebalance_sheet', 'execution_report'] %}text-purple-700{% else %}text-gray-700{% endif %}">Action</p>
+        </div>
+      </div>
+
       <div class="mb-4 grid grid-cols-1 lg:grid-cols-6 gap-3">
         <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
           <p class="text-[11px] uppercase tracking-wide text-gray-400">Latest Type</p>
@@ -72,15 +159,7 @@
         </div>
         <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
           <p class="text-[11px] uppercase tracking-wide text-gray-400">Progression</p>
-          <p class="mt-1 text-sm font-semibold text-gray-800">
-            {% if latest_scoring and latest_scoring.body.get("next_stage") %}
-              {{ latest_scoring.body.get("next_stage") }}
-            {% elif latest.artifact_type == "trade_sheet" %}
-              pilot_ready
-            {% else %}
-              -
-            {% endif %}
-          </p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ next_lane }}</p>
         </div>
         <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
           <p class="text-[11px] uppercase tracking-wide text-gray-400">Pilot Sign-Off</p>
@@ -95,24 +174,164 @@
           </p>
         </div>
       </div>
+
+      <div class="mb-4 grid grid-cols-1 lg:grid-cols-5 gap-3">
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-blue-700">Current state</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest.artifact_label }}</p>
+          <p class="mt-1 text-xs text-gray-500">{{ latest.status }}</p>
+        </div>
+        <div class="{% if operator_posture_tone == 'positive' %}bg-emerald-50 border-emerald-200{% elif operator_posture_tone == 'warning' %}bg-amber-50 border-amber-200{% elif operator_posture_tone == 'negative' %}bg-red-50 border-red-200{% elif operator_posture_tone == 'closed' %}bg-gray-100 border-gray-300{% else %}bg-gray-50 border-gray-200{% endif %} border rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide {% if operator_posture_tone == 'positive' %}text-emerald-700{% elif operator_posture_tone == 'warning' %}text-amber-700{% elif operator_posture_tone == 'negative' %}text-red-700{% else %}text-gray-500{% endif %}">Operator posture</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ operator_posture_title }}</p>
+          <p class="mt-1 text-xs text-gray-500">{{ operator_posture_detail }}</p>
+        </div>
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-amber-700">Next lane</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ next_lane }}</p>
+        </div>
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-emerald-700">Next operator move</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ next_operator_move }}</p>
+        </div>
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-500">Lifecycle</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ lifecycle.completed_count }}/{{ lifecycle.total_count }}</p>
+          <p class="mt-1 text-xs text-gray-500">{{ lifecycle.summary or "No milestones completed yet." }}</p>
+        </div>
+        <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-500">Debug posture</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">Raw bodies collapsed below</p>
+          <p class="mt-1 text-xs text-gray-500">Open artifact details only when you need schema-level inspection.</p>
+        </div>
+      </div>
+
+      {% if review_context %}
+        <div class="mb-4 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div>
+              <p class="text-[11px] uppercase tracking-wide text-amber-700">Review Context</p>
+              <p class="mt-1 text-sm font-semibold text-gray-800">
+                {{ review_context.health_status or "review" }}{% if review_context.recommended_action %} -> {{ review_context.recommended_action }}{% endif %}
+              </p>
+              <p class="mt-1 text-xs text-gray-500">
+                Triggered by {{ review_context.trigger_source or "system monitor" }}. Acknowledge from the chain viewer or use the workbench for full notes.
+              </p>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+              <div class="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Recommended</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ review_context.recommended_action or "-" }}</p>
+              </div>
+              <div class="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Flags</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ review_context.flag_count }}</p>
+              </div>
+              <div class="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Ack</p>
+                <p class="mt-1 font-semibold text-gray-800">{% if review_context.operator_ack %}recorded{% else %}pending{% endif %}</p>
+              </div>
+              <div class="rounded-lg border border-amber-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Source</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ review_context.trigger_source or "-" }}</p>
+              </div>
+            </div>
+          </div>
+          {% if review_context.flags %}
+            <div class="mt-3 flex flex-wrap gap-2">
+              {% for flag in review_context.flags %}
+                <span class="inline-flex items-center rounded-full border border-amber-200 bg-white px-3 py-1 text-xs font-semibold text-amber-700">{{ flag }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      {% if rebalance_context %}
+        <div class="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div>
+              <p class="text-[11px] uppercase tracking-wide text-emerald-700">Rebalance Context</p>
+              <p class="mt-1 text-sm font-semibold text-gray-800">
+                {{ rebalance_context.move_count }} move{% if rebalance_context.move_count != 1 %}s{% endif %} queued
+              </p>
+              <p class="mt-1 text-xs text-gray-500">
+                Approval is {{ rebalance_context.approval_status or "draft" }}{% if rebalance_executed %}, and execution is already recorded{% else %}; decide here if the proposal should trade or be dismissed{% endif %}.
+              </p>
+            </div>
+            <div class="grid grid-cols-2 lg:grid-cols-4 gap-2 text-xs">
+              <div class="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Approval</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ rebalance_context.approval_status or "-" }}</p>
+              </div>
+              <div class="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Moves</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ rebalance_context.move_count }}</p>
+              </div>
+              <div class="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Estimated Cost</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ "%.4f"|format(rebalance_context.estimated_cost or 0.0) }}</p>
+              </div>
+              <div class="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                <p class="uppercase tracking-wide text-gray-400">Decision Source</p>
+                <p class="mt-1 font-semibold text-gray-800">{{ rebalance_context.decision_source or "system" }}</p>
+              </div>
+            </div>
+          </div>
+          {% if rebalance_context.top_moves %}
+            <div class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-2">
+              {% for move in rebalance_context.top_moves %}
+                <div class="rounded-lg border border-emerald-200 bg-white px-3 py-2">
+                  <p class="text-[11px] uppercase tracking-wide text-gray-400">{{ move.instrument }}</p>
+                  <p class="mt-1 text-sm font-semibold text-gray-800">{% if move.delta > 0 %}+{% endif %}{{ "%.2f"|format(move.delta) }}</p>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <div class="flex justify-between gap-3 items-baseline">
+          <div>
+            <p class="text-[11px] uppercase tracking-wide text-gray-400">Timeline Navigation</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">Jump through the chain before opening raw lineage details.</p>
+          </div>
+          <p class="text-xs text-gray-500">{{ artifact_navigation|length }} artifact{% if artifact_navigation|length != 1 %}s{% endif %}</p>
+        </div>
+        <div class="mt-3 flex flex-wrap gap-2">
+          {% for nav in artifact_navigation %}
+            <a href="#{{ nav.dom_id }}" class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs {% if nav.is_latest %}border-blue-300 bg-blue-50 text-blue-700{% else %}border-gray-300 bg-white text-gray-700{% endif %}">
+              <span class="font-semibold uppercase tracking-wide">v{{ nav.version }}</span>
+              <span>{{ nav.label }}</span>
+              {% if nav.is_latest %}
+                <span class="font-semibold uppercase tracking-wide">current</span>
+              {% endif %}
+            </a>
+          {% endfor %}
+        </div>
+      </div>
     {% endif %}
 
     <div class="space-y-3">
       {% for artifact in artifacts %}
-        <article class="border border-gray-200 rounded-lg p-3">
+        <article id="{{ artifact.dom_id }}" class="border rounded-lg p-3 {% if artifact.is_latest %}border-blue-300 bg-blue-50/40{% else %}border-gray-200{% endif %}">
           <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
             <div>
               <div class="flex items-center gap-2 flex-wrap">
                 <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">
                   v{{ artifact.version }}
                 </span>
+                {% if artifact.is_latest %}
+                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">current</span>
+                {% endif %}
                 <span class="text-sm font-semibold text-gray-800">{{ artifact.artifact_label }}</span>
                 {% if artifact.ticker %}
                   <span class="text-xs font-mono text-gray-500">{{ artifact.ticker }}</span>
                 {% endif %}
               </div>
               <p class="mt-1 text-xs text-gray-400 font-mono">
-                {{ artifact.artifact_id[:8] }}{% if artifact.parent_id %} <- {{ artifact.parent_id[:8] }}{% endif %}
+                {{ artifact.sequence_label }} · {{ artifact.artifact_id[:8] }}{% if artifact.parent_id %} <- {{ artifact.parent_id[:8] }}{% endif %}
               </p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">

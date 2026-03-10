@@ -1,57 +1,356 @@
 <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+  {% set active_lane = selected_queue_lane if selected_queue_lane in ['all', 'review', 'pilot', 'rebalance', 'retirements'] else 'all' %}
+  {% set ns = namespace(promote=0, revise=0, park=0, reject=0) %}
+  {% for alert in pending_reviews %}
+    {% if alert.recommended_action == "promote" %}
+      {% set ns.promote = ns.promote + 1 %}
+    {% elif alert.recommended_action == "revise" %}
+      {% set ns.revise = ns.revise + 1 %}
+    {% elif alert.recommended_action == "park" %}
+      {% set ns.park = ns.park + 1 %}
+    {% elif alert.recommended_action == "reject" %}
+      {% set ns.reject = ns.reject + 1 %}
+    {% endif %}
+  {% endfor %}
   <div class="flex justify-between items-baseline gap-4 mb-3">
-    <h2 class="text-lg font-semibold text-gray-800">Research Alerts</h2>
-    <p class="text-gray-400 text-sm">{{ pending_reviews|length }} pending reviews</p>
+    <div>
+      <h2 class="text-lg font-semibold text-gray-800">Decision Queue</h2>
+      <p class="text-gray-400 text-sm">Review triggers, pilot sign-offs, and rebalance calls still waiting for an operator decision.</p>
+    </div>
+    <p class="text-gray-400 text-sm">{{ lane_counts.total_pending }} pending across all lanes</p>
   </div>
   {% if error %}
     <p class="text-sm text-amber-600 mb-3">{{ error }}</p>
   {% endif %}
 
-  {% if pending_reviews %}
-    <div class="space-y-3">
-      {% for alert in pending_reviews %}
-        <div class="border border-amber-200 rounded-lg p-3 bg-amber-50/40">
-          <div class="flex justify-between gap-3">
-            <div>
-              <p class="text-sm font-semibold text-gray-800">{{ alert.strategy_id }}</p>
-              <p class="text-xs text-amber-700 uppercase tracking-wide">{{ alert.health_status }}</p>
-            </div>
-            <span class="font-mono text-xs text-gray-500">{{ alert.created_at }}</span>
-          </div>
-          {% if alert.flags %}
-            <p class="mt-2 text-sm text-gray-600">{{ alert.flags|join(", ") }}</p>
-          {% endif %}
-          <p class="mt-2 text-xs text-gray-500">Suggested: {{ alert.recommended_action or "review" }}</p>
-          <div class="mt-3 flex flex-wrap gap-2">
-            {% for decision in ["revise", "park", "reject", "promote"] %}
-              <form hx-post="/api/actions/research/review-ack" hx-target="#action-result" hx-swap="innerHTML">
-                <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
-                <input type="hidden" name="decision" value="{{ decision }}" />
-                <input type="hidden" name="notes" value="Dashboard action: {{ decision }}" />
-                <button type="submit" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs uppercase tracking-wide">{{ decision }}</button>
-              </form>
-            {% endfor %}
-          </div>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <form hx-post="/api/actions/research/confirm-kill" hx-target="#research-operator-output" hx-swap="innerHTML">
-              <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
-              <input type="hidden" name="notes" value="Dashboard confirm-kill for {{ alert.strategy_id }}" />
-              <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs uppercase tracking-wide">Confirm Kill</button>
-            </form>
-            <form hx-post="/api/actions/research/override-kill" hx-target="#research-operator-output" hx-swap="innerHTML">
-              <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
-              <input type="hidden" name="notes" value="Dashboard override-kill for {{ alert.strategy_id }}" />
-              <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs uppercase tracking-wide">Override Kill</button>
-            </form>
-          </div>
-        </div>
-      {% endfor %}
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Review Lane</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ lane_counts.reviews }}</p>
+      <p class="mt-1 text-xs text-gray-500">Decay and kill reviews still waiting for acknowledgement.</p>
     </div>
-  {% else %}
-    <p class="text-sm text-gray-400">No pending decay reviews.</p>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Pilot Lane</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ lane_counts.pilots }}</p>
+      <p class="mt-1 text-xs text-gray-500">Chains that reached pilot-ready and need approve / reject.</p>
+    </div>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Rebalance Lane</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ lane_counts.rebalances }}</p>
+      <p class="mt-1 text-xs text-gray-500">Engine A proposals still waiting for execute / dismiss.</p>
+    </div>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Recent Retirements</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ lane_counts.retirements }}</p>
+      <p class="mt-1 text-xs text-gray-500">Most recent retirement memos kept nearby for context.</p>
+    </div>
+  </div>
+
+  <div class="mb-4 border border-gray-200 rounded-lg bg-gray-50 p-3">
+    <div class="flex justify-between items-baseline gap-4">
+      <div>
+        <h3 class="text-sm font-semibold text-gray-800">Queue Focus</h3>
+        <p class="text-xs text-gray-500">Filter the queue to a single operator lane without losing the live refresh.</p>
+      </div>
+      <p class="text-xs text-gray-400">Selection persists while you stay in this browser session.</p>
+    </div>
+    <div class="mt-3 flex flex-wrap gap-2">
+      <button type="button" data-queue-lane-button="all" aria-pressed="{{ 'true' if active_lane == 'all' else 'false' }}" onclick="window.setResearchQueueLane('all')" class="{% if active_lane == 'all' %}bg-blue-600 text-white border-blue-500{% else %}bg-white hover:bg-gray-100 text-gray-700 border-gray-300{% endif %} font-semibold px-3 py-1 rounded-lg border transition-colors text-xs">All Lanes</button>
+      <button type="button" data-queue-lane-button="review" aria-pressed="{{ 'true' if active_lane == 'review' else 'false' }}" onclick="window.setResearchQueueLane('review')" class="{% if active_lane == 'review' %}bg-blue-600 text-white border-blue-500{% else %}bg-white hover:bg-gray-100 text-gray-700 border-gray-300{% endif %} font-semibold px-3 py-1 rounded-lg border transition-colors text-xs">Review</button>
+      <button type="button" data-queue-lane-button="pilot" aria-pressed="{{ 'true' if active_lane == 'pilot' else 'false' }}" onclick="window.setResearchQueueLane('pilot')" class="{% if active_lane == 'pilot' %}bg-blue-600 text-white border-blue-500{% else %}bg-white hover:bg-gray-100 text-gray-700 border-gray-300{% endif %} font-semibold px-3 py-1 rounded-lg border transition-colors text-xs">Pilot</button>
+      <button type="button" data-queue-lane-button="rebalance" aria-pressed="{{ 'true' if active_lane == 'rebalance' else 'false' }}" onclick="window.setResearchQueueLane('rebalance')" class="{% if active_lane == 'rebalance' %}bg-blue-600 text-white border-blue-500{% else %}bg-white hover:bg-gray-100 text-gray-700 border-gray-300{% endif %} font-semibold px-3 py-1 rounded-lg border transition-colors text-xs">Rebalance</button>
+      <button type="button" data-queue-lane-button="retirements" aria-pressed="{{ 'true' if active_lane == 'retirements' else 'false' }}" onclick="window.setResearchQueueLane('retirements')" class="{% if active_lane == 'retirements' %}bg-blue-600 text-white border-blue-500{% else %}bg-white hover:bg-gray-100 text-gray-700 border-gray-300{% endif %} font-semibold px-3 py-1 rounded-lg border transition-colors text-xs">Retirements</button>
+    </div>
+  </div>
+
+  {% if selected_chain_id %}
+    <div class="mb-4 border border-blue-200 rounded-lg bg-blue-50 p-3">
+      <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-800">Queue Following Selected Chain</h3>
+          <p class="mt-1 text-xs text-gray-500">
+            {% if selected_chain_context and selected_chain_context.ticker %}
+              {{ selected_chain_context.ticker }}{% if selected_chain_context.engine %} · {{ selected_chain_context.engine }}{% endif %}
+              is driving the queue context.
+            {% else %}
+              Chain {{ selected_chain_id[:8] }} is driving the queue context.
+            {% endif %}
+            Current lane: {{ active_lane if active_lane != 'all' else 'all lanes' }}.
+          </p>
+          {% if selected_chain_context %}
+            <div class="mt-2 flex flex-wrap gap-2 text-xs">
+              {% if selected_chain_context.operator_posture_title %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Posture</span>
+                  <span class="text-gray-700">{{ selected_chain_context.operator_posture_title }}</span>
+                </span>
+              {% endif %}
+              {% if selected_chain_context.latest_label %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Latest</span>
+                  <span class="text-gray-700">{{ selected_chain_context.latest_label }}</span>
+                </span>
+              {% endif %}
+              {% if selected_chain_context.next_operator_move %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Next</span>
+                  <span class="text-gray-700">{{ selected_chain_context.next_operator_move }}</span>
+                </span>
+              {% endif %}
+            </div>
+          {% endif %}
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+            hx-get="/fragments/research/artifact-chain/{{ selected_chain_id }}"
+            hx-target="#research-artifact-chain-viewer"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.syncResearchWorkbench('{{ selected_chain_id }}', '{{ selected_chain_context.queue_filter }}', '{{ selected_chain_context.active_view }}')"
+          >Open Selected Chain</button>
+          <button
+            type="button"
+            onclick="window.clearResearchSelection()"
+            class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+          >Clear Focus</button>
+        </div>
+      </div>
+    </div>
   {% endif %}
 
-  <div class="mt-4 border-t border-gray-200 pt-3">
+  {% if lane_counts.total_pending %}
+    <div class="mb-4 border border-gray-200 rounded-lg bg-gray-50 p-3">
+      <div class="flex justify-between items-baseline gap-4">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-800">Suggested Next Moves</h3>
+          <p class="text-xs text-gray-500">Review recommendations plus pending pilot and rebalance calls.</p>
+        </div>
+        <p class="text-xs text-gray-400">Open the chain when context is thin; act directly when the lane is obvious.</p>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+          <span class="font-semibold uppercase tracking-wide text-gray-500">Promote</span>
+          <span class="font-mono text-gray-700">{{ ns.promote }}</span>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+          <span class="font-semibold uppercase tracking-wide text-gray-500">Revise</span>
+          <span class="font-mono text-gray-700">{{ ns.revise }}</span>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+          <span class="font-semibold uppercase tracking-wide text-gray-500">Park</span>
+          <span class="font-mono text-gray-700">{{ ns.park }}</span>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+          <span class="font-semibold uppercase tracking-wide text-gray-500">Reject</span>
+          <span class="font-mono text-gray-700">{{ ns.reject }}</span>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+          <span class="font-semibold uppercase tracking-wide text-gray-500">Pilot Calls</span>
+          <span class="font-mono text-gray-700">{{ lane_counts.pilots }}</span>
+        </span>
+        <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+          <span class="font-semibold uppercase tracking-wide text-gray-500">Rebalances</span>
+          <span class="font-mono text-gray-700">{{ lane_counts.rebalances }}</span>
+        </span>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if lane_counts.reviews or lane_counts.pilots or lane_counts.rebalances %}
+    <div class="space-y-4">
+      <div id="research-queue-review" data-queue-lane-section data-queue-lane="review" class="{% if active_lane not in ['all', 'review'] %}hidden{% endif %}">
+          <div class="flex justify-between items-baseline gap-4 mb-2">
+            <h3 class="text-sm font-semibold text-gray-800">Review Lane</h3>
+            <p class="text-xs text-gray-400">{{ pending_reviews|length }} item{% if pending_reviews|length != 1 %}s{% endif %}</p>
+          </div>
+          {% if pending_reviews %}
+            <div class="space-y-3">
+              {% for alert in pending_reviews %}
+                <div class="border border-amber-200 rounded-lg p-3 bg-amber-50/40" data-research-chain-card="{{ alert.chain_id }}">
+                  <div class="flex justify-between gap-3">
+                    <div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-sm font-semibold text-gray-800">{{ alert.strategy_id }}</p>
+                        <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
+                      </div>
+                      <p class="text-xs text-amber-700 uppercase tracking-wide">{{ alert.health_status }}</p>
+                      <p class="mt-1 text-[11px] text-gray-500 font-mono">chain {{ alert.chain_id[:8] }}</p>
+                    </div>
+                    <div class="text-right">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if alert.priority == 'urgent' %}bg-red-500/15 text-red-500 border-red-500/30{% elif alert.priority == 'watch' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ alert.priority }}</span>
+                      {% if alert.recommended_action %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-white text-gray-700 border-gray-300">{{ alert.recommended_action }}</span>
+                      {% endif %}
+                      <p class="mt-1 text-xs text-gray-500">{{ alert.created_label }}</p>
+                      <p class="mt-1 font-mono text-xs text-gray-500">{{ alert.created_at }}</p>
+                    </div>
+                  </div>
+                  {% if alert.flags %}
+                    <p class="mt-2 text-sm text-gray-600">{{ alert.flags|join(", ") }}</p>
+                  {% endif %}
+                  <p class="mt-2 text-xs text-gray-500">Suggested: {{ alert.recommended_action or "review" }}</p>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                      class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+                      hx-get="/fragments/research/artifact-chain/{{ alert.chain_id }}"
+                      hx-target="#research-artifact-chain-viewer"
+                      hx-swap="innerHTML"
+                      hx-on::after-request="window.syncResearchWorkbench('{{ alert.chain_id }}', 'review', 'operator')"
+                    >Open chain</button>
+                  </div>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    {% for decision in ["revise", "park", "reject", "promote"] %}
+                      <form hx-post="/api/actions/research/review-ack" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                        <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                        <input type="hidden" name="decision" value="{{ decision }}" />
+                        <input type="hidden" name="notes" value="Dashboard action: {{ decision }}" />
+                        <button type="submit" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs uppercase tracking-wide">{{ decision }}</button>
+                      </form>
+                    {% endfor %}
+                  </div>
+                  <div class="mt-2 flex flex-wrap gap-2">
+                    <form hx-post="/api/actions/research/confirm-kill" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                      <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                      <input type="hidden" name="notes" value="Dashboard confirm-kill for {{ alert.strategy_id }}" />
+                      <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs uppercase tracking-wide">Confirm Kill</button>
+                    </form>
+                    <form hx-post="/api/actions/research/override-kill" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                      <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                      <input type="hidden" name="notes" value="Dashboard override-kill for {{ alert.strategy_id }}" />
+                      <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs uppercase tracking-wide">Override Kill</button>
+                    </form>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-sm text-gray-400">No pending review acknowledgements.</p>
+          {% endif %}
+        </div>
+
+      <div id="research-queue-pilot" data-queue-lane-section data-queue-lane="pilot" class="{% if active_lane not in ['all', 'pilot'] %}hidden{% endif %}">
+          <div class="flex justify-between items-baseline gap-4 mb-2">
+            <h3 class="text-sm font-semibold text-gray-800">Pilot Lane</h3>
+            <p class="text-xs text-gray-400">{{ pending_pilots|length }} item{% if pending_pilots|length != 1 %}s{% endif %}</p>
+          </div>
+          {% if pending_pilots %}
+            <div class="space-y-3">
+              {% for alert in pending_pilots %}
+                <div class="border border-purple-200 rounded-lg p-3 bg-purple-50/40" data-research-chain-card="{{ alert.chain_id }}">
+                  <div class="flex justify-between gap-3">
+                    <div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-sm font-semibold text-gray-800">{{ alert.ticker }}</p>
+                        <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
+                      </div>
+                      <p class="text-xs text-purple-700 uppercase tracking-wide">{{ alert.edge_family }}</p>
+                      <p class="mt-1 text-[11px] text-gray-500 font-mono">chain {{ alert.chain_id[:8] }}</p>
+                    </div>
+                    <div class="text-right">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if alert.priority == 'urgent' %}bg-red-500/15 text-red-500 border-red-500/30{% elif alert.priority == 'watch' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ alert.priority }}</span>
+                      <p class="mt-1 text-xs text-gray-500">{{ alert.updated_label }}</p>
+                      <p class="mt-1 font-mono text-xs text-gray-500">{{ alert.updated_at }}</p>
+                    </div>
+                  </div>
+                  <p class="mt-2 text-sm text-gray-600">Score {{ "%.1f"|format(alert.score) if alert.score is not none else "-" }} · {{ alert.next_action }}</p>
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                      class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+                      hx-get="/fragments/research/artifact-chain/{{ alert.chain_id }}"
+                      hx-target="#research-artifact-chain-viewer"
+                      hx-swap="innerHTML"
+                      hx-on::after-request="window.syncResearchWorkbench('{{ alert.chain_id }}', 'pilot', 'operator')"
+                    >Open chain</button>
+                    <form hx-post="/api/actions/research/pilot-approve" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                      <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                      <input type="hidden" name="notes" value="Dashboard pilot approval for {{ alert.ticker }}" />
+                      <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Approve Pilot</button>
+                    </form>
+                    <form hx-post="/api/actions/research/pilot-reject" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                      <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                      <input type="hidden" name="notes" value="Dashboard pilot rejection for {{ alert.ticker }}" />
+                      <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Reject Pilot</button>
+                    </form>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-sm text-gray-400">No pilot sign-offs waiting.</p>
+          {% endif %}
+        </div>
+
+      <div id="research-queue-rebalance" data-queue-lane-section data-queue-lane="rebalance" class="{% if active_lane not in ['all', 'rebalance'] %}hidden{% endif %}">
+          <div class="flex justify-between items-baseline gap-4 mb-2">
+            <h3 class="text-sm font-semibold text-gray-800">Rebalance Lane</h3>
+            <p class="text-xs text-gray-400">{{ rebalance_items|length }} item{% if rebalance_items|length != 1 %}s{% endif %}</p>
+          </div>
+          {% if rebalance_items %}
+            <div class="space-y-3">
+              {% for alert in rebalance_items %}
+                <div class="border border-emerald-200 rounded-lg p-3 bg-emerald-50/40" data-research-chain-card="{{ alert.chain_id }}">
+                  <div class="flex justify-between gap-3">
+                    <div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <p class="text-sm font-semibold text-gray-800">Engine A rebalance proposal</p>
+                        <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
+                      </div>
+                      <p class="text-xs text-emerald-700 uppercase tracking-wide">{{ alert.move_count }} move{% if alert.move_count != 1 %}s{% endif %} queued</p>
+                      <p class="mt-1 text-[11px] text-gray-500 font-mono">chain {{ alert.chain_id[:8] }}</p>
+                    </div>
+                    <div class="text-right">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">{{ alert.approval_status or "draft" }}</span>
+                      <p class="mt-1 text-xs text-gray-500">{{ alert.created_label }}</p>
+                      <p class="mt-1 font-mono text-xs text-gray-500">{{ alert.created_at }}</p>
+                    </div>
+                  </div>
+                  <p class="mt-2 text-sm text-gray-600">Est. cost {{ "%.4f"|format(alert.estimated_cost or 0.0) }} · source {{ alert.decision_source or "system" }}</p>
+                  {% if alert.top_moves %}
+                    <p class="mt-2 text-xs text-gray-500">
+                      Top moves:
+                      {% for move in alert.top_moves %}
+                        {% if not loop.first %}, {% endif %}
+                        {{ move.instrument }} {% if move.delta > 0 %}+{% endif %}{{ "%.2f"|format(move.delta) }}
+                      {% endfor %}
+                    </p>
+                  {% endif %}
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                      class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+                      hx-get="/fragments/research/artifact-chain/{{ alert.chain_id }}"
+                      hx-target="#research-artifact-chain-viewer"
+                      hx-swap="innerHTML"
+                      hx-on::after-request="window.syncResearchWorkbench('{{ alert.chain_id }}', 'rebalance', 'all')"
+                    >Open chain</button>
+                    {% if alert.can_execute %}
+                      <form hx-post="/api/actions/research/execute-rebalance" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                        <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                        <input type="hidden" name="notes" value="Dashboard execute rebalance." />
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Execute Rebalance</button>
+                      </form>
+                    {% endif %}
+                    {% if alert.can_dismiss %}
+                      <form hx-post="/api/actions/research/dismiss-rebalance" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ alert.chain_id }}')">
+                        <input type="hidden" name="chain_id" value="{{ alert.chain_id }}" />
+                        <input type="hidden" name="notes" value="Dashboard dismiss rebalance." />
+                        <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Dismiss Rebalance</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="text-sm text-gray-400">No rebalance proposals waiting.</p>
+          {% endif %}
+        </div>
+    </div>
+  {% else %}
+    <p class="text-sm text-gray-400">No pending operator actions. Review, pilot, and rebalance lanes are clear.</p>
+  {% endif %}
+
+  <div id="research-queue-retirements" data-queue-lane-section data-queue-lane="retirements" class="mt-4 border-t border-gray-200 pt-3 {% if active_lane not in ['all', 'retirements'] %}hidden{% endif %}">
     <div class="flex justify-between items-baseline gap-4 mb-2">
       <h3 class="text-sm font-semibold text-gray-800">Recent Retirements</h3>
       <p class="text-xs text-gray-400">{{ kill_alerts|length }} recorded</p>
@@ -59,9 +358,28 @@
     {% if kill_alerts %}
       <div class="space-y-2">
         {% for alert in kill_alerts[:5] %}
-          <div class="border border-gray-200 rounded-lg p-2">
-            <p class="text-sm font-medium text-gray-700">{{ alert.hypothesis_ref }}</p>
-            <p class="text-xs text-gray-500">{{ alert.trigger }} :: {{ alert.trigger_detail }}</p>
+          <div class="border border-gray-200 rounded-lg p-2" {% if alert.chain_id %}data-research-chain-card="{{ alert.chain_id }}"{% endif %}>
+            <div class="flex justify-between gap-3">
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <p class="text-sm font-medium text-gray-700">{{ alert.hypothesis_ref }}</p>
+                  {% if alert.chain_id %}
+                    <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
+                  {% endif %}
+                </div>
+                <p class="text-xs text-gray-500">{{ alert.trigger }} :: {{ alert.trigger_detail }}</p>
+                <p class="mt-1 text-xs text-gray-400">{{ alert.created_label }}</p>
+              </div>
+              {% if alert.chain_id %}
+                <button
+                  class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+                  hx-get="/fragments/research/artifact-chain/{{ alert.chain_id }}"
+                  hx-target="#research-artifact-chain-viewer"
+                  hx-swap="innerHTML"
+                  hx-on::after-request="window.syncResearchWorkbench('{{ alert.chain_id }}', 'all', 'all')"
+                >View</button>
+              {% endif %}
+            </div>
           </div>
         {% endfor %}
       </div>

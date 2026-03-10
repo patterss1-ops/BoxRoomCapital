@@ -233,6 +233,10 @@ class BotControlService:
                 schedule.append(ScheduleWindow(name=name, hour=hour, minute=0))
                 window_handlers[name] = self._run_kill_check_window
 
+        # Market brief generation (morning + evening)
+        window_handlers["market_brief_morning"] = lambda **kw: self._run_market_brief("morning")
+        window_handlers["market_brief_evening"] = lambda **kw: self._run_market_brief("evening")
+
         self._scheduler = DailyWorkflowScheduler(
             dispatch_fn=lambda window_name, **kw: dispatch_orchestration(
                 dry_run=config.ORCHESTRATOR_DRY_RUN,
@@ -819,6 +823,23 @@ class BotControlService:
             "skipped": max(0, len(alerts) - auto_kills),
             "error_count": 0,
         }
+
+    def _run_market_brief(self, brief_type: str) -> dict[str, Any]:
+        """Generate a market brief (morning or evening) via the scheduler."""
+        try:
+            from intelligence.market_brief import generate_brief
+            brief = generate_brief(brief_type=brief_type)
+            logger.info("Market brief (%s) generated: model=%s cost=$%.4f", brief_type, brief.model_used, brief.cost_usd)
+            return {
+                "items_processed": 1,
+                "skipped": 0,
+                "error_count": 0,
+                "brief_type": brief_type,
+                "model": brief.model_used,
+            }
+        except Exception as exc:
+            logger.warning("Market brief (%s) failed: %s", brief_type, exc)
+            return {"items_processed": 0, "skipped": 0, "error_count": 1, "error": str(exc)}
 
     def _run_engine_b_job(self, job: dict[str, Any], pipeline: Any) -> None:
         as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")

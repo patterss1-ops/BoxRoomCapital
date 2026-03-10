@@ -1,14 +1,59 @@
 <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
-  <div class="flex justify-between items-baseline gap-4 mb-3">
+  {% set stage_total = stage_counts.values() | list | sum if stage_counts else 0 %}
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
     <div>
+      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">Control State</p>
       <h2 class="text-lg font-semibold text-gray-800">Research Readiness</h2>
-      <p class="text-gray-400 text-sm">Operational blockers for real-data validation and cutover.</p>
+      <p class="text-gray-400 text-sm">Operational blockers for real-data validation and cutover, plus the live state of the research loop.</p>
     </div>
     <div class="flex items-center gap-2">
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if overall_status == 'ready' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif overall_status == 'blocked' %}bg-red-500/15 text-red-500 border-red-500/30{% else %}bg-amber-500/15 text-amber-500 border-amber-500/30{% endif %}">{{ overall_status }}</span>
       <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if routing_mode == 'research_primary' %}bg-blue-500/15 text-blue-500 border-blue-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ routing_mode }}</span>
     </div>
   </div>
+
+  <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Routing Mode</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ routing_mode }}</p>
+      <p class="mt-1 text-xs text-gray-500">{% if routing_mode == "research_primary" %}Research routing is live.{% else %}Mirror mode stays active until cutover.{% endif %}</p>
+    </div>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Tracked Chains</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ stage_total }}</p>
+      <p class="mt-1 text-xs text-gray-500">{{ stage_counts|length if stage_counts else 0 }} active stages reporting.</p>
+    </div>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Reviews Pending</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ review_pending_count }}</p>
+      <p class="mt-1 text-xs text-gray-500">Items waiting for operator review.</p>
+    </div>
+    <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-400">Pilot Sign-Offs</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ pilot_signoff_pending_count }}</p>
+      <p class="mt-1 text-xs text-gray-500">Promotion decisions still outstanding.</p>
+    </div>
+  </div>
+
+  {% if stage_counts %}
+    <div class="mb-4 border border-gray-200 rounded-lg bg-gray-50 p-3">
+      <div class="flex justify-between items-baseline gap-4">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-800">Loop State</h3>
+          <p class="text-xs text-gray-500">Current pipeline distribution by stage.</p>
+        </div>
+        <p class="text-xs text-gray-400">as_of {{ as_of }}</p>
+      </div>
+      <div class="mt-3 flex flex-wrap gap-2">
+        {% for stage, total in stage_counts|dictsort %}
+          <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1 text-xs">
+            <span class="font-semibold uppercase tracking-wide text-gray-500">{{ stage }}</span>
+            <span class="font-mono text-gray-700">{{ total }}</span>
+          </span>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
 
   <div class="grid grid-cols-1 lg:grid-cols-5 gap-3">
     {% for check in checks %}
@@ -32,7 +77,7 @@
   {% if issues %}
     <div class="mt-4 border-t border-gray-200 pt-3">
       <div class="flex justify-between items-baseline gap-4 mb-2">
-        <h3 class="text-sm font-semibold text-gray-800">Next Steps</h3>
+        <h3 class="text-sm font-semibold text-gray-800">Cutover Guidance</h3>
         <p class="text-xs text-gray-400">as_of {{ as_of }}</p>
       </div>
       <div class="space-y-1">

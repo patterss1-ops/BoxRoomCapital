@@ -55,12 +55,23 @@
     </div>
 
     <!-- Market Chart -->
-    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-shrink-0" style="height: 35%;">
+    <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-shrink-0" style="height: 45%;">
       <div class="flex justify-between items-baseline mb-1">
-        <h3 class="text-xs font-semibold text-gray-800">Market</h3>
-        <span id="chart-market-label" class="text-[10px] text-gray-400 font-mono">{{ default_epic }}</span>
+        <div class="flex items-center gap-2">
+          <h3 class="text-xs font-semibold text-gray-800">Market</h3>
+          <span id="chart-market-label" class="text-[10px] text-gray-400 font-mono">SPY</span>
+          <span id="chart-price-label" class="text-[11px] font-mono font-semibold text-gray-800"></span>
+          <span id="chart-change-label" class="text-[10px] font-mono"></span>
+        </div>
+        <div class="flex gap-1" id="chart-interval-btns">
+          <button onclick="changeInterval('5m','5d')" class="px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-gray-800 rounded border border-transparent hover:border-gray-300" data-iv="5m">5m</button>
+          <button onclick="changeInterval('15m','5d')" class="px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-gray-800 rounded border border-transparent hover:border-gray-300" data-iv="15m">15m</button>
+          <button onclick="changeInterval('1h','3mo')" class="px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-gray-800 rounded border border-transparent hover:border-gray-300" data-iv="1h">1H</button>
+          <button onclick="changeInterval('1d','6mo')" class="px-1.5 py-0.5 text-[9px] font-semibold text-gray-800 rounded border border-blue-400 bg-blue-50" data-iv="1d">1D</button>
+          <button onclick="changeInterval('1wk','2y')" class="px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-gray-800 rounded border border-transparent hover:border-gray-300" data-iv="1wk">1W</button>
+        </div>
       </div>
-      <div id="market-chart" class="w-full h-[calc(100%-20px)]"></div>
+      <div id="market-chart" class="w-full h-[calc(100%-24px)]"></div>
     </div>
 
     <!-- Tabbed: Market Browser / Broker / Risk Controls -->
@@ -135,14 +146,16 @@
     <!-- Tabbed: Control Actions / Broker Health / Intent Audit / Ledger -->
     <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
       <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="right2-tabs">
-        <button onclick="switchTab('right2','tab-ctrl')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-ctrl">Actions</button>
+        <button onclick="switchTab('right2','tab-brief')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-brief">Brief</button>
+        <button onclick="switchTab('right2','tab-ctrl')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-ctrl">Actions</button>
         <button onclick="switchTab('right2','tab-pipeline')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-pipeline">Pipeline</button>
         <button onclick="switchTab('right2','tab-health')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-health">Health</button>
         <button onclick="switchTab('right2','tab-audit')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-audit">Audit</button>
         <button onclick="switchTab('right2','tab-ledger')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-ledger">Ledger</button>
       </div>
       <div class="flex-1 overflow-y-auto">
-        <div data-tab-content="tab-ctrl" class="active" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>
+        <div data-tab-content="tab-brief" class="active" id="market-brief-panel" hx-get="/fragments/market-brief" hx-trigger="load delay:300ms" hx-swap="innerHTML"></div>
+        <div data-tab-content="tab-ctrl" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>
         <div data-tab-content="tab-pipeline" id="pipeline-status-panel" hx-get="/fragments/pipeline-status" hx-trigger="load delay:600ms, every 10s" hx-swap="innerHTML"></div>
         <div data-tab-content="tab-health" id="broker-health-panel" hx-get="/fragments/broker-health" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
         <div data-tab-content="tab-audit" id="intent-audit-panel" hx-get="/fragments/intent-audit" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
@@ -152,45 +165,126 @@
   </div>
 </div>
 
-<!-- Market Chart + selectMarket -->
+<!-- Market Chart + selectMarket (Candlestick + Volume) -->
 <script>
 (function() {
   var chartContainer = document.getElementById('market-chart');
-  var chart = window.createTerminalChart(chartContainer, { timeScale: { timeVisible: true } });
-  if (!chart) return;
+  if (!chartContainer || typeof LightweightCharts === 'undefined') return;
 
-  var lineSeries = chart.addLineSeries({ color: '#3b82f6', lineWidth: 2 });
-  var currentEpic = '{{ default_epic }}';
+  var chart = LightweightCharts.createChart(chartContainer, {
+    layout: { background: { color: '#ffffff' }, textColor: '#374151', fontSize: 10 },
+    grid: { vertLines: { color: '#f3f4f6' }, horzLines: { color: '#f3f4f6' } },
+    rightPriceScale: { borderColor: '#e5e7eb', scaleMargins: { top: 0.05, bottom: 0.2 } },
+    timeScale: { borderColor: '#e5e7eb', timeVisible: true, secondsVisible: false },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      horzLine: { color: '#9ca3af', labelBackgroundColor: '#374151' },
+      vertLine: { color: '#9ca3af', labelBackgroundColor: '#374151' },
+    },
+  });
 
-  function fetchPrices(epic) {
-    fetch('/api/charts/market-prices?epic=' + encodeURIComponent(epic) + '&resolution=HOUR&points=48')
+  var candleSeries = chart.addCandlestickSeries({
+    upColor: '#26a69a', downColor: '#ef5350',
+    borderUpColor: '#26a69a', borderDownColor: '#ef5350',
+    wickUpColor: '#26a69a', wickDownColor: '#ef5350',
+  });
+
+  var volumeSeries = chart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: '',
+  });
+  volumeSeries.priceScale().applyOptions({
+    scaleMargins: { top: 0.85, bottom: 0 },
+  });
+
+  // Map IG epics back to yfinance tickers
+  var epicToTicker = {};
+  {% for ticker, info in market_map.items() %}
+  epicToTicker['{{ info.epic }}'] = '{{ ticker.replace("_trend", "") }}';
+  {% endfor %}
+
+  var currentTicker = 'SPY';
+  var currentInterval = '1d';
+  var currentPeriod = '6mo';
+  var refreshTimer = null;
+
+  function fetchOHLCV(ticker, interval, period) {
+    fetch('/api/charts/ohlcv?ticker=' + encodeURIComponent(ticker) + '&interval=' + encodeURIComponent(interval) + '&period=' + encodeURIComponent(period))
       .then(function(r) { return r.json(); })
       .then(function(data) {
-        if (data && data.length > 0) {
-          lineSeries.setData(data);
+        if (data && data.candles && data.candles.length > 0) {
+          candleSeries.setData(data.candles);
+          volumeSeries.setData(data.volumes || []);
           chart.timeScale().fitContent();
+          // Update price label
+          var last = data.candles[data.candles.length - 1];
+          var prev = data.candles.length > 1 ? data.candles[data.candles.length - 2] : last;
+          var priceLabel = document.getElementById('chart-price-label');
+          var changeLabel = document.getElementById('chart-change-label');
+          if (priceLabel) priceLabel.textContent = last.close.toFixed(2);
+          if (changeLabel) {
+            var chg = ((last.close - prev.close) / prev.close * 100).toFixed(2);
+            var sign = chg >= 0 ? '+' : '';
+            changeLabel.textContent = sign + chg + '%';
+            changeLabel.style.color = chg >= 0 ? '#26a69a' : '#ef5350';
+          }
         }
       })
-      .catch(function() {});
+      .catch(function(err) { console.warn('Chart fetch error:', err); });
   }
 
-  fetchPrices(currentEpic);
-  setInterval(function() { fetchPrices(currentEpic); }, 60000);
+  function startRefresh() {
+    if (refreshTimer) clearInterval(refreshTimer);
+    fetchOHLCV(currentTicker, currentInterval, currentPeriod);
+    var ms = currentInterval === '1m' ? 15000 : currentInterval === '5m' ? 30000 : 60000;
+    refreshTimer = setInterval(function() { fetchOHLCV(currentTicker, currentInterval, currentPeriod); }, ms);
+  }
+
+  startRefresh();
 
   var ro = new ResizeObserver(function() {
     chart.applyOptions({ width: chartContainer.clientWidth, height: chartContainer.clientHeight });
   });
   ro.observe(chartContainer);
 
+  window.changeInterval = function(interval, period) {
+    currentInterval = interval;
+    currentPeriod = period;
+    // Update button styles
+    var btns = document.querySelectorAll('#chart-interval-btns button');
+    btns.forEach(function(btn) {
+      if (btn.getAttribute('data-iv') === interval) {
+        btn.className = 'px-1.5 py-0.5 text-[9px] font-semibold text-gray-800 rounded border border-blue-400 bg-blue-50';
+      } else {
+        btn.className = 'px-1.5 py-0.5 text-[9px] text-gray-400 hover:text-gray-800 rounded border border-transparent hover:border-gray-300';
+      }
+    });
+    startRefresh();
+  };
+
   window.selectMarket = function(epic, igName, ticker) {
-    currentEpic = epic;
-    lineSeries.setData([]);
-    fetchPrices(epic);
+    // Map epic to yfinance ticker, falling back to the ticker param
+    currentTicker = epicToTicker[epic] || ticker || 'SPY';
+    // Strip _trend suffix for chart lookups
+    currentTicker = currentTicker.replace('_trend', '');
+    candleSeries.setData([]);
+    volumeSeries.setData([]);
     var label = document.getElementById('chart-market-label');
-    if (label) label.textContent = igName || ticker;
+    if (label) label.textContent = currentTicker + (igName ? ' — ' + igName : '');
     var epicSelect = document.getElementById('trade-epic');
     if (epicSelect) epicSelect.value = epic;
+    startRefresh();
   };
+
+  // Tooltip on crosshair move
+  chart.subscribeCrosshairMove(function(param) {
+    if (!param || !param.time) return;
+    var candle = param.seriesData && param.seriesData.get(candleSeries);
+    if (candle) {
+      var priceLabel = document.getElementById('chart-price-label');
+      if (priceLabel) priceLabel.textContent = 'O:' + candle.open.toFixed(2) + ' H:' + candle.high.toFixed(2) + ' L:' + candle.low.toFixed(2) + ' C:' + candle.close.toFixed(2);
+    }
+  });
 })();
 </script>
 {% endblock %}

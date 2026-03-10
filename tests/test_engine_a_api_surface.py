@@ -39,7 +39,11 @@ def test_research_templates_include_engine_a_diagnostics_fragments():
     assert "Regime Panel" in regime_template
     assert "Signal Heatmap" in heatmap_template
     assert "Portfolio Targets" in targets_template
+    assert "Where accepted research becomes position intent." in targets_template
+    assert "Open rebalance chain" in targets_template
     assert "Rebalance Panel" in rebalance_template
+    assert "Latest Engine A proposal waiting for execution or dismissal." in rebalance_template
+    assert "Largest Changes Queued" in rebalance_template
     assert "/api/actions/research/execute-rebalance" in rebalance_template
     assert "/api/actions/research/dismiss-rebalance" in rebalance_template
     assert "Regime Journal" in journal_template

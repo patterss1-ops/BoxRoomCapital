@@ -2,20 +2,217 @@
 {% block content %}
 <div class="grid grid-cols-1 md:grid-cols-12 gap-4">
 
-  <!-- Research Workflows — full width -->
   <div class="md:col-span-12">
-    <div class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
-      <div class="flex justify-between items-baseline gap-4 mb-3">
-        <h2 class="text-lg font-semibold text-gray-800">Research Workflows</h2>
-        <p class="text-gray-400 text-sm">Discovery, calibration, and strategy parameter promotion.</p>
+    <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+      <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <div class="xl:col-span-8">
+          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">Research Operations</p>
+          <div class="mt-2 flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
+            <div>
+              <h1 class="text-2xl font-semibold text-gray-900">Run research as a live operating loop.</h1>
+              <p class="mt-2 text-sm text-gray-500 max-w-3xl">
+                Intake new evidence, watch active chains advance, and make operator decisions from one surface.
+                Legacy discovery, calibration, and parameter tooling stays available, but the primary view now
+                follows the actual research workflow: intake, processing, decision.
+              </p>
+            </div>
+            <div class="flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide">
+              <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700">1 Intake</span>
+              <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700">2 Active Chains</span>
+              <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">3 Decision Queue</span>
+            </div>
+          </div>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <a href="#research-intake" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Open Intake</a>
+            <a href="#research-loop" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">View Active Research</a>
+            <a href="#research-workbench" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Jump To Decisions</a>
+            <a href="#research-archive-section" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Browse Archive</a>
+          </div>
+        </div>
+        <div class="xl:col-span-4">
+          <div class="h-full bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Operating Loop</p>
+            <div class="mt-3 space-y-3">
+              <div class="border border-gray-200 rounded-lg bg-white p-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-blue-600">Intake</p>
+                <p class="mt-1 text-sm font-semibold text-gray-800">Push new filings, transcripts, news, or manual notes into Engine B.</p>
+                <p class="mt-1 text-xs text-gray-500">The goal is fast structured capture, not another static tools panel.</p>
+              </div>
+              <div class="border border-gray-200 rounded-lg bg-white p-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-amber-600">Processing</p>
+                <p class="mt-1 text-sm font-semibold text-gray-800">Track chain formation, challenges, scores, and rebalance proposals as they develop.</p>
+                <p class="mt-1 text-xs text-gray-500">Active chains and system activity are promoted above diagnostics and raw internals.</p>
+              </div>
+              <div class="border border-gray-200 rounded-lg bg-white p-3">
+                <p class="text-xs font-semibold uppercase tracking-wide text-emerald-600">Decision</p>
+                <p class="mt-1 text-sm font-semibold text-gray-800">Synthesize, approve, reject, execute, or dismiss directly from the workbench.</p>
+                <p class="mt-1 text-xs text-gray-500">Raw artifact payloads are still available, but only when you deliberately open them.</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+    </section>
+  </div>
+
+  <div class="md:col-span-12 xl:col-span-7" id="research-intake">
+    <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+      <div class="flex justify-between items-baseline gap-4 mb-3">
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">Intake</p>
+          <h2 class="text-lg font-semibold text-gray-900">Manual Engine B Intake</h2>
+          <p class="text-sm text-gray-500">Paste a fresh signal, filing excerpt, or event summary and send it straight into the research chain.</p>
+        </div>
+        <p class="text-xs text-gray-400">Primary operator action</p>
+      </div>
+      <form hx-post="/api/actions/research/engine-b-run" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" class="space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Source Class</label>
+            <select name="source_class" class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <option value="news_wire" selected>news_wire</option>
+              <option value="filing">filing</option>
+              <option value="transcript">transcript</option>
+              <option value="analyst_revision">analyst_revision</option>
+              <option value="sa_quant">sa_quant</option>
+              <option value="social_curated">social_curated</option>
+              <option value="social_general">social_general</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-gray-400 text-xs uppercase tracking-wide">Credibility</label>
+            <input type="number" name="source_credibility" value="0.7" min="0" max="1" step="0.1" class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+          </div>
+        </div>
+        <div>
+          <label class="text-gray-400 text-xs uppercase tracking-wide">Source IDs</label>
+          <input type="text" name="source_ids" placeholder="filing:10q-2026-03-09, news:benzinga-123" class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+        </div>
+        <div>
+          <label class="text-gray-400 text-xs uppercase tracking-wide">Raw Content</label>
+          <textarea name="raw_content" rows="8" placeholder="Paste filing excerpt, news item, transcript section, or operator note" class="mt-1 w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-2 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <p class="text-xs text-gray-500">Use this when you want a chain immediately, not when you are exploring old option or calibration tooling.</p>
+          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg border border-blue-500 transition-colors text-sm">Run Engine B</button>
+        </div>
+      </form>
+    </section>
+  </div>
+
+  <div class="md:col-span-12 xl:col-span-5">
+    <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
+      <div class="flex justify-between items-baseline gap-4 mb-3">
+        <div>
+          <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-600">Primary Surface</p>
+          <h2 class="text-lg font-semibold text-gray-900">What changed on this page</h2>
+          <p class="text-sm text-gray-500">Research now leads with chains and operator decisions, not with the old lab tools.</p>
+        </div>
+      </div>
+      <div class="space-y-3">
+        <div class="border border-gray-200 rounded-lg p-3">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Above the fold</p>
+          <p class="mt-1 text-sm text-gray-700">Intake, active research, decision workbench, and archive come first.</p>
+        </div>
+        <div class="border border-gray-200 rounded-lg p-3">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Below the fold</p>
+          <p class="mt-1 text-sm text-gray-700">Option discovery, calibration, strategy params, jobs, and captures are still available under collapsible lab sections.</p>
+        </div>
+        <div class="border border-gray-200 rounded-lg p-3">
+          <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">Operator posture</p>
+          <p class="mt-1 text-sm text-gray-700">The default question is now “what chain needs a call?” instead of “which tool card should I click?”</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="md:col-span-12" id="research-loop">
+    <div class="flex justify-between items-end gap-4">
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-600">Active Research</p>
+        <h2 class="text-lg font-semibold text-gray-900">Processing and triage</h2>
+        <p class="text-sm text-gray-500">Watch the system work, inspect in-flight chains, and see which items need intervention.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="md:col-span-12"
+       id="research-panel"
+       hx-get="/fragments/research{% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}{% endif %}"
+       hx-trigger="load delay:300ms, every 15s"
+       hx-swap="innerHTML"></div>
+
+  <div class="md:col-span-12" id="research-workbench">
+    <div class="flex justify-between items-end gap-4">
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600">Decision Workbench</p>
+        <h2 class="text-lg font-semibold text-gray-900">Chain context and operator actions</h2>
+        <p class="text-sm text-gray-500">Open a chain, inspect its progression, then synthesize, approve, reject, execute, or dismiss from the adjacent action surface.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="md:col-span-12"
+       id="research-focus-ribbon"
+       {% if research_selected_chain_id %}
+       data-initial-research-chain="{{ research_selected_chain_id }}"
+       hx-get="/fragments/research/focus-ribbon?chain_id={{ research_selected_chain_id }}{% if research_selected_queue_lane != 'all' %}&queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_active_view != 'all' %}&active_view={{ research_selected_active_view }}{% endif %}"
+       {% else %}
+       hx-get="/fragments/research/focus-ribbon{% if research_selected_queue_lane != 'all' or research_selected_active_view != 'all' %}?{% endif %}{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_queue_lane != 'all' and research_selected_active_view != 'all' %}&{% endif %}{% if research_selected_active_view != 'all' %}active_view={{ research_selected_active_view }}{% endif %}"
+       {% endif %}
+       hx-trigger="load delay:325ms"
+       hx-swap="innerHTML"></div>
+
+  <div class="md:col-span-12 xl:col-span-8"
+       id="research-artifact-chain-viewer"
+       {% if research_selected_chain_id %}
+       data-initial-research-chain="{{ research_selected_chain_id }}"
+       hx-get="/fragments/research/artifact-chain/{{ research_selected_chain_id }}"
+       {% else %}
+       hx-get="/fragments/research/artifact-chain"
+       {% endif %}
+       hx-trigger="load delay:350ms"
+       hx-swap="innerHTML"></div>
+
+  <div class="md:col-span-12 xl:col-span-4"
+       id="research-operator-output"
+       {% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}
+       {% if research_selected_chain_id %}data-initial-research-chain="{{ research_selected_chain_id }}"{% endif %}
+       hx-get="/fragments/research/operator-output?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}"
+       {% else %}
+       hx-get="/fragments/research/operator-output"
+       {% endif %}
+       hx-trigger="load delay:400ms"
+       hx-swap="innerHTML"></div>
+
+  <div class="md:col-span-12" id="research-archive-section">
+    <div class="flex justify-between items-end gap-4">
+      <div>
+        <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Archive</p>
+        <h2 class="text-lg font-semibold text-gray-900">Closed loops and searchable history</h2>
+        <p class="text-sm text-gray-500">Completed chains, syntheses, retirements, and post-mortems stay available without crowding the live operating surface.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="md:col-span-12"
+       id="research-archive"
+       hx-get="/fragments/research/archive"
+       hx-trigger="load delay:450ms, every 30s"
+       hx-swap="innerHTML"></div>
+
+  <div class="md:col-span-12">
+    <details class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+      <summary class="cursor-pointer font-semibold text-gray-900">Legacy Labs</summary>
+      <p class="mt-2 text-sm text-gray-500">Older research tooling kept for completeness and secondary workflows.</p>
+
+      <div class="mt-4 grid grid-cols-1 xl:grid-cols-12 gap-4">
+        <form hx-post="/api/actions/discover-options" hx-target="#action-result" hx-swap="innerHTML" class="xl:col-span-4 bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
           <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Option Discovery</p>
           <div class="grid grid-cols-3 gap-2">
             <div>
               <label class="text-gray-400 text-xs uppercase tracking-wide">Mode</label>
-              <select name="mode" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <select name="mode" class="w-full bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="search" selected>Search</option>
                 <option value="nav">Navigation</option>
                 <option value="both">Both</option>
@@ -23,29 +220,29 @@
             </div>
             <div>
               <label class="text-gray-400 text-xs uppercase tracking-wide">Details</label>
-              <select name="include_details" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <select name="include_details" class="w-full bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="on" selected>Yes</option>
                 <option value="off">No</option>
               </select>
             </div>
             <div>
               <label class="text-gray-400 text-xs uppercase tracking-wide">Strikes</label>
-              <input type="text" name="strikes" placeholder="US 500" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <input type="text" name="strikes" placeholder="US 500" class="w-full bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
           </div>
           <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Discovery</button>
         </form>
 
-        <form hx-post="/api/actions/calibrate-options" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+        <form hx-post="/api/actions/calibrate-options" hx-target="#action-result" hx-swap="innerHTML" class="xl:col-span-4 bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
           <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Calibration Run</p>
           <div class="grid grid-cols-2 gap-2">
             <div>
               <label class="text-gray-400 text-xs uppercase tracking-wide">Index</label>
-              <input type="text" name="index_filter" placeholder="US 500" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              <input type="text" name="index_filter" placeholder="US 500" class="w-full bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
             </div>
             <div>
               <label class="text-gray-400 text-xs uppercase tracking-wide">Verbose</label>
-              <select name="verbose" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+              <select name="verbose" class="w-full bg-white border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
                 <option value="off" selected>No</option>
                 <option value="on">Yes</option>
               </select>
@@ -54,148 +251,94 @@
           <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Calibration</button>
         </form>
 
-        <form hx-post="/api/actions/research/engine-b-run" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Manual Engine B Intake</p>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Source Class</label>
-              <select name="source_class" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
-                <option value="news_wire" selected>news_wire</option>
-                <option value="filing">filing</option>
-                <option value="transcript">transcript</option>
-                <option value="analyst_revision">analyst_revision</option>
-                <option value="sa_quant">sa_quant</option>
-                <option value="social_curated">social_curated</option>
-                <option value="social_general">social_general</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Credibility</label>
-              <input type="number" name="source_credibility" value="0.7" min="0" max="1" step="0.1" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
-          </div>
-          <div>
-            <label class="text-gray-400 text-xs uppercase tracking-wide">Source IDs</label>
-            <input type="text" name="source_ids" placeholder="filing:10q-2026-03-09, news:benzinga-123" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-          </div>
-          <div>
-            <label class="text-gray-400 text-xs uppercase tracking-wide">Raw Content</label>
-            <textarea name="raw_content" rows="5" placeholder="Paste filing excerpt, news item, or transcript section" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
-          </div>
-          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Run Engine B</button>
-        </form>
-      </div>
-    </div>
-  </div>
+        <details class="xl:col-span-4 bg-gray-100 border border-gray-300 rounded-lg p-3" open>
+          <summary class="cursor-pointer text-gray-500 text-xs font-semibold uppercase tracking-wide mb-2">Strategy Parameter Lab</summary>
+          <div class="mt-3 grid grid-cols-1 gap-3">
+            <form hx-post="/api/actions/strategy-params/create" hx-target="#action-result" hx-swap="innerHTML" class="bg-white border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+              <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Create Parameter Set</p>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Strategy</label>
+                  <select name="strategy_key" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                    <option value="ibs_credit_spreads" selected>ibs_credit_spreads</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Set Name</label>
+                  <input type="text" name="name" placeholder="ibs-shadow-candidate" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Status</label>
+                  <select name="status" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                    <option value="shadow" selected>shadow</option>
+                    <option value="staged_live">staged_live</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Calibration Run ID</label>
+                  <input type="text" name="source_run_id" placeholder="optional run id" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+                </div>
+              </div>
+              <div>
+                <label class="text-gray-400 text-xs uppercase tracking-wide">Overrides JSON</label>
+                <textarea name="overrides_json" rows="2" placeholder='{"min_credit_pct": 2.8}' class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm font-mono placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
+              </div>
+              <div>
+                <label class="text-gray-400 text-xs uppercase tracking-wide">Notes</label>
+                <input type="text" name="notes" placeholder="why this set exists" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              </div>
+              <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Save Param Set</button>
+            </form>
 
-  <!-- Strategy Parameter Lab — full width collapsible -->
-  <div class="md:col-span-12">
-    <details class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg" open>
-      <summary class="font-semibold text-gray-800 cursor-pointer">Strategy Parameter Lab</summary>
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mt-3">
-        <form hx-post="/api/actions/strategy-params/create" hx-target="#action-result" hx-swap="innerHTML" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Create Parameter Set</p>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Strategy</label>
-              <select name="strategy_key" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
-                <option value="ibs_credit_spreads" selected>ibs_credit_spreads</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Set Name</label>
-              <input type="text" name="name" placeholder="ibs-shadow-candidate" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Status</label>
-              <select name="status" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
-                <option value="shadow" selected>shadow</option>
-                <option value="staged_live">staged_live</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Calibration Run ID</label>
-              <input type="text" name="source_run_id" placeholder="optional run id" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
+            <form hx-post="/api/actions/strategy-params/promote" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Promote selected parameter set?" class="bg-white border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
+              <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Promote Parameter Set</p>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Set ID</label>
+                  <input type="text" name="set_id" placeholder="parameter set id" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Target Status</label>
+                  <select name="target_status" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
+                    <option value="staged_live" selected>staged_live</option>
+                    <option value="live">live</option>
+                    <option value="archived">archived</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Actor</label>
+                  <input type="text" name="actor" value="operator" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+                </div>
+                <div>
+                  <label class="text-gray-400 text-xs uppercase tracking-wide">Acknowledgement</label>
+                  <input type="text" name="acknowledgement" value="Manual promotion approved" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+                </div>
+              </div>
+              <div>
+                <label class="text-gray-400 text-xs uppercase tracking-wide">Note</label>
+                <input type="text" name="note" value="promoted from control plane" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
+              </div>
+              <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Promote Set</button>
+            </form>
           </div>
-          <div>
-            <label class="text-gray-400 text-xs uppercase tracking-wide">Overrides JSON</label>
-            <textarea name="overrides_json" rows="2" placeholder='{"min_credit_pct": 2.8}' class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm font-mono placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
-          </div>
-          <div>
-            <label class="text-gray-400 text-xs uppercase tracking-wide">Notes</label>
-            <input type="text" name="notes" placeholder="why this set exists" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-          </div>
-          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-4 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm">Save Param Set</button>
-        </form>
+        </details>
 
-        <form hx-post="/api/actions/strategy-params/promote" hx-target="#action-result" hx-swap="innerHTML" data-confirm="Promote selected parameter set?" class="bg-gray-100 border border-gray-300 rounded-lg p-3 flex flex-col gap-2">
-          <p class="text-gray-500 text-xs font-semibold uppercase tracking-wide mb-1">Promote Parameter Set</p>
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Set ID</label>
-              <input type="text" name="set_id" placeholder="parameter set id" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Target Status</label>
-              <select name="target_status" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500">
-                <option value="staged_live" selected>staged_live</option>
-                <option value="live">live</option>
-                <option value="archived">archived</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Actor</label>
-              <input type="text" name="actor" value="operator" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
-            <div>
-              <label class="text-gray-400 text-xs uppercase tracking-wide">Acknowledgement</label>
-              <input type="text" name="acknowledgement" value="Manual promotion approved" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
-          </div>
-          <div>
-            <label class="text-gray-400 text-xs uppercase tracking-wide">Note</label>
-            <input type="text" name="note" value="promoted from control plane" class="w-full bg-gray-100 border border-gray-300 text-gray-800 rounded-lg px-3 py-1.5 text-sm placeholder-gray-400 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500" />
-          </div>
-          <button type="submit" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-4 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm">Promote Set</button>
-        </form>
+        <div class="xl:col-span-12" id="backtest-panel" hx-get="/fragments/backtest" hx-trigger="load delay:500ms, every 15s" hx-swap="innerHTML"></div>
       </div>
     </details>
   </div>
 
-  <!-- Research Fragment — full width -->
-  <div class="md:col-span-12" id="research-panel" hx-get="/fragments/research" hx-trigger="load delay:300ms, every 15s" hx-swap="innerHTML"></div>
-
-  <!-- Research Chain Viewer — full width -->
-  <div class="md:col-span-12"
-       id="research-artifact-chain-viewer"
-       hx-get="/fragments/research/artifact-chain"
-       hx-trigger="load delay:350ms"
-       hx-swap="innerHTML"></div>
-
-  <!-- Research Operator Output — full width -->
-  <div class="md:col-span-12"
-       id="research-operator-output"
-       hx-get="/fragments/research/operator-output"
-       hx-trigger="load delay:400ms"
-       hx-swap="innerHTML"></div>
-
-  <!-- Research Archive — full width -->
-  <div class="md:col-span-12"
-       id="research-archive"
-       hx-get="/fragments/research/archive"
-       hx-trigger="load delay:450ms, every 30s"
-       hx-swap="innerHTML"></div>
-
-  <!-- SA Snapshots — full width -->
-  <div class="md:col-span-12" id="sa-symbol-captures-panel" hx-get="/fragments/sa-symbol-captures?limit=6" hx-trigger="load delay:450ms, every 20s" hx-swap="innerHTML"></div>
-
-  <!-- Backtest Runs — full width -->
-  <div class="md:col-span-12" id="backtest-panel" hx-get="/fragments/backtest" hx-trigger="load delay:500ms, every 15s" hx-swap="innerHTML"></div>
-
-  <!-- Jobs + Job Detail — 2 column -->
-  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load delay:800ms" hx-swap="innerHTML"></div>
+  <div class="md:col-span-12">
+    <details class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+      <summary class="cursor-pointer font-semibold text-gray-900">Diagnostics &amp; Feeds</summary>
+      <p class="mt-2 text-sm text-gray-500">Secondary surfaces for captures, jobs, and lower-level runtime visibility.</p>
+      <div class="mt-4 grid grid-cols-1 md:grid-cols-12 gap-4">
+        <div class="md:col-span-12" id="sa-symbol-captures-panel" hx-get="/fragments/sa-symbol-captures?limit=6" hx-trigger="load delay:450ms, every 20s" hx-swap="innerHTML"></div>
+        <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load delay:800ms, every 10s" hx-swap="innerHTML"></div>
+        <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load delay:800ms" hx-swap="innerHTML"></div>
+      </div>
+    </details>
+  </div>
 
 </div>
 {% endblock %}

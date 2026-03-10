@@ -102,6 +102,9 @@ DEFAULT_SCHEDULE: list[ScheduleWindow] = [
     # ShareScope UK screen scraper (Sunday morning)
     ScheduleWindow(name="sharescope_scrape", hour=7, minute=30,
                    weekdays=frozenset({7})),
+    # Market briefs — AI analyst morning + evening
+    ScheduleWindow(name="market_brief_morning", hour=12, minute=30),  # 07:30 ET pre-market
+    ScheduleWindow(name="market_brief_evening", hour=21, minute=15),  # 16:15 ET post-close
 ]
 
 

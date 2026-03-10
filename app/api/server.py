@@ -136,6 +136,7 @@ from intelligence.intel_pipeline import (
     IntelSubmission,
     analyze_intel_async,
 )
+from intelligence.market_brief import MarketBrief, generate_brief, get_email_draft_content
 from intelligence.sa_factor_grades import normalize_factor_grades, store_factor_grades
 from intelligence.sa_quant_client import score_sa_quant_snapshot
 from intelligence.scrapers.sa_adapter import (
@@ -182,6 +183,7 @@ _RESEARCH_CACHE_TTL_SECONDS = 15.0
 _LEDGER_CACHE_TTL_SECONDS = 15.0
 _EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 _RESEARCH_FRAGMENT_CACHE_KEYS = (
+    "research-operating-summary",
     "research-readiness",
     "research-pipeline-funnel",
     "research-active-hypotheses",
@@ -197,6 +199,8 @@ _INTEL_ANALYSIS_STALE_SECONDS = max(15 * 60, int(config.COUNCIL_ROUND_TIMEOUT) *
 _RESEARCH_SYNTHESIS_EVENT_TYPE = "research_synthesis"
 _RESEARCH_OPERATOR_SOURCE = "research_ui"
 _RESEARCH_ARCHIVE_VIEWS = {"all", "completed", "synthesis", "post_mortem", "retirement"}
+_LATEST_BRIEFS: dict[str, MarketBrief] = {}  # "morning" / "evening" -> latest brief
+_BRIEF_LOCK = threading.Lock()
 
 
 def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
@@ -314,6 +318,27 @@ def _parse_iso_datetime(value: Any) -> datetime | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
+
+
+def _relative_time_label(value: Any, *, now: datetime | None = None) -> str:
+    parsed = _parse_iso_datetime(value)
+    if parsed is None:
+        return "-"
+    current = now or datetime.now(timezone.utc)
+    seconds = max(0, int((current - parsed).total_seconds()))
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 48:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 14:
+        return f"{days}d ago"
+    weeks = days // 7
+    return f"{weeks}w ago"
 
 
 def _expire_stale_intel_analysis_jobs(now: datetime | None = None) -> int:
@@ -674,7 +699,11 @@ def _build_research_artifact_chain_context(
     store = artifact_store or ArtifactStore()
     chain = store.get_chain(chain_id)
     artifacts = [_serialize_research_artifact(envelope) for envelope in chain]
+    for index, artifact in enumerate(artifacts, start=1):
+        artifact["dom_id"] = f"chain-artifact-v{int(artifact.get('version') or index)}"
+        artifact["sequence_label"] = f"Step {index}"
     latest = artifacts[-1] if artifacts else None
+    now = datetime.now(timezone.utc)
     latest_scoring = next(
         (
             item
@@ -699,11 +728,173 @@ def _build_research_artifact_chain_context(
         ),
         None,
     )
+    latest_review_trigger = next(
+        (
+            item
+            for item in reversed(artifacts)
+            if item.get("artifact_type") == ArtifactType.REVIEW_TRIGGER.value
+        ),
+        None,
+    )
+    latest_rebalance_sheet = next(
+        (
+            item
+            for item in reversed(artifacts)
+            if item.get("artifact_type") == ArtifactType.REBALANCE_SHEET.value
+        ),
+        None,
+    )
     pilot_signoff_required = bool(
         latest_scoring
         and latest_trade_sheet
         and str((latest_scoring.get("body") or {}).get("next_stage") or "").strip().lower() == "pilot"
     )
+    review_ack_pending = bool(
+        latest_review_trigger
+        and not bool((latest_review_trigger.get("body") or {}).get("operator_ack"))
+    )
+    review_recommended_action = (
+        str((latest_review_trigger.get("body") or {}).get("recommended_action") or "").strip().lower()
+        if latest_review_trigger
+        else ""
+    )
+    review_context = None
+    if latest_review_trigger:
+        review_body = latest_review_trigger.get("body") or {}
+        review_flags = [
+            str(flag).strip()
+            for flag in (review_body.get("flags") or [])
+            if str(flag).strip()
+        ]
+        review_context = {
+            "trigger_source": str(review_body.get("trigger_source") or "").strip(),
+            "health_status": str(review_body.get("health_status") or "").strip(),
+            "recommended_action": review_recommended_action,
+            "flags": review_flags[:4],
+            "flag_count": len(review_flags),
+            "operator_ack": bool(review_body.get("operator_ack")),
+            "operator_notes": str(review_body.get("operator_notes") or "").strip(),
+        }
+    rebalance_executed = False
+    rebalance_can_execute = False
+    rebalance_can_dismiss = False
+    rebalance_move_count = 0
+    rebalance_context = None
+    if latest_rebalance_sheet:
+        rebalance_version = int(latest_rebalance_sheet.get("version") or 0)
+        rebalance_body = latest_rebalance_sheet.get("body") or {}
+        deltas = dict(rebalance_body.get("deltas") or {})
+        ranked_moves = sorted(
+            (
+                {
+                    "instrument": str(instrument),
+                    "delta": float(delta or 0.0),
+                }
+                for instrument, delta in deltas.items()
+                if abs(float(delta or 0.0)) > 0.0
+            ),
+            key=lambda item: abs(item["delta"]),
+            reverse=True,
+        )
+        rebalance_move_count = len(ranked_moves)
+        rebalance_executed = any(
+            envelope.artifact_type == ArtifactType.EXECUTION_REPORT and int(envelope.version or 0) > rebalance_version
+            for envelope in chain
+        )
+        rebalance_can_execute = rebalance_move_count > 0 and not rebalance_executed
+        rebalance_can_dismiss = not rebalance_executed
+        rebalance_context = {
+            "approval_status": str(rebalance_body.get("approval_status") or "").strip(),
+            "decision_source": str(rebalance_body.get("decision_source") or "").strip(),
+            "decided_by": str(rebalance_body.get("decided_by") or "").strip(),
+            "operator_notes": str(rebalance_body.get("operator_notes") or "").strip(),
+            "estimated_cost": float(rebalance_body.get("estimated_cost") or 0.0),
+            "move_count": rebalance_move_count,
+            "top_moves": ranked_moves[:3],
+        }
+    latest_type = str((latest or {}).get("artifact_type") or "").strip().lower()
+    next_lane = (
+        str((latest_scoring.get("body") or {}).get("next_stage") or "").strip().lower()
+        if latest_scoring
+        else ("pilot_ready" if latest_type == ArtifactType.TRADE_SHEET.value else "")
+    )
+    if latest_type == ArtifactType.REBALANCE_SHEET.value:
+        next_lane = "rebalance_decision"
+    if latest_type == ArtifactType.REVIEW_TRIGGER.value:
+        next_lane = "review_pending"
+    if pilot_signoff_required and not next_lane:
+        next_lane = "pilot_ready"
+
+    next_operator_move = "inspect chain and synthesize"
+    posture_title = "Chain in progress"
+    posture_detail = "Inspect the latest artifact and decide the next operator action."
+    posture_tone = "neutral"
+    if latest_type == ArtifactType.REVIEW_TRIGGER.value:
+        posture_title = "Review acknowledgement pending"
+        posture_detail = "A decay or kill review is waiting for an operator decision."
+        posture_tone = "warning"
+        next_operator_move = "acknowledge review"
+    elif latest_type == ArtifactType.REBALANCE_SHEET.value:
+        posture_title = "Rebalance decision pending"
+        posture_detail = "Engine A produced a rebalance proposal; execute it or dismiss it from the workbench."
+        posture_tone = "warning"
+        next_operator_move = "execute or dismiss rebalance"
+    elif pilot_signoff_required and latest_pilot_decision is None:
+        posture_title = "Pilot sign-off pending"
+        posture_detail = "The trade plan is ready and needs an approve/reject call before the chain can advance."
+        posture_tone = "warning"
+        next_operator_move = "approve or reject pilot"
+    elif latest_type == ArtifactType.SCORING_RESULT.value:
+        posture_title = "Ready for synthesis"
+        posture_detail = "Score is recorded; summarize the chain and decide whether it advances, parks, or dies."
+        posture_tone = "positive" if str((latest.get("body") or {}).get("outcome") or "").strip().lower() == "promote" else "neutral"
+        next_operator_move = "inspect score and synthesize"
+    elif latest_type == ArtifactType.PILOT_DECISION.value:
+        decision = str((latest.get("body") or {}).get("operator_decision") or "").strip().lower()
+        posture_title = "Pilot decision recorded"
+        posture_detail = "Pilot sign-off is in the chain record. Review follow-through or capture the post-mortem."
+        posture_tone = "positive" if decision == "approve" else "negative"
+        next_operator_move = "review follow-through"
+    elif latest_type == ArtifactType.POST_MORTEM_NOTE.value:
+        posture_title = "Closed with post-mortem"
+        posture_detail = "The learning loop is captured; use archive search to compare similar cases later."
+        posture_tone = "closed"
+        next_operator_move = "archive and compare"
+    elif latest_type == ArtifactType.RETIREMENT_MEMO.value:
+        posture_title = "Retired"
+        posture_detail = "The chain has been retired. Use the memo and archive history as the reference state."
+        posture_tone = "negative"
+        next_operator_move = "review retirement context"
+    elif latest_type == ArtifactType.TRADE_SHEET.value:
+        posture_title = "Trade sheet ready"
+        posture_detail = "The chain has a trade expression. Confirm whether it is ready for pilot or needs more review."
+        posture_tone = "positive"
+        next_operator_move = "review trade expression"
+
+    lifecycle = _build_research_chain_lifecycle(chain) if chain else {
+        "milestones": [],
+        "completed_count": 0,
+        "total_count": len(_RESEARCH_CHAIN_LIFECYCLE_STAGES),
+        "summary": "",
+    }
+    latest_artifact_id = str((latest or {}).get("artifact_id") or "")
+    artifact_navigation = []
+    for artifact in artifacts:
+        is_latest_artifact = str(artifact.get("artifact_id") or "") == latest_artifact_id
+        artifact["is_latest"] = is_latest_artifact
+        artifact_navigation.append(
+            {
+                "artifact_id": str(artifact.get("artifact_id") or ""),
+                "dom_id": str(artifact.get("dom_id") or ""),
+                "label": str(artifact.get("artifact_label") or "Artifact"),
+                "version": int(artifact.get("version") or 0),
+                "engine": str(artifact.get("engine") or ""),
+                "created_label": _relative_time_label(artifact.get("created_at"), now=now),
+                "is_latest": is_latest_artifact,
+            }
+        )
+    first_created_at = artifacts[0].get("created_at") if artifacts else ""
+    latest_created_at = latest.get("created_at") if latest else ""
     return {
         "chain_id": chain_id,
         "artifacts": artifacts,
@@ -711,14 +902,35 @@ def _build_research_artifact_chain_context(
         "latest": latest,
         "latest_scoring": latest_scoring,
         "pilot_decision": latest_pilot_decision,
+        "latest_review_trigger": latest_review_trigger,
+        "latest_rebalance_sheet": latest_rebalance_sheet,
         "pilot_signoff_required": pilot_signoff_required,
         "pilot_signoff_pending": pilot_signoff_required and latest_pilot_decision is None,
+        "review_ack_pending": review_ack_pending,
+        "review_recommended_action": review_recommended_action,
+        "review_context": review_context,
+        "rebalance_executed": rebalance_executed,
+        "rebalance_can_execute": rebalance_can_execute,
+        "rebalance_can_dismiss": rebalance_can_dismiss,
+        "rebalance_move_count": rebalance_move_count,
+        "rebalance_context": rebalance_context,
         "can_generate_post_mortem": any(
             envelope.artifact_type == ArtifactType.HYPOTHESIS_CARD for envelope in chain
         ),
         "post_mortem_count": sum(
             1 for envelope in chain if envelope.artifact_type == ArtifactType.POST_MORTEM_NOTE
         ),
+        "lifecycle": lifecycle,
+        "artifact_navigation": artifact_navigation,
+        "operator_posture_title": posture_title,
+        "operator_posture_detail": posture_detail,
+        "operator_posture_tone": posture_tone,
+        "next_lane": next_lane or "review",
+        "next_operator_move": next_operator_move,
+        "first_created_at": first_created_at,
+        "first_created_label": _relative_time_label(first_created_at, now=now),
+        "latest_created_at": latest_created_at,
+        "latest_created_label": _relative_time_label(latest_created_at, now=now),
         "error": "" if artifacts else f"No research artifacts found for chain {chain_id[:8]}.",
         "generated_at": _utc_now_iso(),
     }
@@ -835,10 +1047,13 @@ def _build_research_chain_lifecycle(chain: list[ArtifactEnvelope]) -> dict[str, 
 def _build_research_operator_output_context(
     *,
     chain_id: str = "",
+    queue_lane: str = "all",
+    active_view: str = "all",
     synthesis: dict[str, Any] | None = None,
     operator_action: dict[str, Any] | None = None,
     pilot_decision: dict[str, Any] | None = None,
     post_mortem: dict[str, Any] | None = None,
+    queued_intake: dict[str, Any] | None = None,
     error: str = "",
 ) -> dict[str, Any]:
     active_chain_id = chain_id
@@ -850,14 +1065,754 @@ def _build_research_operator_output_context(
         active_chain_id = str(pilot_decision.get("chain_id") or "")
     if not active_chain_id and post_mortem:
         active_chain_id = str(post_mortem.get("chain_id") or "")
+    selected_queue_lane = _normalize_research_queue_lane(queue_lane)
+    selected_active_view = _normalize_research_active_view(active_view)
+    active_chain = None
+    queue_alignment = None
+    queue_follow_up = None
+    if (
+        active_chain_id
+        and not error
+        and synthesis is None
+        and operator_action is None
+        and pilot_decision is None
+        and post_mortem is None
+        and queued_intake is None
+    ):
+        chain_context = _build_research_artifact_chain_context(active_chain_id)
+        if int(chain_context.get("artifact_count") or 0) > 0:
+            active_chain = chain_context
+            queue_alignment = _build_research_workbench_queue_alignment(chain_context, selected_queue_lane)
+    if not error and not queued_intake:
+        queue_follow_up = _build_research_queue_follow_up_context(
+            selected_queue_lane,
+            exclude_chain_id=active_chain_id,
+        )
     return {
         "chain_id": active_chain_id,
+        "active_chain": active_chain,
+        "selected_queue_lane": selected_queue_lane,
+        "selected_queue_label": _research_queue_lane_label(selected_queue_lane),
+        "selected_active_view": selected_active_view,
+        "selected_active_view_label": _research_active_view_label(selected_active_view),
+        "return_to_active_view": selected_active_view,
+        "return_to_active_view_label": _research_active_view_label(selected_active_view),
+        "return_to_queue_label": (
+            "Return to Queue"
+            if selected_queue_lane == "all"
+            else f"Return to {_research_queue_lane_label(selected_queue_lane)}"
+        ),
+        "queue_alignment": queue_alignment,
+        "queue_follow_up": queue_follow_up,
         "synthesis": synthesis,
         "operator_action": operator_action,
         "pilot_decision": pilot_decision,
         "post_mortem": post_mortem,
+        "queued_intake": queued_intake,
         "error": error,
         "generated_at": _utc_now_iso(),
+    }
+
+
+def _build_research_lane_focus(next_lane: str) -> dict[str, str]:
+    normalized = str(next_lane or "").strip().lower()
+    if normalized.startswith("review"):
+        return {
+            "queue_filter": "review",
+            "queue_label": "Review Lane",
+            "queue_anchor": "#research-alerts",
+            "active_view": "operator",
+            "active_view_label": "Operator",
+        }
+    if normalized.startswith("pilot"):
+        return {
+            "queue_filter": "pilot",
+            "queue_label": "Pilot Lane",
+            "queue_anchor": "#research-alerts",
+            "active_view": "operator",
+            "active_view_label": "Operator",
+        }
+    if normalized.startswith("rebalance"):
+        return {
+            "queue_filter": "rebalance",
+            "queue_label": "Rebalance Lane",
+            "queue_anchor": "#research-alerts",
+            "active_view": "all",
+            "active_view_label": "All",
+        }
+    return {
+        "queue_filter": "all",
+        "queue_label": "Flow Lane",
+        "queue_anchor": "#research-loop",
+        "active_view": "flow",
+        "active_view_label": "Flow",
+    }
+
+
+def _normalize_research_queue_lane(lane: str) -> str:
+    normalized = str(lane or "").strip().lower()
+    return normalized if normalized in {"all", "review", "pilot", "rebalance", "retirements"} else "all"
+
+
+def _normalize_research_active_view(view: str) -> str:
+    normalized = str(view or "").strip().lower()
+    return normalized if normalized in {"all", "focus", "operator", "flow", "stale"} else "all"
+
+
+def _research_queue_lane_label(lane: str) -> str:
+    normalized = _normalize_research_queue_lane(lane)
+    if normalized == "review":
+        return "Review Lane"
+    if normalized == "pilot":
+        return "Pilot Lane"
+    if normalized == "rebalance":
+        return "Rebalance Lane"
+    if normalized == "retirements":
+        return "Retirements"
+    return "All Lanes"
+
+
+def _research_active_view_for_lane(lane: str) -> str:
+    normalized = str(lane or "").strip().lower()
+    if normalized in {"review", "pilot"}:
+        return "operator"
+    if normalized == "flow":
+        return "flow"
+    return "all"
+
+
+def _research_active_view_label(view: str) -> str:
+    normalized = _normalize_research_active_view(view)
+    if normalized == "focus":
+        return "Board Focus"
+    if normalized == "operator":
+        return "Operator"
+    if normalized == "flow":
+        return "Flow"
+    if normalized == "stale":
+        return "Stale"
+    return "All"
+
+
+def _build_research_focus_ribbon_context(
+    chain_id: str = "",
+    queue_lane: str = "all",
+    active_view: str = "all",
+    suppress_auto_sync: bool = False,
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any]:
+    store = artifact_store
+    requested_chain_id = str(chain_id or "").strip()
+    current_queue_lane = _normalize_research_queue_lane(queue_lane)
+    current_active_view = _normalize_research_active_view(active_view)
+    missing_error = ""
+
+    if requested_chain_id:
+        if store is None:
+            store = ArtifactStore()
+        selected_chain = _build_research_artifact_chain_context(requested_chain_id, artifact_store=store)
+        if int(selected_chain.get("artifact_count") or 0) > 0:
+            latest = selected_chain.get("latest") or {}
+            lane_focus = _build_research_lane_focus(str(selected_chain.get("next_lane") or ""))
+            review_pending = bool(selected_chain.get("review_ack_pending"))
+            rebalance_pending = bool(
+                selected_chain.get("rebalance_can_execute") or selected_chain.get("rebalance_can_dismiss")
+            )
+            pilot_pending = bool(selected_chain.get("pilot_signoff_pending"))
+            synthesis_ready = not review_pending and not rebalance_pending and not pilot_pending
+            pilot_decision = selected_chain.get("pilot_decision") or {}
+            pilot_decision_body = pilot_decision.get("body") if isinstance(pilot_decision, dict) else {}
+            if not isinstance(pilot_decision_body, dict):
+                pilot_decision_body = {}
+            action_readiness = [
+                {
+                    "label": "Review Ack",
+                    "state": "pending" if review_pending else "recorded" if selected_chain.get("review_context") else "idle",
+                    "detail": (
+                        f"{selected_chain.get('review_recommended_action') or 'review'} recommended"
+                        if selected_chain.get("review_context")
+                        else "No review trigger on this chain."
+                    ),
+                    "tone": "warning" if review_pending else "neutral",
+                },
+                {
+                    "label": "Rebalance",
+                    "state": (
+                        "pending"
+                        if rebalance_pending
+                        else "executed"
+                        if selected_chain.get("rebalance_executed")
+                        else "recorded"
+                        if selected_chain.get("rebalance_context")
+                        else "idle"
+                    ),
+                    "detail": (
+                        f"{int((selected_chain.get('rebalance_context') or {}).get('move_count') or 0)} move(s)"
+                        if selected_chain.get("rebalance_context")
+                        else "No rebalance proposal on this chain."
+                    ),
+                    "tone": "positive" if rebalance_pending else "neutral",
+                },
+                {
+                    "label": "Pilot Sign-Off",
+                    "state": (
+                        "pending"
+                        if pilot_pending
+                        else str(pilot_decision_body.get("operator_decision") or "").strip().lower() or "idle"
+                    ),
+                    "detail": (
+                        "Approve or reject the trade expression."
+                        if pilot_pending
+                        else "Pilot decision already recorded."
+                        if pilot_decision
+                        else "No pilot sign-off needed yet."
+                    ),
+                    "tone": "warning" if pilot_pending else "neutral",
+                },
+                {
+                    "label": "Synthesis",
+                    "state": "ready" if synthesis_ready else "waiting",
+                    "detail": (
+                        str(selected_chain.get("next_operator_move") or "inspect chain").strip()
+                        if synthesis_ready
+                        else "Higher-priority review, pilot, or rebalance action comes first."
+                    ),
+                    "tone": "positive" if synthesis_ready else "neutral",
+                },
+                {
+                    "label": "Post-Mortem",
+                    "state": (
+                        "recorded"
+                        if int(selected_chain.get("post_mortem_count") or 0) > 0
+                        else "available"
+                        if selected_chain.get("can_generate_post_mortem")
+                        else "idle"
+                    ),
+                    "detail": (
+                        f"{int(selected_chain.get('post_mortem_count') or 0)} note(s) captured"
+                        if int(selected_chain.get("post_mortem_count") or 0) > 0
+                        else "Capture a learning memo once the loop closes."
+                        if selected_chain.get("can_generate_post_mortem")
+                        else "No post-mortem lane available yet."
+                    ),
+                    "tone": "neutral",
+                },
+            ]
+            chain_lane = str(selected_chain.get("next_lane") or "").strip().lower()
+            if chain_lane.startswith("review"):
+                quick_action_mode = "review"
+            elif chain_lane.startswith("rebalance"):
+                quick_action_mode = "rebalance"
+            elif chain_lane.startswith("pilot"):
+                quick_action_mode = "pilot"
+            else:
+                quick_action_mode = "synthesis"
+            return {
+                "mode": "selected",
+                "focus_label": "Selected Chain",
+                "chain_id": requested_chain_id,
+                "ticker": str(latest.get("ticker") or "").strip(),
+                "engine": str(latest.get("engine") or "").strip(),
+                "title": str(selected_chain.get("operator_posture_title") or "Selected chain").strip(),
+                "detail": str(selected_chain.get("operator_posture_detail") or "").strip(),
+                "tone": str(selected_chain.get("operator_posture_tone") or "neutral").strip(),
+                "latest_meta_label": "Latest Artifact",
+                "latest_label": str(latest.get("artifact_label") or "Artifact").strip(),
+                "status_label": "Status",
+                "status_value": str(latest.get("status") or "-").strip() or "-",
+                "artifact_count": int(selected_chain.get("artifact_count") or 0),
+                "activity_label": "Latest Update",
+                "activity_value": str(selected_chain.get("latest_created_label") or "-").strip() or "-",
+                "started_label": "Started",
+                "started_value": str(selected_chain.get("first_created_label") or "-").strip() or "-",
+                "next_lane": str(selected_chain.get("next_lane") or "review").strip() or "review",
+                "next_operator_move": str(selected_chain.get("next_operator_move") or "inspect chain").strip(),
+                "lifecycle_summary": str((selected_chain.get("lifecycle") or {}).get("summary") or "").strip(),
+                "action_readiness": action_readiness,
+                "quick_action_mode": quick_action_mode,
+                "review_recommended_action": str(selected_chain.get("review_recommended_action") or "").strip(),
+                "can_generate_post_mortem": bool(selected_chain.get("can_generate_post_mortem")),
+                "post_mortem_count": int(selected_chain.get("post_mortem_count") or 0),
+                "current_queue_lane": current_queue_lane,
+                "current_queue_label": _research_queue_lane_label(current_queue_lane),
+                "current_queue_matches_focus": current_queue_lane == str(lane_focus.get("queue_filter") or "all"),
+                "current_active_view": current_active_view,
+                "current_active_view_label": _research_active_view_label(current_active_view),
+                "current_active_view_matches_focus": current_active_view == str(lane_focus.get("active_view") or "all"),
+                "suppress_auto_sync": suppress_auto_sync,
+                **lane_focus,
+                "show_load_button": False,
+                "load_button_label": "",
+                "secondary_anchor": "#research-artifact-chain-viewer",
+                "secondary_label": "Jump To Timeline",
+                "error": "",
+                "generated_at": _utc_now_iso(),
+            }
+        missing_error = str(selected_chain.get("error") or "").strip()
+
+    summary = _get_research_operating_summary_context()
+    queue_follow_up = _build_research_queue_follow_up_context("all")
+    if queue_follow_up and queue_follow_up.get("mode") == "next_item":
+        detail = str(queue_follow_up.get("detail") or "").strip() or "The operator queue has an actionable item waiting."
+        if missing_error:
+            detail = f"{missing_error} Showing the next queued item instead."
+        lane_focus = _build_research_lane_focus(str(queue_follow_up.get("lane") or ""))
+        priority = str(queue_follow_up.get("priority") or "").strip().lower()
+        tone = "warning" if priority in {"urgent", "watch"} or missing_error else "clear"
+        return {
+            "mode": "recommended",
+            "focus_label": "Recommended Focus",
+            "chain_id": str(queue_follow_up.get("chain_id") or "").strip(),
+            "ticker": str(queue_follow_up.get("title") or "").strip(),
+            "engine": "",
+            "title": f"Open the next {str(queue_follow_up.get('lane_label') or 'queue').lower()} item",
+            "detail": detail,
+            "tone": tone,
+            "latest_meta_label": "Queue Lane",
+            "latest_label": str(queue_follow_up.get("lane_label") or "Queue").strip(),
+            "status_label": "Priority",
+            "status_value": str(queue_follow_up.get("priority") or "-").strip() or "-",
+            "artifact_count": None,
+            "activity_label": str(queue_follow_up.get("meta_label") or "Age").strip() or "Age",
+            "activity_value": str(queue_follow_up.get("meta_value") or "-").strip() or "-",
+            "started_label": str(queue_follow_up.get("status_label") or "Suggested").strip() or "Suggested",
+            "started_value": str(queue_follow_up.get("status_value") or "-").strip() or "-",
+            "next_lane": str(queue_follow_up.get("lane_label") or queue_follow_up.get("lane") or "review").strip() or "review",
+            "next_operator_move": "open suggested chain",
+            "lifecycle_summary": "",
+            "action_readiness": [],
+            "quick_action_mode": "",
+            "review_recommended_action": "",
+            "can_generate_post_mortem": False,
+            "post_mortem_count": 0,
+            "current_queue_lane": current_queue_lane,
+            "current_queue_label": _research_queue_lane_label(current_queue_lane),
+            "current_queue_matches_focus": current_queue_lane == str(lane_focus.get("queue_filter") or "all"),
+            "current_active_view": current_active_view,
+            "current_active_view_label": _research_active_view_label(current_active_view),
+            "current_active_view_matches_focus": current_active_view == str(lane_focus.get("active_view") or "all"),
+            "suppress_auto_sync": suppress_auto_sync,
+            **lane_focus,
+            "show_load_button": bool(queue_follow_up.get("chain_id")),
+            "load_button_label": str(queue_follow_up.get("open_label") or "Load Suggested Chain").strip() or "Load Suggested Chain",
+            "secondary_anchor": "#research-alerts",
+            "secondary_label": "Open Decision Queue",
+            "error": missing_error,
+            "generated_at": _utc_now_iso(),
+        }
+
+    latest_chain = summary.get("latest_chain") if isinstance(summary.get("latest_chain"), dict) else None
+    if latest_chain:
+        next_lane = str(latest_chain.get("stage") or "flow").strip()
+        lane_focus = _build_research_lane_focus(next_lane)
+        detail = str(summary.get("focus_detail") or "").strip()
+        if missing_error:
+            detail = f"{missing_error} Showing the latest active chain instead."
+        return {
+            "mode": "recommended",
+            "focus_label": "Recommended Focus",
+            "chain_id": str(latest_chain.get("chain_id") or "").strip(),
+            "ticker": str(latest_chain.get("ticker") or "").strip(),
+            "engine": str(latest_chain.get("engine") or "").strip(),
+            "title": "Load the latest active chain",
+            "detail": detail or "The latest chain is ready to inspect.",
+            "tone": "warning" if missing_error else str(summary.get("focus_tone") or "clear").strip(),
+            "latest_meta_label": "Current Stage",
+            "latest_label": next_lane or "-",
+            "status_label": "Freshness",
+            "status_value": str(latest_chain.get("freshness") or "-").strip() or "-",
+            "artifact_count": None,
+            "activity_label": "Latest Update",
+            "activity_value": str(latest_chain.get("updated_label") or "-").strip() or "-",
+            "started_label": "Started",
+            "started_value": str(latest_chain.get("created_label") or "-").strip() or "-",
+            "next_lane": next_lane or "flow",
+            "next_operator_move": str(latest_chain.get("next_action") or "open suggested chain").strip(),
+            "lifecycle_summary": "",
+            "action_readiness": [],
+            "quick_action_mode": "",
+            "review_recommended_action": "",
+            "can_generate_post_mortem": False,
+            "post_mortem_count": 0,
+            "current_queue_lane": current_queue_lane,
+            "current_queue_label": _research_queue_lane_label(current_queue_lane),
+            "current_queue_matches_focus": current_queue_lane == str(lane_focus.get("queue_filter") or "all"),
+            "current_active_view": current_active_view,
+            "current_active_view_label": _research_active_view_label(current_active_view),
+            "current_active_view_matches_focus": current_active_view == str(lane_focus.get("active_view") or "all"),
+            "suppress_auto_sync": suppress_auto_sync,
+            **lane_focus,
+            "show_load_button": bool(latest_chain.get("chain_id")),
+            "load_button_label": "Load Suggested Chain",
+            "secondary_anchor": "#research-loop",
+            "secondary_label": "Browse Active Research",
+            "error": missing_error,
+            "generated_at": _utc_now_iso(),
+        }
+
+    idle_detail = str(summary.get("focus_detail") or "").strip() or "Open an active chain or send a new intake."
+    if missing_error:
+        idle_detail = f"{missing_error} Open another active chain or send a new intake."
+    return {
+        "mode": "idle",
+        "focus_label": "Current Focus",
+        "chain_id": "",
+        "ticker": "",
+        "engine": "",
+        "title": str(summary.get("focus_title") or "No chain selected").strip() or "No chain selected",
+        "detail": idle_detail,
+        "tone": "warning" if missing_error else str(summary.get("focus_tone") or "idle").strip(),
+        "latest_meta_label": "Surface",
+        "latest_label": "Research Workbench",
+        "status_label": "State",
+        "status_value": "waiting",
+        "artifact_count": None,
+        "activity_label": "Suggested Lane",
+        "activity_value": "flow",
+        "started_label": "Next Move",
+        "started_value": "open a chain or submit intake",
+        "next_lane": "flow",
+        "next_operator_move": "open a chain or submit intake",
+        "lifecycle_summary": "",
+        "action_readiness": [],
+        "quick_action_mode": "",
+        "review_recommended_action": "",
+        "can_generate_post_mortem": False,
+        "post_mortem_count": 0,
+        "current_queue_lane": current_queue_lane,
+        "current_queue_label": _research_queue_lane_label(current_queue_lane),
+        "current_queue_matches_focus": current_queue_lane == "all",
+        "current_active_view": current_active_view,
+        "current_active_view_label": _research_active_view_label(current_active_view),
+        "current_active_view_matches_focus": current_active_view == "all",
+        "suppress_auto_sync": suppress_auto_sync,
+        "queue_filter": "all",
+        "queue_label": "Flow Lane",
+        "queue_anchor": "#research-loop",
+        "active_view": "all",
+        "active_view_label": "All",
+        "show_load_button": False,
+        "load_button_label": "",
+        "secondary_anchor": "#research-intake",
+        "secondary_label": "Open Intake",
+        "error": missing_error,
+        "generated_at": _utc_now_iso(),
+    }
+
+
+def _build_research_selected_chain_queue_context(
+    chain_id: str,
+    artifact_store: ArtifactStore | None = None,
+) -> dict[str, Any] | None:
+    clean_chain_id = str(chain_id or "").strip()
+    if not clean_chain_id:
+        return None
+    try:
+        chain_context = _build_research_artifact_chain_context(clean_chain_id, artifact_store=artifact_store)
+    except Exception as exc:
+        logger.debug("Research selected-chain queue context unavailable for %s: %s", clean_chain_id, exc)
+        return {
+            "chain_id": clean_chain_id,
+            "ticker": "",
+            "engine": "",
+            "next_lane": "",
+            "queue_filter": "all",
+            "active_view": "all",
+            "operator_posture_title": "Selected chain unavailable",
+            "next_operator_move": "reopen the chain or clear focus",
+            "latest_label": "",
+            "latest_created_label": "",
+            "error": str(exc),
+        }
+    if int(chain_context.get("artifact_count") or 0) <= 0:
+        return {
+            "chain_id": clean_chain_id,
+            "ticker": "",
+            "engine": "",
+            "next_lane": "",
+            "queue_filter": "all",
+            "active_view": "all",
+            "operator_posture_title": "Selected chain unavailable",
+            "next_operator_move": "reopen the chain or clear focus",
+            "latest_label": "",
+            "latest_created_label": "",
+            "error": str(chain_context.get("error") or "").strip(),
+        }
+    latest = chain_context.get("latest") or {}
+    lane_focus = _build_research_lane_focus(str(chain_context.get("next_lane") or ""))
+    return {
+        "chain_id": clean_chain_id,
+        "ticker": str(latest.get("ticker") or "").strip(),
+        "engine": str(latest.get("engine") or "").strip(),
+        "next_lane": str(chain_context.get("next_lane") or "").strip(),
+        "queue_filter": _normalize_research_queue_lane(str(lane_focus.get("queue_filter") or "all")),
+        "active_view": _normalize_research_active_view(str(lane_focus.get("active_view") or "all")),
+        "operator_posture_title": str(chain_context.get("operator_posture_title") or "").strip(),
+        "next_operator_move": str(chain_context.get("next_operator_move") or "").strip(),
+        "latest_label": str(latest.get("artifact_label") or "").strip(),
+        "latest_created_label": str(chain_context.get("latest_created_label") or "").strip(),
+        "error": "",
+    }
+
+
+def _build_research_workbench_queue_alignment(
+    chain_context: dict[str, Any] | None,
+    selected_queue_lane: str,
+) -> dict[str, Any] | None:
+    if not isinstance(chain_context, dict) or int(chain_context.get("artifact_count") or 0) <= 0:
+        return None
+
+    preferred_focus = _build_research_lane_focus(str(chain_context.get("next_lane") or ""))
+    preferred_lane = _normalize_research_queue_lane(str(preferred_focus.get("queue_filter") or "all"))
+    preferred_active_view = _normalize_research_active_view(str(preferred_focus.get("active_view") or "all"))
+    current_lane = _normalize_research_queue_lane(selected_queue_lane)
+    preferred_label = _research_queue_lane_label(preferred_lane)
+    current_label = _research_queue_lane_label(current_lane)
+
+    if current_lane == preferred_lane:
+        return {
+            "state": "aligned",
+            "tone": "positive",
+            "title": "Queue aligned with selected chain",
+            "detail": f"Queue focus already matches this chain's current lane: {preferred_label}.",
+            "current_lane": current_lane,
+            "current_label": current_label,
+            "preferred_lane": preferred_lane,
+            "preferred_label": preferred_label,
+            "preferred_active_view": preferred_active_view,
+            "preferred_active_view_label": _research_active_view_label(preferred_active_view),
+            "show_action": False,
+            "action_label": "",
+        }
+
+    if current_lane == "all":
+        return {
+            "state": "broad",
+            "tone": "neutral",
+            "title": "Queue is broader than selected chain",
+            "detail": f"This chain is asking for {preferred_label}, but the queue is still showing all lanes.",
+            "current_lane": current_lane,
+            "current_label": current_label,
+            "preferred_lane": preferred_lane,
+            "preferred_label": preferred_label,
+            "preferred_active_view": preferred_active_view,
+            "preferred_active_view_label": _research_active_view_label(preferred_active_view),
+            "show_action": preferred_lane != "all",
+            "action_label": "Focus Queue",
+        }
+
+    if preferred_lane == "all":
+        return {
+            "state": "misaligned",
+            "tone": "warning",
+            "title": "Queue focus is narrower than selected chain",
+            "detail": f"This chain is currently in Flow Lane, but the queue is filtered to {current_label}.",
+            "current_lane": current_lane,
+            "current_label": current_label,
+            "preferred_lane": preferred_lane,
+            "preferred_label": preferred_label,
+            "preferred_active_view": preferred_active_view,
+            "preferred_active_view_label": _research_active_view_label(preferred_active_view),
+            "show_action": True,
+            "action_label": "Show All Lanes",
+        }
+
+    return {
+        "state": "misaligned",
+        "tone": "warning",
+        "title": "Queue focus is off-lane",
+        "detail": f"This chain is asking for {preferred_label}, but the queue is filtered to {current_label}.",
+        "current_lane": current_lane,
+        "current_label": current_label,
+        "preferred_lane": preferred_lane,
+        "preferred_label": preferred_label,
+        "preferred_active_view": preferred_active_view,
+        "preferred_active_view_label": _research_active_view_label(preferred_active_view),
+        "show_action": True,
+        "action_label": "Sync Queue Focus",
+    }
+
+
+def _build_research_next_queue_item_context(
+    selected_queue_lane: str,
+    *,
+    alerts: dict[str, Any] | None = None,
+    exclude_chain_id: str = "",
+) -> dict[str, Any] | None:
+    normalized_lane = _normalize_research_queue_lane(selected_queue_lane)
+    skip_chain_id = str(exclude_chain_id or "").strip()
+    alerts = alerts or _get_research_alerts_context()
+
+    lane_order = {
+        "review": ["review"],
+        "pilot": ["pilot"],
+        "rebalance": ["rebalance"],
+        "all": ["review", "pilot", "rebalance"],
+        "retirements": [],
+    }.get(normalized_lane, ["review", "pilot", "rebalance"])
+
+    def candidate_from_review(row: dict[str, Any]) -> dict[str, Any]:
+        flags = list(row.get("flags") or [])
+        detail = f"Suggested {str(row.get('recommended_action') or 'review').strip() or 'review'}."
+        if flags:
+            detail = f"{', '.join(str(flag) for flag in flags[:2])}."
+        return {
+            "lane": "review",
+            "lane_label": "Review Lane",
+            "active_view": "operator",
+            "active_view_label": "Operator",
+            "chain_id": str(row.get("chain_id") or "").strip(),
+            "title": str(row.get("strategy_id") or row.get("ticker") or "Review item").strip() or "Review item",
+            "detail": detail,
+            "status_label": "Suggested",
+            "status_value": str(row.get("recommended_action") or "review").strip() or "review",
+            "meta_label": "Age",
+            "meta_value": str(row.get("created_label") or row.get("created_at") or "-").strip() or "-",
+            "priority": str(row.get("priority") or "routine").strip() or "routine",
+            "open_label": "Open Next Review",
+        }
+
+    def candidate_from_pilot(row: dict[str, Any]) -> dict[str, Any]:
+        score = row.get("score")
+        detail = str(row.get("next_action") or "approve or reject pilot").strip() or "approve or reject pilot"
+        if score is not None:
+            detail = f"Score {float(score):.1f} · {detail}"
+        return {
+            "lane": "pilot",
+            "lane_label": "Pilot Lane",
+            "active_view": "operator",
+            "active_view_label": "Operator",
+            "chain_id": str(row.get("chain_id") or "").strip(),
+            "title": str(row.get("ticker") or "Pilot candidate").strip() or "Pilot candidate",
+            "detail": detail,
+            "status_label": "Freshness",
+            "status_value": str(row.get("freshness") or "-").strip() or "-",
+            "meta_label": "Updated",
+            "meta_value": str(row.get("updated_label") or row.get("updated_at") or "-").strip() or "-",
+            "priority": str(row.get("priority") or "routine").strip() or "routine",
+            "open_label": "Open Next Pilot",
+        }
+
+    def candidate_from_rebalance(row: dict[str, Any]) -> dict[str, Any]:
+        detail = (
+            f"{int(row.get('move_count') or 0)} move(s) queued"
+            f" · cost {float(row.get('estimated_cost') or 0.0):.4f}"
+        )
+        return {
+            "lane": "rebalance",
+            "lane_label": "Rebalance Lane",
+            "active_view": "all",
+            "active_view_label": "All",
+            "chain_id": str(row.get("chain_id") or "").strip(),
+            "title": "Engine A rebalance proposal",
+            "detail": detail,
+            "status_label": "Approval",
+            "status_value": str(row.get("approval_status") or "draft").strip() or "draft",
+            "meta_label": "Created",
+            "meta_value": str(row.get("created_label") or row.get("created_at") or "-").strip() or "-",
+            "priority": str(row.get("priority") or "watch").strip() or "watch",
+            "open_label": "Open Next Rebalance",
+        }
+
+    builders = {
+        "review": (alerts.get("pending_reviews") or [], candidate_from_review),
+        "pilot": (alerts.get("pending_pilots") or [], candidate_from_pilot),
+        "rebalance": (alerts.get("rebalance_items") or [], candidate_from_rebalance),
+    }
+    for lane in lane_order:
+        rows, builder = builders.get(lane, ([], None))
+        if builder is None:
+            continue
+        for row in rows:
+            chain_id = str(row.get("chain_id") or "").strip()
+            if not chain_id or chain_id == skip_chain_id:
+                continue
+            candidate = builder(row)
+            if candidate.get("chain_id"):
+                return candidate
+    return None
+
+
+def _build_research_queue_follow_up_context(
+    selected_queue_lane: str,
+    *,
+    exclude_chain_id: str = "",
+) -> dict[str, Any] | None:
+    alerts = _get_research_alerts_context()
+    next_item = _build_research_next_queue_item_context(
+        selected_queue_lane,
+        alerts=alerts,
+        exclude_chain_id=exclude_chain_id,
+    )
+    if next_item:
+        return {"mode": "next_item", **next_item}
+
+    normalized_lane = _normalize_research_queue_lane(selected_queue_lane)
+    lane_counts = dict(alerts.get("lane_counts") or {})
+    total_pending = int(lane_counts.get("total_pending") or 0)
+
+    if normalized_lane == "all":
+        if total_pending <= 0:
+            return {
+                "mode": "lane_clear",
+                "title": "Operator queue clear",
+                "detail": "No review, pilot, or rebalance items are waiting right now.",
+                "current_lane": "all",
+                "current_label": "All Lanes",
+                "next_lane": "",
+                "next_label": "",
+                "next_active_view": "all",
+                "next_active_view_label": "All",
+                "next_count": 0,
+                "primary_action_label": "Open Intake",
+                "primary_action_mode": "intake",
+            }
+        return None
+
+    current_label = _research_queue_lane_label(normalized_lane)
+    current_count = {
+        "review": int(lane_counts.get("reviews") or 0),
+        "pilot": int(lane_counts.get("pilots") or 0),
+        "rebalance": int(lane_counts.get("rebalances") or 0),
+    }.get(normalized_lane, 0)
+    if current_count > 0:
+        return None
+
+    for next_lane, count in (
+        ("review", int(lane_counts.get("reviews") or 0)),
+        ("pilot", int(lane_counts.get("pilots") or 0)),
+        ("rebalance", int(lane_counts.get("rebalances") or 0)),
+    ):
+        if next_lane == normalized_lane or count <= 0:
+            continue
+        return {
+            "mode": "lane_clear",
+            "title": f"{current_label} cleared",
+            "detail": f"No more items are waiting in {current_label}. {count} item(s) remain in { _research_queue_lane_label(next_lane) }.",
+            "current_lane": normalized_lane,
+            "current_label": current_label,
+            "next_lane": next_lane,
+            "next_label": _research_queue_lane_label(next_lane),
+            "next_active_view": _research_active_view_for_lane(next_lane),
+            "next_active_view_label": _research_active_view_label(_research_active_view_for_lane(next_lane)),
+            "next_count": count,
+            "primary_action_label": f"Open { _research_queue_lane_label(next_lane) }",
+            "primary_action_mode": "lane",
+        }
+
+    return {
+        "mode": "lane_clear",
+        "title": f"{current_label} cleared",
+        "detail": f"No more items are waiting in {current_label}. The operator queue is clear for now.",
+        "current_lane": normalized_lane,
+        "current_label": current_label,
+        "next_lane": "",
+        "next_label": "",
+        "next_active_view": "all",
+        "next_active_view_label": "All",
+        "next_count": 0,
+        "primary_action_label": "Open Intake",
+        "primary_action_mode": "intake",
     }
 
 
@@ -1080,10 +2035,13 @@ def _render_research_operator_output(
     request: Request,
     *,
     chain_id: str = "",
+    queue_lane: str = "all",
+    active_view: str = "all",
     synthesis: dict[str, Any] | None = None,
     operator_action: dict[str, Any] | None = None,
     pilot_decision: dict[str, Any] | None = None,
     post_mortem: dict[str, Any] | None = None,
+    queued_intake: dict[str, Any] | None = None,
     error: str = "",
 ):
     return TEMPLATES.TemplateResponse(
@@ -1093,10 +2051,13 @@ def _render_research_operator_output(
             "request": request,
             **_build_research_operator_output_context(
                 chain_id=chain_id,
+                queue_lane=queue_lane,
+                active_view=active_view,
                 synthesis=synthesis,
                 operator_action=operator_action,
                 pilot_decision=pilot_decision,
                 post_mortem=post_mortem,
+                queued_intake=queued_intake,
                 error=error,
             ),
         },
@@ -1690,14 +2651,443 @@ def _get_research_readiness_context() -> dict[str, Any]:
     )
 
 
+def _get_research_operating_summary_context() -> dict[str, Any]:
+    def _load() -> dict[str, Any]:
+        try:
+            summary = research_dashboard.operating_summary()
+            def _summary_active_view_for_lane(queue_lane: str) -> str:
+                normalized_lane = _normalize_research_queue_lane(queue_lane)
+                if normalized_lane in {"review", "pilot"}:
+                    return "operator"
+                if normalized_lane == "rebalance":
+                    return "all"
+                return "flow"
+
+            def _summary_active_view_for_chain(chain: dict[str, Any] | None) -> str:
+                if not isinstance(chain, dict):
+                    return "all"
+                freshness = str(chain.get("freshness") or "").strip().lower()
+                if freshness == "stale":
+                    return "stale"
+                operator_now = str(chain.get("operator_now") or "").strip().lower()
+                if operator_now in {"true", "1", "yes"}:
+                    return "operator"
+                board_group = str(chain.get("board_group") or "").strip().lower()
+                if board_group == "operator":
+                    return "operator"
+                if board_group == "flow":
+                    return "flow"
+                stage = str(chain.get("stage") or "").strip().lower()
+                if stage in {"pilot_ready", "review_pending", "review_revise", "review_parked"}:
+                    return "operator"
+                if stage:
+                    return "flow"
+                return "all"
+
+            try:
+                rebalance_panel = _build_engine_a_rebalance_panel_context()
+                rebalance = rebalance_panel.get("rebalance")
+            except Exception as exc:
+                logger.debug("Research operating summary rebalance context unavailable: %s", exc)
+                rebalance = None
+
+            rebalance_ready_count = 0
+            rebalance_detail = "No Engine A proposal waiting."
+            rebalance_anchor = "#research-portfolio-expression"
+            rebalance_tone = "idle"
+            if rebalance:
+                if rebalance.get("executed"):
+                    rebalance_detail = "Latest proposal already executed."
+                    rebalance_tone = "clear"
+                elif rebalance.get("can_execute") or rebalance.get("can_dismiss"):
+                    rebalance_ready_count = 1
+                    rebalance_detail = (
+                        f"{int(rebalance.get('move_count') or 0)} move(s) queued"
+                        f" · cost {float(rebalance.get('estimated_cost') or 0.0):.4f}"
+                    )
+                    rebalance_tone = "warning"
+                else:
+                    rebalance_detail = "Proposal recorded but not actionable yet."
+                    rebalance_tone = "neutral"
+
+            if (
+                rebalance_ready_count
+                and int(summary.get("urgent_review_count") or 0) == 0
+                and int(summary.get("pilot_ready_count") or 0) == 0
+                and int((summary.get("freshness_counts") or {}).get("stale") or 0) == 0
+            ):
+                summary["focus_title"] = "Rebalance waiting"
+                summary["focus_detail"] = "Engine A has a queued rebalance proposal that still needs an operator call."
+                summary["focus_tone"] = "warning"
+                summary["focus_anchor"] = rebalance_anchor
+
+            summary["rebalance_ready_count"] = rebalance_ready_count
+            recommended_card: dict[str, Any] | None = None
+            queue_follow_up = _build_research_queue_follow_up_context("all")
+            if queue_follow_up and queue_follow_up.get("mode") == "next_item":
+                priority = str(queue_follow_up.get("priority") or "routine").strip() or "routine"
+                queue_filter = _normalize_research_queue_lane(str(queue_follow_up.get("lane") or "all"))
+                recommended_card = {
+                    "mode": "queue_item",
+                    "card_label": "Suggested Queue Entry",
+                    "chain_id": str(queue_follow_up.get("chain_id") or "").strip(),
+                    "title": str(queue_follow_up.get("title") or "Queue item").strip() or "Queue item",
+                    "headline": str(queue_follow_up.get("lane_label") or "Queue").strip() or "Queue",
+                    "detail": str(queue_follow_up.get("detail") or "").strip(),
+                    "badge": priority,
+                    "badge_tone": "warning" if priority in {"urgent", "watch"} else "clear",
+                    "meta": (
+                        f"{str(queue_follow_up.get('status_label') or '').strip()}: "
+                        f"{str(queue_follow_up.get('status_value') or '-').strip() or '-'}"
+                    ).strip(),
+                    "submeta": str(queue_follow_up.get("meta_value") or "-").strip() or "-",
+                    "button_label": str(queue_follow_up.get("open_label") or "Open Suggested Chain").strip()
+                    or "Open Suggested Chain",
+                    "queue_filter": queue_filter,
+                    "secondary_queue_filter": queue_filter,
+                    "active_view": _summary_active_view_for_lane(queue_filter),
+                    "secondary_anchor": "#research-alerts",
+                    "secondary_label": "Open Decision Queue",
+                }
+            elif isinstance(summary.get("latest_chain"), dict):
+                latest_chain = summary["latest_chain"]
+                freshness = str(latest_chain.get("freshness") or "unknown").strip() or "unknown"
+                recommended_card = {
+                    "mode": "latest_chain",
+                    "card_label": "Latest Chain",
+                    "chain_id": str(latest_chain.get("chain_id") or "").strip(),
+                    "title": str(latest_chain.get("ticker") or "-").strip() or "-",
+                    "headline": str(latest_chain.get("stage") or "-").strip() or "-",
+                    "detail": str(latest_chain.get("next_action") or "").strip(),
+                    "badge": freshness,
+                    "badge_tone": freshness,
+                    "meta": str(latest_chain.get("updated_label") or "-").strip() or "-",
+                    "submeta": str(latest_chain.get("created_label") or "").strip(),
+                    "button_label": "Open Latest Chain",
+                    "queue_filter": "",
+                    "secondary_queue_filter": "",
+                    "active_view": _summary_active_view_for_chain(latest_chain),
+                    "secondary_anchor": "#research-loop",
+                    "secondary_label": "Browse Active Research",
+                }
+            summary["recommended_card"] = recommended_card
+            summary["lane_cards"] = [
+                {
+                    "id": "review",
+                    "label": "Review Lane",
+                    "count": int(summary.get("pending_review_count") or 0),
+                    "detail": (
+                        f"{int(summary.get('urgent_review_count') or 0)} urgent"
+                        f" / {int(summary.get('watch_review_count') or 0)} watch"
+                    ),
+                    "tone": (
+                        "urgent"
+                        if int(summary.get("urgent_review_count") or 0) > 0
+                        else "warning"
+                        if int(summary.get("pending_review_count") or 0) > 0
+                        else "idle"
+                    ),
+                    "anchor": "#research-alerts",
+                    "queue_filter": "review",
+                    "active_view": "operator",
+                },
+                {
+                    "id": "pilot",
+                    "label": "Pilot Lane",
+                    "count": int(summary.get("pilot_ready_count") or 0),
+                    "detail": (
+                        f"{int(summary.get('review_pending_stage_count') or 0)} already in review pending"
+                        if int(summary.get("pilot_ready_count") or 0) > 0
+                        else "No pilot sign-off waiting."
+                    ),
+                    "tone": "warning" if int(summary.get("pilot_ready_count") or 0) > 0 else "idle",
+                    "anchor": "#research-alerts",
+                    "queue_filter": "pilot",
+                    "active_view": "operator",
+                },
+                {
+                    "id": "rebalance",
+                    "label": "Rebalance Lane",
+                    "count": rebalance_ready_count,
+                    "detail": rebalance_detail,
+                    "tone": rebalance_tone,
+                    "anchor": "#research-alerts" if rebalance_ready_count else rebalance_anchor,
+                    "queue_filter": "rebalance",
+                    "active_view": "all",
+                },
+                {
+                    "id": "flow",
+                    "label": "Flow Lane",
+                    "count": int(summary.get("active_chain_count") or 0),
+                    "detail": (
+                        f"{int((summary.get('freshness_counts') or {}).get('fresh') or 0)} fresh"
+                        f" / {int((summary.get('freshness_counts') or {}).get('aging') or 0)} aging"
+                        f" / {int((summary.get('freshness_counts') or {}).get('stale') or 0)} stale"
+                    ),
+                    "tone": (
+                        "warning"
+                        if int((summary.get("freshness_counts") or {}).get("stale") or 0) > 0
+                        else "clear"
+                        if int(summary.get("active_chain_count") or 0) > 0
+                        else "idle"
+                    ),
+                    "anchor": "#research-loop",
+                    "queue_filter": "all",
+                    "active_view": "flow",
+                },
+            ]
+            return summary
+        except Exception as exc:
+            logger.debug("Research operating summary unavailable: %s", exc)
+            return {
+                "focus_title": "Operating summary unavailable",
+                "focus_detail": str(exc),
+                "focus_tone": "idle",
+                "focus_anchor": "#research-loop",
+                "active_chain_count": 0,
+                "freshness_counts": {"fresh": 0, "aging": 0, "stale": 0},
+                "pending_review_count": 0,
+                "urgent_review_count": 0,
+                "watch_review_count": 0,
+                "pilot_ready_count": 0,
+                "rebalance_ready_count": 0,
+                "review_pending_stage_count": 0,
+                "lane_cards": [
+                    {
+                        "id": "review",
+                        "label": "Review Lane",
+                        "count": 0,
+                        "detail": "Operating summary unavailable.",
+                        "tone": "idle",
+                        "anchor": "#research-alerts",
+                        "queue_filter": "review",
+                        "active_view": "operator",
+                    },
+                    {
+                        "id": "pilot",
+                        "label": "Pilot Lane",
+                        "count": 0,
+                        "detail": "Operating summary unavailable.",
+                        "tone": "idle",
+                        "anchor": "#research-alerts",
+                        "queue_filter": "pilot",
+                        "active_view": "operator",
+                    },
+                    {
+                        "id": "rebalance",
+                        "label": "Rebalance Lane",
+                        "count": 0,
+                        "detail": "Operating summary unavailable.",
+                        "tone": "idle",
+                        "anchor": "#research-alerts",
+                        "queue_filter": "rebalance",
+                        "active_view": "all",
+                    },
+                    {
+                        "id": "flow",
+                        "label": "Flow Lane",
+                        "count": 0,
+                        "detail": "Operating summary unavailable.",
+                        "tone": "idle",
+                        "anchor": "#research-loop",
+                        "queue_filter": "all",
+                        "active_view": "flow",
+                    },
+                ],
+                "latest_chain": None,
+                "latest_decision": None,
+                "generated_at": _utc_now_iso(),
+                "error": str(exc),
+            }
+
+    return _get_cached_value(
+        "research-operating-summary",
+        10.0,
+        _load,
+        stale_on_error=True,
+    )
+
+
 def _get_research_active_hypotheses_context() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
         try:
             rows = research_dashboard.active_hypotheses(limit=20)
-            return {"rows": rows, "error": ""}
+            operator_rows = [row for row in rows if row.get("operator_now")]
+            flow_rows = [row for row in rows if not row.get("operator_now")]
+            operator_lane_map: dict[str, dict[str, Any]] = {}
+            for row in operator_rows:
+                lane_key = str(row.get("operator_lane_label") or "Operator Lane").strip().lower().replace(" ", "_")
+                lane = operator_lane_map.setdefault(
+                    lane_key,
+                    {
+                        "key": lane_key,
+                        "label": row.get("operator_lane_label") or "Operator Lane",
+                        "rows": [],
+                        "count": 0,
+                        "urgent_count": 0,
+                        "watch_count": 0,
+                    },
+                )
+                lane["rows"].append(row)
+                lane["count"] += 1
+                if row.get("operator_priority") == "urgent":
+                    lane["urgent_count"] += 1
+                elif row.get("operator_priority") == "watch":
+                    lane["watch_count"] += 1
+            operator_lanes = sorted(operator_lane_map.values(), key=lambda lane: (-lane["urgent_count"], -lane["count"], lane["label"]))
+            operator_focus = None
+            if operator_lanes:
+                for lane in operator_lanes:
+                    lead_row = next(
+                        (row for row in lane["rows"] if row.get("operator_priority") == "urgent"),
+                        next(
+                            (row for row in lane["rows"] if row.get("operator_priority") == "watch"),
+                            lane["rows"][0],
+                        ),
+                    )
+                    lane["lead_row"] = lead_row
+                    lane["lead_button_label"] = (
+                        "Open Urgent Chain"
+                        if lane["urgent_count"]
+                        else ("Open Watch Chain" if lane["watch_count"] else "Open Lead Chain")
+                    )
+                focus_lane = operator_lanes[0]
+                lead_row = focus_lane["lead_row"]
+                operator_focus = {
+                    "lane_label": focus_lane["label"],
+                    "chain_id": lead_row["chain_id"],
+                    "ticker": lead_row["ticker"],
+                    "updated_label": lead_row["updated_label"],
+                    "priority": lead_row.get("operator_priority") or "routine",
+                    "button_label": focus_lane["lead_button_label"],
+                    "detail": (
+                        f"{focus_lane['urgent_count']} urgent chain(s) need action in this lane."
+                        if focus_lane["urgent_count"]
+                        else (
+                            f"{focus_lane['watch_count']} watch item(s) are aging in this lane."
+                            if focus_lane["watch_count"]
+                            else f"{focus_lane['count']} chain(s) are ready for operator action in this lane."
+                        )
+                    ),
+                }
+            flow_lane_map: dict[str, dict[str, Any]] = {}
+            for row in flow_rows:
+                lane_key = str(row.get("flow_lane_key") or "active")
+                lane = flow_lane_map.setdefault(
+                    lane_key,
+                    {
+                        "key": lane_key,
+                        "label": row.get("flow_lane_label") or "Active",
+                        "order": int(row.get("flow_lane_order") or 99),
+                        "rows": [],
+                        "count": 0,
+                        "fresh_count": 0,
+                        "stale_count": 0,
+                    },
+                )
+                lane["rows"].append(row)
+                lane["count"] += 1
+                if row.get("freshness") == "fresh":
+                    lane["fresh_count"] += 1
+                if row.get("freshness") == "stale":
+                    lane["stale_count"] += 1
+            flow_lanes = sorted(flow_lane_map.values(), key=lambda lane: (lane["order"], lane["label"]))
+            flow_focus = None
+            if flow_lanes:
+                for lane in flow_lanes:
+                    lead_row = next((row for row in lane["rows"] if row.get("freshness") == "stale"), lane["rows"][0])
+                    lane["lead_row"] = lead_row
+                    lane["lead_button_label"] = "Open Stale Chain" if lane["stale_count"] else "Open Lead Chain"
+                focus_lane = sorted(
+                    flow_lanes,
+                    key=lambda lane: (-lane["stale_count"], -lane["count"], lane["order"], lane["label"]),
+                )[0]
+                lead_row = focus_lane["lead_row"]
+                flow_focus = {
+                    "lane_label": focus_lane["label"],
+                    "chain_id": lead_row["chain_id"],
+                    "ticker": lead_row["ticker"],
+                    "updated_label": lead_row["updated_label"],
+                    "freshness": lead_row["freshness"],
+                    "button_label": focus_lane["lead_button_label"],
+                    "detail": (
+                        f"{focus_lane['stale_count']} stale chain(s) are backing up this lane."
+                        if focus_lane["stale_count"]
+                        else f"{focus_lane['count']} chain(s) are currently moving through this lane."
+                    ),
+                }
+            board_focus = None
+            if operator_focus:
+                board_focus = {
+                    "source": "operator",
+                    "tone": "operator",
+                    "section_label": "Needs Operator Now",
+                    "title": operator_focus["lane_label"],
+                    "detail": operator_focus["detail"],
+                    "chain_id": operator_focus["chain_id"],
+                    "ticker": operator_focus["ticker"],
+                    "meta": f"{operator_focus['updated_label']} · {operator_focus['priority']}",
+                    "button_label": "Open Operator Chain",
+                    "priority_reason": "Operator-ready work takes precedence over the in-flight flow.",
+                }
+                if flow_focus:
+                    board_focus["secondary"] = {
+                        "section_label": "Then Inspect Flow",
+                        "title": flow_focus["lane_label"],
+                        "detail": flow_focus["detail"],
+                        "chain_id": flow_focus["chain_id"],
+                        "ticker": flow_focus["ticker"],
+                        "meta": f"{flow_focus['updated_label']} · {flow_focus['freshness']}",
+                        "button_label": "Then Open Flow Chain",
+                    }
+            elif flow_focus:
+                board_focus = {
+                    "source": "flow",
+                    "tone": "flow",
+                    "section_label": "Still Flowing",
+                    "title": flow_focus["lane_label"],
+                    "detail": flow_focus["detail"],
+                    "chain_id": flow_focus["chain_id"],
+                    "ticker": flow_focus["ticker"],
+                    "meta": f"{flow_focus['updated_label']} · {flow_focus['freshness']}",
+                    "button_label": "Open Flow Chain",
+                    "priority_reason": "No operator-ready chains are waiting, so the board falls back to the most backed-up flow lane.",
+                }
+            freshness_counts = {
+                "fresh": sum(1 for row in rows if row.get("freshness") == "fresh"),
+                "aging": sum(1 for row in rows if row.get("freshness") == "aging"),
+                "stale": sum(1 for row in rows if row.get("freshness") == "stale"),
+            }
+            return {
+                "rows": rows,
+                "operator_rows": operator_rows,
+                "operator_lanes": operator_lanes,
+                "operator_focus": operator_focus,
+                "flow_rows": flow_rows,
+                "flow_lanes": flow_lanes,
+                "flow_focus": flow_focus,
+                "board_focus": board_focus,
+                "operator_count": len(operator_rows),
+                "flow_count": len(flow_rows),
+                "freshness_counts": freshness_counts,
+                "error": "",
+            }
         except Exception as exc:
             logger.debug("Research active hypotheses unavailable: %s", exc)
-            return {"rows": [], "error": str(exc)}
+            return {
+                "rows": [],
+                "operator_rows": [],
+                "operator_lanes": [],
+                "operator_focus": None,
+                "flow_rows": [],
+                "flow_lanes": [],
+                "flow_focus": None,
+                "board_focus": None,
+                "operator_count": 0,
+                "flow_count": 0,
+                "freshness_counts": {"fresh": 0, "aging": 0, "stale": 0},
+                "error": str(exc),
+            }
 
     return _get_cached_value(
         "research-active-hypotheses",
@@ -1821,11 +3211,60 @@ def _get_research_alerts_context() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
         try:
             alerts = research_dashboard.alerts(limit=20)
+            rebalance_items: list[dict[str, Any]] = []
+            rebalance_payload = _build_engine_a_rebalance_panel_context()
+            rebalance = rebalance_payload.get("rebalance")
+            if (
+                rebalance
+                and int(rebalance.get("move_count") or 0) > 0
+                and not bool(rebalance.get("executed"))
+            ):
+                rebalance_items.append(
+                    {
+                        "artifact_id": str(rebalance.get("artifact_id") or ""),
+                        "chain_id": str(rebalance.get("chain_id") or ""),
+                        "approval_status": str(rebalance.get("approval_status") or ""),
+                        "decision_source": str(rebalance.get("decision_source") or ""),
+                        "estimated_cost": float(rebalance.get("estimated_cost") or 0.0),
+                        "move_count": int(rebalance.get("move_count") or 0),
+                        "can_execute": bool(rebalance.get("can_execute")),
+                        "can_dismiss": bool(rebalance.get("can_dismiss")),
+                        "created_at": str(rebalance.get("created_at") or ""),
+                        "created_label": _relative_time_label(rebalance.get("created_at")),
+                        "priority": "watch",
+                        "top_moves": list(rebalance.get("top_moves") or [])[:3],
+                    }
+                )
+            alerts["rebalance_items"] = rebalance_items
+            alerts["lane_counts"] = {
+                "reviews": len(alerts.get("pending_reviews") or []),
+                "pilots": len(alerts.get("pending_pilots") or []),
+                "rebalances": len(rebalance_items),
+                "retirements": len(alerts.get("kill_alerts") or []),
+                "total_pending": (
+                    len(alerts.get("pending_reviews") or [])
+                    + len(alerts.get("pending_pilots") or [])
+                    + len(rebalance_items)
+                ),
+            }
             alerts["error"] = ""
             return alerts
         except Exception as exc:
             logger.debug("Research alerts unavailable: %s", exc)
-            return {"pending_reviews": [], "kill_alerts": [], "error": str(exc)}
+            return {
+                "pending_reviews": [],
+                "pending_pilots": [],
+                "rebalance_items": [],
+                "kill_alerts": [],
+                "lane_counts": {
+                    "reviews": 0,
+                    "pilots": 0,
+                    "rebalances": 0,
+                    "retirements": 0,
+                    "total_pending": 0,
+                },
+                "error": str(exc),
+            }
 
     return _get_cached_value(
         "research-alerts",
@@ -3328,42 +4767,75 @@ def create_app() -> FastAPI:
 
     @app.post("/api/actions/research/review-ack", response_class=HTMLResponse)
     def research_review_ack_action(
+        request: Request,
         chain_id: str = Form(default=""),
         decision: str = Form(default="park"),
         notes: str = Form(default="Acknowledged from research dashboard"),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip()
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
+            return _render_research_operator_output(
+                request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
         if not clean_chain_id:
-            return action_message("Review chain_id is required.", ok=False)
+            return render_output(
+                error="Review chain_id is required.",
+            )
         try:
             outcome = PromotionOutcome(decision.strip().lower())
         except ValueError:
-            return action_message("Decision must be promote, revise, park, or reject.", ok=False)
+            return render_output(
+                chain_id=clean_chain_id,
+                error="Decision must be promote, revise, park, or reject.",
+            )
 
         try:
-            service = DecayReviewService(artifact_store=ArtifactStore())
-            service.acknowledge_review(
+            store = ArtifactStore()
+            service = DecayReviewService(artifact_store=store)
+            acknowledged = service.acknowledge_review(
                 chain_id=clean_chain_id,
                 operator_decision=outcome,
                 notes=notes.strip() or "Acknowledged from research dashboard",
             )
+            stage = {
+                PromotionOutcome.PROMOTE: "review_cleared",
+                PromotionOutcome.REVISE: "review_revise",
+                PromotionOutcome.PARK: "review_parked",
+                PromotionOutcome.REJECT: "review_rejected",
+            }[outcome]
             _update_research_pipeline_state(
                 clean_chain_id,
-                {
-                    PromotionOutcome.PROMOTE: "review_cleared",
-                    PromotionOutcome.REVISE: "review_revise",
-                    PromotionOutcome.PARK: "review_parked",
-                    PromotionOutcome.REJECT: "review_rejected",
-                }[outcome],
+                stage,
                 outcome=outcome.value,
                 operator_ack=True,
                 operator_notes=notes.strip() or "Acknowledged from research dashboard",
             )
         except Exception as exc:
-            return action_message(f"Review acknowledgement failed: {exc}", ok=False)
+            return render_output(
+                chain_id=clean_chain_id,
+                error=f"Review acknowledgement failed: {exc}",
+            )
 
         _invalidate_research_cached_values()
-        return action_message(f"Review {clean_chain_id[:8]} acknowledged: {outcome.value}.", ok=True)
+        return render_output(
+            chain_id=clean_chain_id,
+            operator_action=_build_operator_action_payload(
+                chain_id=clean_chain_id,
+                title="Review Acknowledged",
+                status=stage,
+                summary=f"Review decision recorded as {outcome.value}.",
+                artifacts=[acknowledged],
+            ),
+        )
 
     @app.post("/api/actions/research/confirm-kill", response_class=HTMLResponse)
     def research_confirm_kill_action(
@@ -3371,27 +4843,37 @@ def create_app() -> FastAPI:
         chain_id: str = Form(default=""),
         actor: str = Form(default="operator"),
         notes: str = Form(default="Operator confirmed kill from research dashboard."),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_actor = actor.strip() if isinstance(actor, str) else "operator"
         clean_notes = notes.strip() if isinstance(notes, str) else "Operator confirmed kill from research dashboard."
-        if not clean_chain_id:
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
             return _render_research_operator_output(
                 request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
+        if not clean_chain_id:
+            return render_output(
                 error="Research chain_id is required to confirm a kill.",
             )
 
         store = ArtifactStore()
         review = _find_chain_artifact(clean_chain_id, ArtifactType.REVIEW_TRIGGER, artifact_store=store)
         if review is None:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"No review trigger found for chain {clean_chain_id[:8]}.",
             )
         if bool(dict(review.body).get("operator_ack")):
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Review chain {clean_chain_id[:8]} is already acknowledged.",
             )
@@ -3423,15 +4905,13 @@ def create_app() -> FastAPI:
                 operator_notes=clean_notes or "Operator confirmed kill from research dashboard.",
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Kill confirmation failed: {exc}",
             )
 
         _invalidate_research_cached_values()
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=clean_chain_id,
             operator_action=_build_operator_action_payload(
                 chain_id=clean_chain_id,
@@ -3448,27 +4928,37 @@ def create_app() -> FastAPI:
         chain_id: str = Form(default=""),
         actor: str = Form(default="operator"),
         notes: str = Form(default="Operator overrode kill recommendation."),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_actor = actor.strip() if isinstance(actor, str) else "operator"
         clean_notes = notes.strip() if isinstance(notes, str) else "Operator overrode kill recommendation."
-        if not clean_chain_id:
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
             return _render_research_operator_output(
                 request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
+        if not clean_chain_id:
+            return render_output(
                 error="Research chain_id is required to override a kill.",
             )
 
         store = ArtifactStore()
         review = _find_chain_artifact(clean_chain_id, ArtifactType.REVIEW_TRIGGER, artifact_store=store)
         if review is None:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"No review trigger found for chain {clean_chain_id[:8]}.",
             )
         if bool(dict(review.body).get("operator_ack")):
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Review chain {clean_chain_id[:8]} is already acknowledged.",
             )
@@ -3487,15 +4977,13 @@ def create_app() -> FastAPI:
                 operator_notes=clean_notes or "Operator overrode kill recommendation.",
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Kill override failed: {exc}",
             )
 
         _invalidate_research_cached_values()
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=clean_chain_id,
             operator_action=_build_operator_action_payload(
                 chain_id=clean_chain_id,
@@ -3512,10 +5000,23 @@ def create_app() -> FastAPI:
         chain_id: str = Form(default=""),
         actor: str = Form(default="operator"),
         notes: str = Form(default="Operator approved and executed Engine A rebalance."),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_actor = actor.strip() if isinstance(actor, str) else "operator"
         clean_notes = notes.strip() if isinstance(notes, str) else "Operator approved and executed Engine A rebalance."
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
+            return _render_research_operator_output(
+                request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
         store = ArtifactStore()
         rebalance = (
             _find_chain_artifact(clean_chain_id, ArtifactType.REBALANCE_SHEET, artifact_store=store)
@@ -3523,8 +5024,7 @@ def create_app() -> FastAPI:
             else _latest_artifact_by_type(ArtifactType.REBALANCE_SHEET, engine=Engine.ENGINE_A, artifact_store=store)
         )
         if rebalance is None or not rebalance.chain_id:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error="No Engine A rebalance proposal is available to execute.",
             )
@@ -3534,14 +5034,12 @@ def create_app() -> FastAPI:
             envelope.artifact_type == ArtifactType.EXECUTION_REPORT and int(envelope.version or 0) > int(rebalance.version or 0)
             for envelope in chain
         ):
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=rebalance.chain_id,
                 error=f"Latest Engine A rebalance for chain {rebalance.chain_id[:8]} has already been executed.",
             )
         if not any(abs(float(delta or 0.0)) > 0.0 for delta in dict(rebalance.body).get("deltas", {}).values()):
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=rebalance.chain_id,
                 error=f"Rebalance chain {rebalance.chain_id[:8]} has no executable deltas.",
             )
@@ -3567,15 +5065,13 @@ def create_app() -> FastAPI:
                 artifact_store=store,
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=rebalance.chain_id,
                 error=f"Rebalance execution failed: {exc}",
             )
 
         _invalidate_research_cached_values()
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=rebalance.chain_id,
             operator_action=_build_operator_action_payload(
                 chain_id=rebalance.chain_id,
@@ -3592,10 +5088,23 @@ def create_app() -> FastAPI:
         chain_id: str = Form(default=""),
         actor: str = Form(default="operator"),
         notes: str = Form(default="Operator dismissed Engine A rebalance."),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_actor = actor.strip() if isinstance(actor, str) else "operator"
         clean_notes = notes.strip() if isinstance(notes, str) else "Operator dismissed Engine A rebalance."
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
+            return _render_research_operator_output(
+                request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
         store = ArtifactStore()
         rebalance = (
             _find_chain_artifact(clean_chain_id, ArtifactType.REBALANCE_SHEET, artifact_store=store)
@@ -3603,8 +5112,7 @@ def create_app() -> FastAPI:
             else _latest_artifact_by_type(ArtifactType.REBALANCE_SHEET, engine=Engine.ENGINE_A, artifact_store=store)
         )
         if rebalance is None or not rebalance.chain_id:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error="No Engine A rebalance proposal is available to dismiss.",
             )
@@ -3614,8 +5122,7 @@ def create_app() -> FastAPI:
             envelope.artifact_type == ArtifactType.EXECUTION_REPORT and int(envelope.version or 0) > int(rebalance.version or 0)
             for envelope in chain
         ):
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=rebalance.chain_id,
                 error=f"Latest Engine A rebalance for chain {rebalance.chain_id[:8]} has already been executed.",
             )
@@ -3629,15 +5136,13 @@ def create_app() -> FastAPI:
                 artifact_store=store,
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=rebalance.chain_id,
                 error=f"Rebalance dismissal failed: {exc}",
             )
 
         _invalidate_research_cached_values()
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=rebalance.chain_id,
             operator_action=_build_operator_action_payload(
                 chain_id=rebalance.chain_id,
@@ -3650,14 +5155,30 @@ def create_app() -> FastAPI:
 
     @app.post("/api/actions/research/engine-b-run", response_class=HTMLResponse)
     def research_engine_b_run_action(
+        request: Request,
         raw_content: str = Form(default=""),
         source_class: str = Form(default="news_wire"),
         source_credibility: float = Form(default=0.7),
         source_ids: str = Form(default=""),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
+            return _render_research_operator_output(
+                request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
         content = raw_content.strip()
         if not content:
-            return action_message("Raw content is required.", ok=False)
+            return render_output(
+                error="Raw content is required.",
+            )
         source_id_list = [item.strip() for item in source_ids.split(",") if item.strip()]
         if not source_id_list:
             source_id_list = [f"manual:{uuid.uuid4().hex[:8]}"]
@@ -3671,21 +5192,41 @@ def create_app() -> FastAPI:
             allow_ad_hoc=True,
         )
         if not result.get("ok"):
-            return action_message(
-                f"Engine B enqueue failed: {result.get('detail') or result.get('error', 'unknown')}.",
-                ok=False,
+            return render_output(
+                error=f"Engine B enqueue failed: {result.get('detail') or result.get('error', 'unknown')}.",
             )
-        return action_message(f"Queued Engine B research job {str(result['job_id'])[:8]}.", ok=True)
+        return render_output(
+            queued_intake={
+                "job_id": str(result["job_id"]),
+                "source_class": source_class.strip() or "news_wire",
+                "source_credibility": result.get("source_credibility"),
+                "source_ids": source_id_list,
+                "queue_depth": int(result.get("queue_depth") or 0),
+                "content_preview": content[:220],
+            },
+        )
 
     @app.post("/api/actions/research/synthesize", response_class=HTMLResponse)
     def research_synthesize_action(
         request: Request,
         chain_id: str = Form(default=""),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
-        if not clean_chain_id:
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
             return _render_research_operator_output(
                 request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
+        if not clean_chain_id:
+            return render_output(
                 error="Research chain_id is required for synthesis.",
             )
 
@@ -3693,8 +5234,7 @@ def create_app() -> FastAPI:
         try:
             chain_context = _build_research_artifact_chain_context(clean_chain_id, artifact_store=store)
             if not chain_context["artifacts"]:
-                return _render_research_operator_output(
-                    request,
+                return render_output(
                     chain_id=clean_chain_id,
                     error=chain_context["error"],
                 )
@@ -3727,14 +5267,12 @@ def create_app() -> FastAPI:
                 )
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Synthesis failed: {exc}",
             )
 
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=clean_chain_id,
             synthesis={
                 "event_id": str(event_result.get("id") or ""),
@@ -3752,15 +5290,27 @@ def create_app() -> FastAPI:
         request: Request,
         chain_id: str = Form(default=""),
         hypothesis_id: str = Form(default=""),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_hypothesis_id = hypothesis_id.strip() if isinstance(hypothesis_id, str) else ""
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
+            return _render_research_operator_output(
+                request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
         store = ArtifactStore()
 
         if not clean_hypothesis_id:
             if not clean_chain_id:
-                return _render_research_operator_output(
-                    request,
+                return render_output(
                     error="Provide chain_id or hypothesis_id to generate a post-mortem.",
                 )
             hypothesis = _find_chain_artifact(
@@ -3769,8 +5319,7 @@ def create_app() -> FastAPI:
                 artifact_store=store,
             )
             if hypothesis is None:
-                return _render_research_operator_output(
-                    request,
+                return render_output(
                     chain_id=clean_chain_id,
                     error=f"No hypothesis artifact found for chain {clean_chain_id[:8]}.",
                 )
@@ -3781,14 +5330,12 @@ def create_app() -> FastAPI:
                 clean_hypothesis_id
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Post-mortem generation failed: {exc}",
             )
 
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=str(artifact.chain_id or clean_chain_id),
             post_mortem=_serialize_research_artifact(artifact),
         )
@@ -3799,13 +5346,25 @@ def create_app() -> FastAPI:
         chain_id: str = Form(default=""),
         actor: str = Form(default="operator"),
         notes: str = Form(default="Pilot approved by operator."),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_actor = actor.strip() if isinstance(actor, str) else "operator"
         clean_notes = notes.strip() if isinstance(notes, str) else "Pilot approved by operator."
-        if not clean_chain_id:
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
             return _render_research_operator_output(
                 request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
+        if not clean_chain_id:
+            return render_output(
                 error="Research chain_id is required for pilot approval.",
             )
 
@@ -3825,15 +5384,13 @@ def create_app() -> FastAPI:
                 notes=clean_notes,
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Pilot approval failed: {exc}",
             )
 
         _invalidate_research_cached_values()
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=clean_chain_id,
             pilot_decision=_serialize_research_artifact(artifact),
         )
@@ -3844,13 +5401,25 @@ def create_app() -> FastAPI:
         chain_id: str = Form(default=""),
         actor: str = Form(default="operator"),
         notes: str = Form(default="Pilot rejected by operator."),
+        queue_lane: str = Form(default="all"),
+        active_view: str = Form(default="all"),
     ):
         clean_chain_id = chain_id.strip() if isinstance(chain_id, str) else ""
         clean_actor = actor.strip() if isinstance(actor, str) else "operator"
         clean_notes = notes.strip() if isinstance(notes, str) else "Pilot rejected by operator."
-        if not clean_chain_id:
+        clean_queue_lane = _normalize_research_queue_lane(queue_lane)
+        clean_active_view = _normalize_research_active_view(active_view)
+
+        def render_output(**kwargs):
             return _render_research_operator_output(
                 request,
+                queue_lane=clean_queue_lane,
+                active_view=clean_active_view,
+                **kwargs,
+            )
+
+        if not clean_chain_id:
+            return render_output(
                 error="Research chain_id is required for pilot rejection.",
             )
 
@@ -3870,15 +5439,13 @@ def create_app() -> FastAPI:
                 notes=clean_notes,
             )
         except Exception as exc:
-            return _render_research_operator_output(
-                request,
+            return render_output(
                 chain_id=clean_chain_id,
                 error=f"Pilot rejection failed: {exc}",
             )
 
         _invalidate_research_cached_values()
-        return _render_research_operator_output(
-            request,
+        return render_output(
             chain_id=clean_chain_id,
             pilot_decision=_serialize_research_artifact(artifact),
         )
@@ -4120,10 +5687,17 @@ def create_app() -> FastAPI:
 
     @app.get("/research", response_class=HTMLResponse)
     def research_page(request: Request):
+        selected_chain_id = str(request.query_params.get("research_chain") or "").strip()
+        selected_queue_lane = _normalize_research_queue_lane(request.query_params.get("research_lane") or "")
+        selected_active_view = _normalize_research_active_view(request.query_params.get("research_view") or "")
+        ctx = _page_context(request=request, page_key="research", title="Research | Trading Bot")
+        ctx["research_selected_chain_id"] = selected_chain_id
+        ctx["research_selected_queue_lane"] = selected_queue_lane
+        ctx["research_selected_active_view"] = selected_active_view
         return TEMPLATES.TemplateResponse(
             request,
             "research_page.html",
-            _page_context(request=request, page_key="research", title="Research | Trading Bot"),
+            ctx,
         )
 
     @app.get("/incidents", response_class=HTMLResponse)
@@ -4140,6 +5714,53 @@ def create_app() -> FastAPI:
             request,
             "intel_council_page.html",
             _page_context(request=request, page_key="intel", title="Intel Council | Trading Bot"),
+        )
+
+    # ─── Market Brief endpoints ────────────────────────────────────────────
+
+    @app.post("/api/actions/generate-brief", response_class=HTMLResponse)
+    def generate_brief_action(type: str = "morning"):
+        """Generate a market brief on demand."""
+        brief_type = type if type in {"morning", "evening"} else "morning"
+        try:
+            brief = generate_brief(brief_type=brief_type)
+            with _BRIEF_LOCK:
+                _LATEST_BRIEFS[brief_type] = brief
+            return TEMPLATES.TemplateResponse(
+                Request(scope={"type": "http", "method": "GET", "path": "/"}),
+                "_market_brief.html",
+                {"request": Request(scope={"type": "http", "method": "GET", "path": "/"}), "brief": brief.to_dict()},
+            )
+        except Exception as exc:
+            return action_message(f"Brief generation failed: {exc}", ok=False)
+
+    @app.get("/api/briefs/latest")
+    def api_latest_briefs():
+        """Return latest morning and evening briefs as JSON."""
+        with _BRIEF_LOCK:
+            return {
+                k: v.to_dict() for k, v in _LATEST_BRIEFS.items()
+            }
+
+    @app.get("/api/briefs/{brief_type}")
+    def api_brief(brief_type: str):
+        """Return a specific brief type."""
+        with _BRIEF_LOCK:
+            brief = _LATEST_BRIEFS.get(brief_type)
+        if not brief:
+            return {"error": f"No {brief_type} brief available"}
+        return brief.to_dict()
+
+    @app.get("/fragments/market-brief", response_class=HTMLResponse)
+    def market_brief_fragment(request: Request):
+        """Render the latest market brief."""
+        with _BRIEF_LOCK:
+            # Show the most recent brief (morning or evening)
+            brief = _LATEST_BRIEFS.get("morning") or _LATEST_BRIEFS.get("evening")
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_market_brief.html",
+            {"request": request, "brief": brief.to_dict() if brief else None},
         )
 
     @app.get("/settings", response_class=HTMLResponse)
@@ -4468,6 +6089,54 @@ def create_app() -> FastAPI:
             return result
         except Exception:
             return []
+
+    @app.get("/api/charts/ohlcv")
+    def api_chart_ohlcv(ticker: str = "SPY", period: str = "6mo", interval: str = "1d"):
+        """Fetch OHLCV candlestick data via yfinance for rich charting."""
+        import yfinance as yf
+        _VALID_PERIODS = {"5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
+        _VALID_INTERVALS = {"1m", "5m", "15m", "1h", "1d", "1wk"}
+        if not ticker:
+            return {"candles": [], "volumes": [], "ticker": ticker}
+        if period not in _VALID_PERIODS:
+            period = "6mo"
+        if interval not in _VALID_INTERVALS:
+            interval = "1d"
+        # Short intervals require short periods
+        if interval in {"1m", "5m", "15m"} and period not in {"5d"}:
+            period = "5d"
+        elif interval == "1h" and period not in {"5d", "1mo", "3mo"}:
+            period = "3mo"
+
+        try:
+            df = yf.download(ticker, period=period, interval=interval, progress=False)
+            if df is None or df.empty:
+                return {"candles": [], "volumes": [], "ticker": ticker}
+            # Flatten MultiIndex columns if present
+            if getattr(df.columns, "nlevels", 1) > 1:
+                df.columns = df.columns.get_level_values(0)
+            candles = []
+            volumes = []
+            for idx, row in df.iterrows():
+                try:
+                    if hasattr(idx, "timestamp"):
+                        epoch = int(idx.timestamp())
+                    else:
+                        epoch = int(datetime.combine(idx, datetime.min.time()).replace(tzinfo=timezone.utc).timestamp())
+                    o = float(row["Open"])
+                    h = float(row["High"])
+                    l = float(row["Low"])
+                    c = float(row["Close"])
+                    v = int(row["Volume"]) if row["Volume"] == row["Volume"] else 0
+                    candles.append({"time": epoch, "open": round(o, 4), "high": round(h, 4), "low": round(l, 4), "close": round(c, 4)})
+                    color = "rgba(38,166,154,0.5)" if c >= o else "rgba(239,83,80,0.5)"
+                    volumes.append({"time": epoch, "value": v, "color": color})
+                except (ValueError, TypeError, KeyError):
+                    continue
+            return {"candles": candles, "volumes": volumes, "ticker": ticker}
+        except Exception as exc:
+            logger.warning("Chart OHLCV fetch failed for %s: %s", ticker, exc)
+            return {"candles": [], "volumes": [], "ticker": ticker, "error": str(exc)}
 
     @app.get("/fragments/ledger", response_class=HTMLResponse)
     def ledger_fragment(request: Request):
@@ -5171,13 +6840,16 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/fragments/research", response_class=HTMLResponse)
-    def research_fragment(request: Request):
+    def research_fragment(request: Request, queue_lane: str = "all", chain_id: str = "", active_view: str = "all"):
         context = _get_research_fragment_context()
         return TEMPLATES.TemplateResponse(
             request,
             "_research.html",
             {
                 "request": request,
+                "selected_queue_lane": _normalize_research_queue_lane(queue_lane),
+                "selected_chain_id": str(chain_id or "").strip(),
+                "selected_active_view": _normalize_research_active_view(active_view),
                 **context,
             },
         )
@@ -5210,8 +6882,35 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/fragments/research/operator-output", response_class=HTMLResponse)
-    def research_operator_output_fragment(request: Request):
-        return _render_research_operator_output(request)
+    def research_operator_output_fragment(request: Request, chain_id: str = "", queue_lane: str = "all", active_view: str = "all"):
+        return _render_research_operator_output(
+            request,
+            chain_id=chain_id,
+            queue_lane=_normalize_research_queue_lane(queue_lane),
+            active_view=_normalize_research_active_view(active_view),
+        )
+
+    @app.get("/fragments/research/focus-ribbon", response_class=HTMLResponse)
+    def research_focus_ribbon_fragment(
+        request: Request,
+        chain_id: str = "",
+        queue_lane: str = "all",
+        active_view: str = "all",
+        suppress_auto_sync: bool = False,
+    ):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_focus_ribbon.html",
+            {
+                "request": request,
+                **_build_research_focus_ribbon_context(
+                    chain_id=chain_id,
+                    queue_lane=_normalize_research_queue_lane(queue_lane),
+                    active_view=_normalize_research_active_view(active_view),
+                    suppress_auto_sync=bool(suppress_auto_sync),
+                ),
+            },
+        )
 
     @app.get("/fragments/research/archive", response_class=HTMLResponse)
     def research_archive_fragment(
@@ -5275,6 +6974,14 @@ def create_app() -> FastAPI:
             {"request": request, **_get_research_regime_journal_context()},
         )
 
+    @app.get("/fragments/research/operating-summary", response_class=HTMLResponse)
+    def research_operating_summary_fragment(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_research_operating_summary.html",
+            {"request": request, **_get_research_operating_summary_context()},
+        )
+
     @app.get("/fragments/research/pipeline-funnel", response_class=HTMLResponse)
     def research_pipeline_funnel_fragment(request: Request):
         return TEMPLATES.TemplateResponse(
@@ -5292,11 +6999,16 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/fragments/research/active-hypotheses", response_class=HTMLResponse)
-    def research_active_hypotheses_fragment(request: Request):
+    def research_active_hypotheses_fragment(request: Request, active_view: str = "all", chain_id: str = ""):
         return TEMPLATES.TemplateResponse(
             request,
             "_research_active_hypotheses.html",
-            {"request": request, **_get_research_active_hypotheses_context()},
+            {
+                "request": request,
+                "selected_active_view": _normalize_research_active_view(active_view),
+                "selected_chain_id": str(chain_id or "").strip(),
+                **_get_research_active_hypotheses_context(),
+            },
         )
 
     @app.get("/fragments/research/engine-status", response_class=HTMLResponse)
@@ -5316,11 +7028,18 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/fragments/research/alerts", response_class=HTMLResponse)
-    def research_alerts_fragment(request: Request):
+    def research_alerts_fragment(request: Request, queue_lane: str = "all", chain_id: str = ""):
+        clean_chain_id = str(chain_id or "").strip()
         return TEMPLATES.TemplateResponse(
             request,
             "_research_alerts.html",
-            {"request": request, **_get_research_alerts_context()},
+            {
+                "request": request,
+                "selected_queue_lane": _normalize_research_queue_lane(queue_lane),
+                "selected_chain_id": clean_chain_id,
+                "selected_chain_context": _build_research_selected_chain_queue_context(clean_chain_id),
+                **_get_research_alerts_context(),
+            },
         )
 
     @app.get("/fragments/signal-engine", response_class=HTMLResponse)

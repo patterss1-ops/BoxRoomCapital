@@ -35,7 +35,9 @@ def _build_form_request(path: str, payload: dict[str, str] | None = None):
     return Request(scope, receive)
 
 
-def _build_get_request(path: str):
+def _build_get_request(path: str, params: dict[str, str] | None = None):
+    query_string = urlencode(params or {}).encode("utf-8")
+
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
 
@@ -44,7 +46,7 @@ def _build_get_request(path: str):
         "method": "GET",
         "path": path,
         "headers": [],
-        "query_string": b"",
+        "query_string": query_string,
     }
     return Request(scope, receive)
 
@@ -456,6 +458,30 @@ def test_research_pilot_reject_action_saves_decision_and_updates_output(monkeypa
     monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
     monkeypatch.setattr(
         server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-2",
+                    "chain_id": "chain-follow",
+                    "strategy_id": "carry",
+                    "health_status": "warning",
+                    "flags": ["drawdown"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:05:00Z",
+                    "created_label": "10m ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 1, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server,
         "_update_research_pipeline_state",
         lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
             (chain_id, stage, outcome, operator_ack, operator_notes)
@@ -503,6 +529,30 @@ def test_research_confirm_kill_action_rejects_review_and_records_retirement(monk
 
     monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
     monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-2",
+                    "chain_id": "chain-follow",
+                    "strategy_id": "carry",
+                    "health_status": "warning",
+                    "flags": ["drawdown"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:05:00Z",
+                    "created_label": "10m ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 1, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
     monkeypatch.setattr(
         server,
         "_update_research_pipeline_state",
@@ -582,6 +632,1446 @@ def test_research_override_kill_action_clears_review_without_retirement(monkeypa
     assert fake_store.saved[-1].artifact_type == ArtifactType.REVIEW_TRIGGER
     assert fake_store.saved[-1].body["operator_decision"] == "promote"
     assert pipeline_updates[-1][:3] == ("chain-review", "review_cleared", "promote")
+
+
+def test_research_review_ack_action_renders_workbench_output(monkeypatch):
+    review_chain = [
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review",
+            version=1,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_B,
+            ticker="momentum",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "momentum",
+                "trigger_source": "decay_detector",
+                "health_status": "warning",
+                "flags": ["win_rate_below_floor"],
+                "recent_metrics": {"recent_profit_factor": 0.95},
+                "baseline_metrics": {"baseline_profit_factor": 1.2},
+                "recommended_action": "revise",
+                "artifact_id": "review-1",
+                "operator_ack": False,
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review": review_chain})
+    pipeline_updates = []
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-2",
+                    "chain_id": "chain-follow",
+                    "strategy_id": "carry",
+                    "health_status": "warning",
+                    "flags": ["drawdown"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:05:00Z",
+                    "created_label": "10m ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 1, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_update_research_pipeline_state",
+        lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
+            (chain_id, stage, outcome, operator_ack, operator_notes)
+        ),
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/review-ack", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/review-ack"),
+        chain_id="chain-review",
+        decision="revise",
+        notes="Need another pass before reactivation.",
+        queue_lane="review",
+        active_view="stale",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Review Acknowledged" in body
+    assert "recorded as revise" in body
+    assert "Next Up In Review Lane" in body
+    assert "carry" in body
+    assert "Open Next Review" in body
+    assert "window.syncResearchWorkbench('chain-follow', 'review', 'operator')" in body
+    assert "Return to Review Lane" in body
+    assert "Board Slice" in body
+    assert "window.returnResearchToQueue('review', 'stale')" in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator', false)" in body
+    assert fake_store.saved[-1].artifact_type == ArtifactType.REVIEW_TRIGGER
+    assert fake_store.saved[-1].body["operator_decision"] == "revise"
+    assert pipeline_updates[-1][:3] == ("chain-review", "review_revise", "revise")
+
+
+def test_research_review_ack_action_surfaces_cleared_lane_follow_up(monkeypatch):
+    review_chain = [
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review",
+            version=1,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_B,
+            ticker="momentum",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "momentum",
+                "trigger_source": "decay_detector",
+                "health_status": "warning",
+                "flags": ["win_rate_below_floor"],
+                "recommended_action": "revise",
+                "artifact_id": "review-1",
+                "operator_ack": False,
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review": review_chain})
+    pipeline_updates = []
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [],
+            "pending_pilots": [
+                {
+                    "chain_id": "chain-pilot",
+                    "ticker": "NVDA",
+                    "edge_family": "earnings_reaction",
+                    "outcome": "promote",
+                    "score": 84.0,
+                    "created_at": "2026-03-09T10:00:00Z",
+                    "updated_at": "2026-03-09T11:30:00Z",
+                    "created_label": "2h ago",
+                    "updated_label": "30m ago",
+                    "freshness": "aging",
+                    "priority": "watch",
+                    "next_action": "approve or reject pilot",
+                }
+            ],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 0, "pilots": 1, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_update_research_pipeline_state",
+        lambda chain_id, stage, outcome, operator_ack=True, operator_notes="": pipeline_updates.append(
+            (chain_id, stage, outcome, operator_ack, operator_notes)
+        ),
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/review-ack", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/review-ack"),
+        chain_id="chain-review",
+        decision="revise",
+        notes="Need another pass before reactivation.",
+        queue_lane="review",
+        active_view="stale",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Lane Clear" in body
+    assert "Review Lane cleared" in body
+    assert "Open Pilot Lane" in body
+    assert "Board Slice" in body
+    assert "window.returnResearchToQueue('pilot', 'operator')" in body
+    assert "window.returnResearchToQueue('review', 'stale')" in body
+    assert pipeline_updates[-1][:3] == ("chain-review", "review_revise", "revise")
+
+
+def test_research_engine_b_run_action_renders_queued_intake_state(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_queue_engine_b_intake",
+        lambda **kwargs: {
+            "ok": True,
+            "job_id": "job-12345678",
+            "queue_depth": 2,
+            "source_credibility": 0.8,
+        },
+    )
+
+    endpoint = _route_endpoint("/api/actions/research/engine-b-run", "POST")
+    response = endpoint(
+        _build_form_request("/api/actions/research/engine-b-run"),
+        raw_content="NVIDIA reported revenue above consensus.",
+        source_class="news_wire",
+        source_credibility=0.8,
+        source_ids="manual:nvda-earnings",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Engine B Intake Queued" in body
+    assert "job-1234" in body
+    assert "manual:nvda-earnings" in body
+
+
+def test_research_operator_output_fragment_renders_review_ready_actions(monkeypatch):
+    review_chain = [
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review",
+            version=1,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_B,
+            ticker="momentum",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "momentum",
+                "trigger_source": "decay_detector",
+                "health_status": "warning",
+                "flags": ["win_rate_below_floor"],
+                "recent_metrics": {"recent_profit_factor": 0.95},
+                "baseline_metrics": {"baseline_profit_factor": 1.2},
+                "recommended_action": "park",
+                "artifact_id": "review-1",
+                "operator_ack": False,
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review": review_chain})
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+
+    endpoint = _route_endpoint("/fragments/research/operator-output", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/operator-output"),
+        chain_id="chain-review",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Selected chain is loaded and ready for an operator call." in body
+    assert "Ready Actions" in body
+    assert "Lane Focus" in body
+    assert "Review Lane" in body
+    assert "Pilot Lane" in body
+    assert "Synthesis Lane" in body
+    assert "Review Trigger" in body
+    assert "/api/actions/research/review-ack" in body
+    assert "/api/actions/research/confirm-kill" in body
+    assert "/api/actions/research/override-kill" in body
+
+
+def test_research_operator_output_fragment_renders_rebalance_ready_actions(monkeypatch):
+    rebalance_chain = [
+        ArtifactEnvelope(
+            artifact_id="regime-1",
+            chain_id="chain-a",
+            version=1,
+            artifact_type=ArtifactType.REGIME_SNAPSHOT,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "vol_regime": "normal",
+                "trend_regime": "strong_trend",
+                "carry_regime": "steep",
+                "macro_regime": "risk_on",
+                "sizing_factor": 0.9,
+                "active_overrides": [],
+                "indicators": {"vix": 18.0},
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="rebalance-1",
+            chain_id="chain-a",
+            version=2,
+            artifact_type=ArtifactType.REBALANCE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:02:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "current_positions": {"ES": 1.0, "NQ": 0.0},
+                "target_positions": {"ES": 2.0, "NQ": -1.0},
+                "deltas": {"ES": 1.0, "NQ": -1.0},
+                "estimated_cost": 0.0042,
+                "approval_status": "draft",
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-a": rebalance_chain})
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+
+    endpoint = _route_endpoint("/fragments/research/operator-output", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/operator-output"),
+        chain_id="chain-a",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Ready Actions" in body
+    assert "Lane Focus" in body
+    assert "Rebalance Lane" in body
+    assert "Rebalance Proposal" in body
+    assert "Execute Rebalance" in body
+    assert "Dismiss Rebalance" in body
+    assert "/api/actions/research/execute-rebalance" in body
+    assert "/api/actions/research/dismiss-rebalance" in body
+
+
+def test_research_operator_output_fragment_surfaces_queue_alignment_warning(monkeypatch):
+    pilot_chain = [
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-pilot",
+            version=1,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T10:55:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fals-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 84.0,
+                "penalties": {"crowding": -4.0},
+                "final_score": 80.0,
+                "outcome": "promote",
+                "outcome_reason": "Ready for pilot",
+                "blocking_objections": [],
+                "next_stage": "pilot",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-pilot",
+            version=2,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "NVDA", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "fixed_fraction", "target_risk_pct": 1.0},
+                "entry_rules": ["enter on confirmation"],
+                "exit_rules": ["stop on invalidation"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 3.0},
+                "kill_criteria": ["guidance reversal"],
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-pilot": pilot_chain})
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+
+    endpoint = _route_endpoint("/fragments/research/operator-output", "GET")
+    response = endpoint(
+        _build_get_request(
+            "/fragments/research/operator-output",
+            {"queue_lane": "review", "chain_id": "chain-pilot"},
+        ),
+        chain_id="chain-pilot",
+        queue_lane="review",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Queue Alignment" in body
+    assert "Queue focus is off-lane" in body
+    assert "Current" in body
+    assert "Review Lane" in body
+    assert "Preferred" in body
+    assert "Pilot Lane" in body
+    assert "Board Slice" in body
+    assert "Sync Queue Focus" in body
+    assert "window.setResearchQueueAndActiveView('pilot', 'operator')" in body
+
+
+def test_research_operator_output_fragment_guides_idle_workbench_to_next_queue_item(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-2",
+                    "chain_id": "chain-follow",
+                    "strategy_id": "carry",
+                    "health_status": "warning",
+                    "flags": ["drawdown"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:05:00Z",
+                    "created_label": "10m ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 1, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
+
+    endpoint = _route_endpoint("/fragments/research/operator-output", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/operator-output", {"queue_lane": "review"}),
+        queue_lane="review",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Queue is ready for the next operator call." in body
+    assert "Suggested Queue Entry" in body
+    assert "carry" in body
+    assert "Board Slice" in body
+    assert "Open Next Review" in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator', false)" in body
+    assert "window.syncResearchWorkbench('chain-follow', 'review', 'operator')" in body
+
+
+def test_research_operator_output_fragment_guides_idle_workbench_when_queue_is_clear(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 0, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 0},
+            "error": "",
+        },
+    )
+
+    endpoint = _route_endpoint("/fragments/research/operator-output", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/operator-output", {"queue_lane": "all"}),
+        queue_lane="all",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Operator queue clear" in body
+    assert "Open Intake" in body
+    assert "#research-intake" in body
+
+
+def test_research_operating_summary_fragment_renders_lane_pressure(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 0, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 0},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "operating_summary",
+        lambda: {
+            "focus_title": "Research loop flowing",
+            "focus_detail": "Latest chain is AAPL in challenge and was updated 10m ago.",
+            "focus_tone": "clear",
+            "focus_anchor": "#research-loop",
+            "active_chain_count": 3,
+            "freshness_counts": {"fresh": 2, "aging": 1, "stale": 0},
+            "pending_review_count": 0,
+            "urgent_review_count": 0,
+            "watch_review_count": 0,
+            "pilot_ready_count": 0,
+            "review_pending_stage_count": 0,
+            "latest_chain": {
+                "chain_id": "chain-1",
+                "ticker": "AAPL",
+                "stage": "challenge",
+                "freshness": "fresh",
+                "next_action": "score and synthesize",
+                "updated_label": "10m ago",
+            },
+            "latest_decision": None,
+            "generated_at": "2026-03-09T12:00:00Z",
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_build_engine_a_rebalance_panel_context",
+        lambda: {
+            "rebalance": {
+                "can_execute": True,
+                "can_dismiss": True,
+                "executed": False,
+                "move_count": 2,
+                "estimated_cost": 0.0042,
+            },
+            "error": "",
+            "generated_at": "2026-03-09T12:00:00Z",
+        },
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/operating-summary", "GET")
+    response = endpoint(_build_get_request("/fragments/research/operating-summary"))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Lane Pressure" in body
+    assert "Review Lane" in body
+    assert "Pilot Lane" in body
+    assert "Rebalance Lane" in body
+    assert "Flow Lane" in body
+    assert "Rebalance waiting" in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator')" in body
+    assert "window.setResearchQueueAndActiveView('pilot', 'operator')" in body
+    assert "window.setResearchQueueAndActiveView('rebalance', 'all')" in body
+    assert "window.setResearchQueueAndActiveView('all', 'flow')" in body
+
+
+def test_research_operating_summary_fragment_recommends_queue_item_over_latest_chain(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-2",
+                    "chain_id": "chain-review",
+                    "strategy_id": "carry",
+                    "health_status": "warning",
+                    "flags": ["drawdown"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:05:00Z",
+                    "created_label": "10m ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 1, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "operating_summary",
+        lambda: {
+            "focus_title": "Urgent operator queue",
+            "focus_detail": "Review items need an operator call now.",
+            "focus_tone": "warning",
+            "focus_anchor": "#research-workbench",
+            "active_chain_count": 2,
+            "freshness_counts": {"fresh": 1, "aging": 1, "stale": 0},
+            "pending_review_count": 1,
+            "urgent_review_count": 0,
+            "watch_review_count": 1,
+            "pilot_ready_count": 0,
+            "review_pending_stage_count": 0,
+            "latest_chain": {
+                "chain_id": "chain-latest",
+                "ticker": "NVDA",
+                "stage": "challenge",
+                "freshness": "fresh",
+                "next_action": "challenge and score",
+                "updated_label": "12m ago",
+                "created_label": "34m ago",
+            },
+            "latest_decision": None,
+            "generated_at": "2026-03-09T12:00:00Z",
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_build_engine_a_rebalance_panel_context",
+        lambda: {"rebalance": None, "error": "", "generated_at": "2026-03-09T12:00:00Z"},
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/operating-summary", "GET")
+    response = endpoint(_build_get_request("/fragments/research/operating-summary"))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Suggested Queue Entry" in body
+    assert "carry" in body
+    assert "Review Lane" in body
+    assert "Open Next Review" in body
+    assert "Open Decision Queue" in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator', false)" in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator')" in body
+
+
+def test_research_active_hypotheses_fragment_splits_operator_and_flow_rows(monkeypatch):
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "active_hypotheses",
+        lambda limit=20: [
+            {
+                "chain_id": "chain-pilot",
+                "ticker": "NVDA",
+                "edge_family": "earnings_reaction",
+                "stage": "pilot_ready",
+                "stage_group": "operator",
+                "outcome": "promote",
+                "score": 84.0,
+                "created_at": "2026-03-09T10:00:00Z",
+                "updated_at": "2026-03-09T11:20:00Z",
+                "updated_label": "5m ago",
+                "created_label": "1h ago",
+                "freshness": "fresh",
+                "next_action": "approve or reject pilot",
+                "operator_now": True,
+                "operator_lane_label": "Pilot Lane",
+                "operator_priority": "watch",
+                "board_group": "operator",
+                "flow_lane_key": "active",
+                "flow_lane_label": "Active",
+                "flow_lane_order": 99,
+            },
+            {
+                "chain_id": "chain-flow",
+                "ticker": "AAPL",
+                "edge_family": "underreaction_revision",
+                "stage": "challenge",
+                "stage_group": "challenge",
+                "outcome": "revise",
+                "score": 72.5,
+                "created_at": "2026-03-09T09:00:00Z",
+                "updated_at": "2026-03-09T06:35:00Z",
+                "updated_label": "4h ago",
+                "created_label": "2h ago",
+                "freshness": "stale",
+                "next_action": "score and synthesize",
+                "operator_now": False,
+                "operator_lane_label": "",
+                "operator_priority": "",
+                "board_group": "flow",
+                "flow_lane_key": "challenge",
+                "flow_lane_label": "Challenge",
+                "flow_lane_order": 2,
+            },
+        ],
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/active-hypotheses", "GET")
+    response = endpoint(_build_get_request("/fragments/research/active-hypotheses"))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Board Focus" in body
+    assert "Operator" in body
+    assert "Flow" in body
+    assert "Stale" in body
+    assert "Board Focus" in body
+    assert "Filtered View" in body
+    assert "Slice Navigation" in body
+    assert "Selected Chain Outside Slice" in body
+    assert "Needs Operator Now" in body
+    assert "Operator Focus" in body
+    assert "Still Flowing" in body
+    assert "Flow Focus" in body
+    assert "Then Inspect Flow" in body
+    assert "Pilot Lane" in body
+    assert "Challenge" in body
+    assert "Open Operator Chain" in body
+    assert "Then Open Flow Chain" in body
+    assert "Open First Visible" in body
+    assert "Previous Visible" in body
+    assert "Next Visible" in body
+    assert "Show In Matching Slice" in body
+    assert "Open Watch Chain" in body
+    assert "Open Stale Chain" in body
+    assert "window.syncResearchWorkbench('chain-pilot', 'pilot', 'all')" in body
+    assert "window.syncResearchWorkbench('chain-flow', 'all', 'all')" in body
+    assert 'data-research-queue-lane="pilot"' in body
+    assert 'data-research-queue-lane="all"' in body
+    assert "approve or reject pilot" in body
+    assert "score and synthesize" in body
+
+
+def test_research_active_hypotheses_fragment_renders_hidden_selected_chain_warning(monkeypatch):
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "active_hypotheses",
+        lambda limit=20: [
+            {
+                "chain_id": "chain-flow",
+                "ticker": "AAPL",
+                "edge_family": "underreaction_revision",
+                "stage": "challenge",
+                "stage_group": "challenge",
+                "outcome": "revise",
+                "score": 72.5,
+                "created_at": "2026-03-09T09:00:00Z",
+                "updated_at": "2026-03-09T10:35:00Z",
+                "updated_label": "50m ago",
+                "created_label": "2h ago",
+                "freshness": "aging",
+                "next_action": "score and synthesize",
+                "operator_now": False,
+                "operator_lane_label": "",
+                "operator_priority": "",
+                "board_group": "flow",
+                "flow_lane_key": "challenge",
+                "flow_lane_label": "Challenge",
+                "flow_lane_order": 2,
+            },
+        ],
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/active-hypotheses", "GET")
+    response = endpoint(
+        _build_get_request(
+            "/fragments/research/active-hypotheses",
+            {"active_view": "operator", "chain_id": "chain-flow"},
+        ),
+        active_view="operator",
+        chain_id="chain-flow",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Selected Chain Outside Slice" in body
+    assert "AAPL is selected in the workbench but hidden by this slice." in body
+    assert "Switch this board to Board Focus" in body
+    assert "reveal the selected chain" in body
+    assert "Show In Board Focus" in body
+
+
+def test_research_active_hypotheses_fragment_renders_selected_visible_slice_state(monkeypatch):
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "active_hypotheses",
+        lambda limit=20: [
+            {
+                "chain_id": "chain-flow",
+                "ticker": "AAPL",
+                "edge_family": "underreaction_revision",
+                "stage": "challenge",
+                "stage_group": "challenge",
+                "outcome": "revise",
+                "score": 72.5,
+                "created_at": "2026-03-09T09:00:00Z",
+                "updated_at": "2026-03-09T10:35:00Z",
+                "updated_label": "50m ago",
+                "created_label": "2h ago",
+                "freshness": "aging",
+                "next_action": "score and synthesize",
+                "operator_now": False,
+                "operator_lane_label": "",
+                "operator_priority": "",
+                "board_group": "flow",
+                "flow_lane_key": "challenge",
+                "flow_lane_label": "Challenge",
+                "flow_lane_order": 2,
+            },
+        ],
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/active-hypotheses", "GET")
+    response = endpoint(
+        _build_get_request(
+            "/fragments/research/active-hypotheses",
+            {"active_view": "flow", "chain_id": "chain-flow"},
+        ),
+        active_view="flow",
+        chain_id="chain-flow",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Selected in slice: AAPL (1 of 1)." in body
+    assert "This is the only visible chain in the current slice." in body
+    assert "window.syncResearchWorkbench('chain-flow', 'all', 'flow')" in body
+
+
+def test_research_focus_ribbon_fragment_renders_selected_chain(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="evt-1",
+            chain_id="chain-focus",
+            version=1,
+            artifact_type=ArtifactType.EVENT_CARD,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="tester",
+            body={
+                "source_ids": ["news:1"],
+                "source_class": "news_wire",
+                "source_credibility": 0.9,
+                "event_timestamp": "2026-03-09T10:55:00Z",
+                "corroboration_count": 1,
+                "claims": ["Revenue beat"],
+                "affected_instruments": ["AAPL"],
+                "market_implied_prior": "neutral",
+                "materiality": "high",
+                "time_sensitivity": "days",
+                "raw_content_hash": "abc123",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-focus",
+            version=2,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:04:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fals-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 84.0,
+                "penalties": {"crowding": -4.0},
+                "final_score": 80.0,
+                "outcome": "promote",
+                "outcome_reason": "Ready for experiment",
+                "blocking_objections": [],
+                "next_stage": "pilot",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-focus",
+            version=3,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="AAPL",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:05:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "AAPL", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "fixed_fraction", "target_risk_pct": 1.0},
+                "entry_rules": ["enter on confirmation"],
+                "exit_rules": ["stop on invalidation"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 3.0},
+                "kill_criteria": ["guidance reversal"],
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-focus": chain})
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+
+    endpoint = _route_endpoint("/fragments/research/focus-ribbon", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/focus-ribbon", {"queue_lane": "pilot", "active_view": "operator"}),
+        chain_id="chain-focus",
+        queue_lane="pilot",
+        active_view="operator",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Current Focus" in body
+    assert "Selected Chain" in body
+    assert "Action Readiness" in body
+    assert "Pilot Sign-Off" in body
+    assert 'data-auto-queue-sync="true"' in body
+    assert 'data-focus-queue-lane="pilot"' in body
+    assert 'data-focus-active-view="operator"' in body
+    assert "Current queue already matches this chain's current lane." in body
+    assert "Board Slice" in body
+    assert "Current board already matches this chain's working slice." in body
+    assert "Clear Focus" in body
+    assert "AAPL" in body
+    assert "Trade Sheet" in body
+    assert "pilot" in body
+    assert "approve or reject pilot" in body
+    assert "Approve Pilot" in body
+    assert "Reject Pilot" in body
+    assert "Jump To Timeline" in body
+
+
+def test_research_focus_ribbon_fragment_renders_recommended_chain(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 0, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 0},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "operating_summary",
+        lambda: {
+            "focus_title": "Research loop flowing",
+            "focus_detail": "Latest chain is NVDA in challenge and was updated 12m ago.",
+            "focus_tone": "clear",
+            "focus_anchor": "#research-loop",
+            "active_chain_count": 1,
+            "freshness_counts": {"fresh": 1, "aging": 0, "stale": 0},
+            "pending_review_count": 0,
+            "urgent_review_count": 0,
+            "watch_review_count": 0,
+            "pilot_ready_count": 0,
+            "review_pending_stage_count": 0,
+            "latest_chain": {
+                "chain_id": "chain-latest",
+                "ticker": "NVDA",
+                "engine": "engine_b",
+                "stage": "challenge",
+                "freshness": "fresh",
+                "next_action": "challenge and score",
+                "updated_label": "12m ago",
+                "created_label": "34m ago",
+            },
+            "latest_decision": None,
+            "generated_at": "2026-03-09T12:00:00Z",
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/focus-ribbon", "GET")
+    response = endpoint(_build_get_request("/fragments/research/focus-ribbon"))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Recommended Focus" in body
+    assert "Load Suggested Chain" in body
+    assert 'data-auto-queue-sync="false"' in body
+    assert 'data-focus-active-view="flow"' in body
+    assert "NVDA" in body
+    assert "challenge" in body
+    assert "challenge and score" in body
+    assert "window.setResearchQueueAndActiveView('all', 'flow', false)" in body
+
+
+def test_research_focus_ribbon_recommends_next_queue_item_over_latest_chain(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "_get_research_alerts_context",
+        lambda: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-2",
+                    "chain_id": "chain-review",
+                    "strategy_id": "carry",
+                    "health_status": "warning",
+                    "flags": ["drawdown"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:05:00Z",
+                    "created_label": "10m ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [],
+            "rebalance_items": [],
+            "kill_alerts": [],
+            "lane_counts": {"reviews": 1, "pilots": 0, "rebalances": 0, "retirements": 0, "total_pending": 1},
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "operating_summary",
+        lambda: {
+            "focus_title": "Research loop flowing",
+            "focus_detail": "Latest chain is NVDA in challenge and was updated 12m ago.",
+            "focus_tone": "clear",
+            "focus_anchor": "#research-loop",
+            "active_chain_count": 1,
+            "freshness_counts": {"fresh": 1, "aging": 0, "stale": 0},
+            "pending_review_count": 1,
+            "urgent_review_count": 0,
+            "watch_review_count": 1,
+            "pilot_ready_count": 0,
+            "review_pending_stage_count": 0,
+            "latest_chain": {
+                "chain_id": "chain-latest",
+                "ticker": "NVDA",
+                "engine": "engine_b",
+                "stage": "challenge",
+                "freshness": "fresh",
+                "next_action": "challenge and score",
+                "updated_label": "12m ago",
+                "created_label": "34m ago",
+            },
+            "latest_decision": None,
+            "generated_at": "2026-03-09T12:00:00Z",
+            "error": "",
+        },
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/focus-ribbon", "GET")
+    response = endpoint(_build_get_request("/fragments/research/focus-ribbon"))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Recommended Focus" in body
+    assert "Open the next review lane item" in body
+    assert "carry" in body
+    assert "Review Lane" in body
+    assert "Priority: watch" in body
+    assert "Open Next Review" in body
+    assert "Open Decision Queue" in body
+    assert 'data-focus-queue-lane="review"' in body
+    assert 'data-focus-active-view="operator"' in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator', false)" in body
+
+
+def test_research_focus_ribbon_prioritizes_review_over_older_pilot_readiness(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-review-pilot",
+            version=1,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T08:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "NVDA", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "fixed_fraction", "target_risk_pct": 1.0},
+                "entry_rules": ["enter on confirmation"],
+                "exit_rules": ["stop on invalidation"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 3.0},
+                "kill_criteria": ["guidance reversal"],
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-review-pilot",
+            version=2,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T08:01:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fals-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 84.0,
+                "penalties": {"crowding": -4.0},
+                "final_score": 80.0,
+                "outcome": "promote",
+                "outcome_reason": "Ready for experiment",
+                "blocking_objections": [],
+                "next_stage": "pilot",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review-pilot",
+            version=3,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T08:02:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "nvda-research",
+                "trigger_source": "decay_detector",
+                "health_status": "warning",
+                "flags": ["capacity"],
+                "recommended_action": "park",
+                "operator_ack": False,
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review-pilot": chain})
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+
+    endpoint = _route_endpoint("/fragments/research/focus-ribbon", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/focus-ribbon"),
+        chain_id="chain-review-pilot",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Review acknowledgement pending" in body
+    assert "Open Review Workbench" in body
+    assert "window.setResearchQueueAndActiveView('review', 'operator')" in body
+    assert "Approve Pilot" not in body
+
+
+def test_research_focus_ribbon_prioritizes_latest_rebalance_over_older_review(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="review-1",
+            chain_id="chain-review-rebalance",
+            version=1,
+            artifact_type=ArtifactType.REVIEW_TRIGGER,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T08:00:00Z",
+            created_by="system",
+            body={
+                "strategy_id": "es-trend",
+                "trigger_source": "decay_detector",
+                "health_status": "warning",
+                "flags": ["turnover"],
+                "recommended_action": "revise",
+                "operator_ack": False,
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="rebalance-1",
+            chain_id="chain-review-rebalance",
+            version=2,
+            artifact_type=ArtifactType.REBALANCE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T08:05:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T08:05:00Z",
+                "current_positions": {"ES": 0.0},
+                "target_positions": {"ES": 1.0},
+                "deltas": {"ES": 1.0},
+                "estimated_cost": 0.0025,
+                "approval_status": "draft",
+                "decision_source": "system",
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-review-rebalance": chain})
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+
+    endpoint = _route_endpoint("/fragments/research/focus-ribbon", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/focus-ribbon"),
+        chain_id="chain-review-rebalance",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Rebalance decision pending" in body
+    assert "Execute Rebalance" in body
+    assert "Dismiss Rebalance" in body
+    assert "Open Review Workbench" not in body
+
+
+def test_research_alerts_fragment_renders_review_pilot_and_rebalance_lanes(monkeypatch):
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "alerts",
+        lambda limit=20: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-1",
+                    "chain_id": "chain-review",
+                    "strategy_id": "momentum",
+                    "health_status": "warning",
+                    "flags": ["win_rate_below_floor"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:00:00Z",
+                    "created_label": "1h ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [
+                {
+                    "chain_id": "chain-pilot",
+                    "ticker": "NVDA",
+                    "edge_family": "earnings_reaction",
+                    "outcome": "promote",
+                    "score": 84.0,
+                    "created_at": "2026-03-09T10:00:00Z",
+                    "updated_at": "2026-03-09T11:30:00Z",
+                    "created_label": "2h ago",
+                    "updated_label": "30m ago",
+                    "freshness": "aging",
+                    "priority": "watch",
+                    "next_action": "approve or reject pilot",
+                }
+            ],
+            "kill_alerts": [],
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_build_engine_a_rebalance_panel_context",
+        lambda: {
+            "rebalance": {
+                "artifact_id": "rebalance-1",
+                "chain_id": "chain-a",
+                "created_at": "2026-03-09T11:15:00Z",
+                "approval_status": "draft",
+                "decision_source": "system",
+                "estimated_cost": 0.0042,
+                "move_count": 2,
+                "executed": False,
+                "can_execute": True,
+                "can_dismiss": True,
+                "top_moves": [
+                    {"instrument": "ES", "delta": 1.0},
+                    {"instrument": "NQ", "delta": -1.0},
+                ],
+            },
+            "error": "",
+            "generated_at": "2026-03-09T12:00:00Z",
+        },
+    )
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-pilot",
+            version=1,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T10:55:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fals-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 84.0,
+                "penalties": {"crowding": -4.0},
+                "final_score": 80.0,
+                "outcome": "promote",
+                "outcome_reason": "Ready for pilot",
+                "blocking_objections": [],
+                "next_stage": "pilot",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-pilot",
+            version=2,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "NVDA", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "fixed_fraction", "target_risk_pct": 1.0},
+                "entry_rules": ["enter on confirmation"],
+                "exit_rules": ["stop on invalidation"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 3.0},
+                "kill_criteria": ["guidance reversal"],
+            },
+        ),
+    ]
+    monkeypatch.setattr(server, "ArtifactStore", lambda: FakeArtifactStore(chains={"chain-pilot": chain}))
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/alerts", "GET")
+    response = endpoint(_build_get_request("/fragments/research/alerts"))
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Queue Focus" in body
+    assert "All Lanes" in body
+    assert "Review Lane" in body
+    assert "Pilot Lane" in body
+    assert "Rebalance Lane" in body
+    assert "Retirements" in body
+    assert "data-queue-lane-section" in body
+    assert "Approve Pilot" in body
+    assert "Reject Pilot" in body
+    assert "Execute Rebalance" in body
+    assert "Dismiss Rebalance" in body
+    assert "window.syncResearchWorkbench('chain-review', 'review', 'operator')" in body
+    assert "window.syncResearchWorkbench('chain-pilot', 'pilot', 'operator')" in body
+    assert "window.syncResearchWorkbench('chain-a', 'rebalance', 'all')" in body
+
+
+def test_research_alerts_fragment_honors_initial_queue_lane(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="score-1",
+            chain_id="chain-pilot",
+            version=1,
+            artifact_type=ArtifactType.SCORING_RESULT,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T10:55:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "falsification_ref": "fals-1",
+                "dimension_scores": {"novelty": 14.0},
+                "raw_total": 84.0,
+                "penalties": {"crowding": -4.0},
+                "final_score": 80.0,
+                "outcome": "promote",
+                "outcome_reason": "Ready for pilot",
+                "blocking_objections": [],
+                "next_stage": "pilot",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="trade-1",
+            chain_id="chain-pilot",
+            version=2,
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_B,
+            ticker="NVDA",
+            edge_family=EdgeFamily.UNDERREACTION_REVISION,
+            created_at="2026-03-09T11:00:00Z",
+            created_by="tester",
+            body={
+                "hypothesis_ref": "hyp-1",
+                "experiment_ref": "exp-1",
+                "instruments": [{"ticker": "NVDA", "instrument_type": "equity", "broker": "ibkr"}],
+                "sizing": {"method": "fixed_fraction", "target_risk_pct": 1.0},
+                "entry_rules": ["enter on confirmation"],
+                "exit_rules": ["stop on invalidation"],
+                "holding_period_target": "days",
+                "risk_limits": {"max_loss_pct": 3.0},
+                "kill_criteria": ["guidance reversal"],
+            },
+        ),
+    ]
+    monkeypatch.setattr(server, "ArtifactStore", lambda: FakeArtifactStore(chains={"chain-pilot": chain}))
+    monkeypatch.setattr(
+        server.research_dashboard,
+        "alerts",
+        lambda limit=20: {
+            "pending_reviews": [
+                {
+                    "artifact_id": "review-1",
+                    "chain_id": "chain-review",
+                    "strategy_id": "momentum",
+                    "health_status": "warning",
+                    "flags": ["win_rate_below_floor"],
+                    "recommended_action": "park",
+                    "created_at": "2026-03-09T11:00:00Z",
+                    "created_label": "1h ago",
+                    "priority": "watch",
+                }
+            ],
+            "pending_pilots": [
+                {
+                    "chain_id": "chain-pilot",
+                    "ticker": "NVDA",
+                    "edge_family": "earnings_reaction",
+                    "outcome": "promote",
+                    "score": 84.0,
+                    "created_at": "2026-03-09T10:00:00Z",
+                    "updated_at": "2026-03-09T11:30:00Z",
+                    "created_label": "2h ago",
+                    "updated_label": "30m ago",
+                    "freshness": "aging",
+                    "priority": "watch",
+                    "next_action": "approve or reject pilot",
+                }
+            ],
+            "kill_alerts": [],
+        },
+    )
+    monkeypatch.setattr(
+        server,
+        "_build_engine_a_rebalance_panel_context",
+        lambda: {
+            "rebalance": {
+                "artifact_id": "rebalance-1",
+                "chain_id": "chain-a",
+                "created_at": "2026-03-09T11:15:00Z",
+                "approval_status": "draft",
+                "decision_source": "system",
+                "estimated_cost": 0.0042,
+                "move_count": 2,
+                "executed": False,
+                "can_execute": True,
+                "can_dismiss": True,
+                "top_moves": [
+                    {"instrument": "ES", "delta": 1.0},
+                    {"instrument": "NQ", "delta": -1.0},
+                ],
+            },
+            "error": "",
+            "generated_at": "2026-03-09T12:00:00Z",
+        },
+    )
+    monkeypatch.setattr(server, "_get_cached_value", lambda key, ttl_seconds, loader, stale_on_error=True: loader())
+
+    endpoint = _route_endpoint("/fragments/research/alerts", "GET")
+    response = endpoint(
+        _build_get_request("/fragments/research/alerts", {"queue_lane": "pilot", "chain_id": "chain-pilot"}),
+        queue_lane="pilot",
+        chain_id="chain-pilot",
+    )
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert 'data-queue-lane-button="pilot"' in body
+    assert 'aria-pressed="true"' in body
+    assert 'data-queue-lane-button="all"' in body
+    assert 'aria-pressed="false"' in body
+    assert "Queue Following Selected Chain" in body
+    assert "NVDA" in body
+    assert "Pilot sign-off pending" in body
+    assert "Trade Sheet" in body
+    assert "approve or reject pilot" in body
+    assert "Open Selected Chain" in body
+    assert "Clear Focus" in body
+    assert "chain-pi" in body
+    assert "window.syncResearchWorkbench('chain-pilot', 'pilot', 'operator')" in body
+    assert 'id="research-queue-review" data-queue-lane-section data-queue-lane="review" class="hidden"' in body
+    assert 'id="research-queue-pilot" data-queue-lane-section data-queue-lane="pilot"' in body
 
 
 def test_research_execute_rebalance_action_records_manual_trade_and_execution(monkeypatch):

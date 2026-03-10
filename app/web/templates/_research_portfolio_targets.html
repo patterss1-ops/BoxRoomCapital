@@ -1,16 +1,64 @@
 <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
-  <div class="flex justify-between items-baseline gap-4 mb-3">
-    <div>
-      <h2 class="text-lg font-semibold text-gray-800">Portfolio Targets</h2>
-      <p class="text-gray-400 text-sm">Current versus target Engine A positions.</p>
-    </div>
-    {% if created_at %}
-      <p class="text-xs text-gray-400 font-mono">{{ created_at }}</p>
+  {% set ns = namespace(non_zero_moves=0) %}
+  {% for row in rows %}
+    {% if row.delta != 0 %}
+      {% set ns.non_zero_moves = ns.non_zero_moves + 1 %}
     {% endif %}
+  {% endfor %}
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
+    <div>
+      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Portfolio Expression</p>
+      <h2 class="text-lg font-semibold text-gray-800">Portfolio Targets</h2>
+      <p class="text-gray-400 text-sm">Where accepted research becomes position intent.</p>
+    </div>
+    <div class="flex items-center gap-2">
+      {% if approval_status %}
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if approval_status in ['approved', 'executed'] %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif approval_status in ['pending', 'draft', 'review'] %}bg-amber-500/15 text-amber-500 border-amber-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ approval_status }}</span>
+      {% endif %}
+      {% if created_at %}
+        <p class="text-xs text-gray-400 font-mono">{{ created_at }}</p>
+      {% endif %}
+    </div>
   </div>
   {% if error %}
     <p class="text-sm text-amber-600">{{ error }}</p>
   {% elif rows %}
+    <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Instruments</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ rows|length }}</p>
+        <p class="mt-1 text-xs text-gray-500">Names represented in the latest rebalance sheet.</p>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Active Changes</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ ns.non_zero_moves }}</p>
+        <p class="mt-1 text-xs text-gray-500">Positions that will actually move.</p>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Estimated Cost</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ "%.4f"|format(estimated_cost) if estimated_cost is not none else "-" }}</p>
+        <p class="mt-1 text-xs text-gray-500">Cost estimate attached to the proposal.</p>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Chain Ref</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{% if chain_id %}{{ chain_id[:8] }}{% else %}-{% endif %}</p>
+        <p class="mt-1 text-xs text-gray-500">Trace back to the source research chain.</p>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+      <p class="text-xs text-gray-500">The table below shows current positions, proposed targets, and the action implied by the latest Engine A output.</p>
+      {% if chain_id %}
+        <button
+          class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+          hx-get="/fragments/research/artifact-chain/{{ chain_id }}"
+          hx-target="#research-artifact-chain-viewer"
+          hx-swap="innerHTML"
+          hx-on::after-request="window.syncResearchWorkbench('{{ chain_id }}', 'rebalance', 'all')"
+        >Open rebalance chain</button>
+      {% endif %}
+    </div>
+
     <div class="overflow-x-auto">
       <table class="w-full text-sm text-left">
         <thead>
@@ -19,6 +67,7 @@
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Current</th>
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Target</th>
             <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Delta</th>
+            <th class="text-gray-400 text-xs uppercase tracking-wide font-semibold px-2 py-2 border-b border-gray-200">Intent</th>
           </tr>
         </thead>
         <tbody>
@@ -29,6 +78,15 @@
               <td class="text-gray-700 px-2 py-2 border-b border-gray-200">{{ "%.2f"|format(row.target_position) }}</td>
               <td class="px-2 py-2 border-b border-gray-200 {% if row.delta > 0 %}text-emerald-600{% elif row.delta < 0 %}text-red-600{% else %}text-gray-600{% endif %}">
                 {{ "%.2f"|format(row.delta) }}
+              </td>
+              <td class="px-2 py-2 border-b border-gray-200 text-gray-600">
+                {% if row.delta > 0 %}
+                  Increase
+                {% elif row.delta < 0 %}
+                  Reduce
+                {% else %}
+                  Hold
+                {% endif %}
               </td>
             </tr>
           {% endfor %}

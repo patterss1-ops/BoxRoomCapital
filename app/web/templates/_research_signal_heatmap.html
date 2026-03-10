@@ -1,16 +1,50 @@
 <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
-  <div class="flex justify-between items-baseline gap-4 mb-3">
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-3">
     <div>
+      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Signal Stack</p>
       <h2 class="text-lg font-semibold text-gray-800">Signal Heatmap</h2>
-      <p class="text-gray-400 text-sm">Latest Engine A signal set.</p>
+      <p class="text-gray-400 text-sm">Cross-market inputs feeding the current Engine A portfolio stance.</p>
     </div>
-    {% if as_of %}
-      <p class="text-xs text-gray-400 font-mono">{{ as_of }}</p>
-    {% endif %}
+    <div class="flex items-center gap-2">
+      {% if chain_id %}
+        <button
+          class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+          hx-get="/fragments/research/artifact-chain/{{ chain_id }}"
+          hx-target="#research-artifact-chain-viewer"
+          hx-swap="innerHTML"
+          hx-on::after-request="window.syncResearchWorkbench('{{ chain_id }}', 'rebalance', 'all')"
+        >Open signal chain</button>
+      {% endif %}
+      {% if as_of %}
+        <p class="text-xs text-gray-400 font-mono">{{ as_of }}</p>
+      {% endif %}
+    </div>
   </div>
   {% if error %}
     <p class="text-sm text-amber-600">{{ error }}</p>
   {% elif rows %}
+    <div class="grid grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Instruments</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ rows|length }}</p>
+        <p class="mt-1 text-xs text-gray-500">Markets with active signal coverage.</p>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Signal Families</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ signal_columns|length }}</p>
+        <p class="mt-1 text-xs text-gray-500">{{ signal_columns | join(", ") }}</p>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Strongest Forecast</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ rows[0].instrument if rows else "-" }}</p>
+        <p class="mt-1 text-xs text-gray-500">{{ "%.2f"|format(rows[0].combined_forecast) if rows and rows[0].combined_forecast is not none else "-" }}</p>
+      </div>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Research Tie-In</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{% if chain_id %}linked{% else %}unlinked{% endif %}</p>
+        <p class="mt-1 text-xs text-gray-500">Inspect the artifact chain for upstream regime context.</p>
+      </div>
+    </div>
     <div class="overflow-x-auto">
       <table class="w-full text-sm text-left">
         <thead>

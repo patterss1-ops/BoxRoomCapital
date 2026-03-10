@@ -1,15 +1,208 @@
-<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg" data-selected-active-view="{{ selected_active_view }}">
   <div class="flex justify-between items-baseline gap-4 mb-3">
     <div>
       <h2 class="text-lg font-semibold text-gray-800">Research Operator Output</h2>
-      <p class="text-gray-400 text-sm">On-demand synthesis, pilot sign-off, and post-mortem results for the selected chain.</p>
+      <p class="text-gray-400 text-sm">Primary action surface for syntheses, sign-offs, rebalance decisions, and post-mortems.</p>
     </div>
     <p class="text-xs text-gray-400 font-mono">{{ generated_at }}</p>
   </div>
 
+  <div class="mb-4 border border-gray-200 rounded-lg bg-gray-50 p-3">
+    <div class="flex justify-between gap-3 items-start">
+      <div>
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Workbench State</p>
+        {% if error %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Last operator action returned an error.</p>
+          <p class="mt-1 text-xs text-gray-500">Fix the issue in the active chain, then retry.</p>
+        {% elif operator_action %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Operator action recorded and artifacts refreshed.</p>
+          <p class="mt-1 text-xs text-gray-500">Use the updated chain to verify the new state before moving on.</p>
+        {% elif pilot_decision %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Pilot sign-off is now part of the chain record.</p>
+          <p class="mt-1 text-xs text-gray-500">The chain can now move into review, execution, or post-mortem handling.</p>
+        {% elif post_mortem %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Post-mortem captured for later learning and archive review.</p>
+          <p class="mt-1 text-xs text-gray-500">Use archive search if you want to compare similar failures later.</p>
+        {% elif synthesis %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Synthesis prepared for an operator decision.</p>
+          <p class="mt-1 text-xs text-gray-500">Review the chain and decide whether to approve, reject, or document follow-up.</p>
+        {% elif queued_intake %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Manual intake queued for Engine B.</p>
+          <p class="mt-1 text-xs text-gray-500">The worker will create a chain asynchronously; watch Active Chains and the decision workbench for progression.</p>
+        {% elif queue_follow_up and not chain_id %}
+          {% if queue_follow_up.mode == "next_item" %}
+            <p class="mt-1 text-sm font-semibold text-gray-800">Queue is ready for the next operator call.</p>
+            <p class="mt-1 text-xs text-gray-500">Open the suggested {{ queue_follow_up.lane_label|lower }} item directly from the workbench instead of scanning the queue first.</p>
+          {% else %}
+            <p class="mt-1 text-sm font-semibold text-gray-800">{{ queue_follow_up.title }}</p>
+            <p class="mt-1 text-xs text-gray-500">{{ queue_follow_up.detail }}</p>
+          {% endif %}
+        {% elif active_chain %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Selected chain is loaded and ready for an operator call.</p>
+          <p class="mt-1 text-xs text-gray-500">The workbench now mirrors the chain posture so you can act here without bouncing back to the viewer first.</p>
+        {% elif chain_id %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Chain selected, but the chain could not be loaded.</p>
+          <p class="mt-1 text-xs text-gray-500">Refresh the chain or pick another row from Active Chains or the archive.</p>
+        {% else %}
+          <p class="mt-1 text-sm font-semibold text-gray-800">Waiting for a chain action.</p>
+          <p class="mt-1 text-xs text-gray-500">This panel fills when you synthesize, approve, reject, execute, or write a post-mortem.</p>
+        {% endif %}
+      </div>
+      <div class="text-right">
+        {% if operator_action %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">{{ operator_action.status }}</span>
+        {% elif pilot_decision %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if pilot_decision.body.approved %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% else %}bg-red-500/15 text-red-500 border-red-500/30{% endif %}">{{ pilot_decision.body.operator_decision }}</span>
+        {% elif post_mortem %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">post_mortem</span>
+        {% elif synthesis %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">synthesis</span>
+        {% elif queued_intake %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">queued</span>
+        {% elif active_chain %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border {% if active_chain.operator_posture_tone == 'positive' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif active_chain.operator_posture_tone == 'warning' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% elif active_chain.operator_posture_tone == 'negative' %}bg-red-500/15 text-red-500 border-red-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ active_chain.next_lane }}</span>
+        {% elif error %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-red-500/15 text-red-500 border-red-500/30">error</span>
+        {% else %}
+          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">idle</span>
+        {% endif %}
+        <p class="mt-2 text-xs font-mono text-gray-500">{% if chain_id %}chain {{ chain_id[:8] }}{% else %}no active chain{% endif %}</p>
+        <p class="mt-1 text-xs text-gray-400">queue {{ selected_queue_label }}</p>
+        <p class="mt-1 text-xs text-gray-400">board {{ selected_active_view_label }}</p>
+      </div>
+    </div>
+  </div>
+
   {% if error %}
     <p class="text-sm text-amber-600">{{ error }}</p>
-  {% elif synthesis %}
+  {% endif %}
+
+  {% if queue_follow_up and (operator_action or pilot_decision or post_mortem or synthesis or (not active_chain and not chain_id and not queued_intake)) %}
+    <div class="mb-4 border border-blue-200 rounded-lg bg-blue-50 p-3">
+      <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+        <div>
+          {% if queue_follow_up.mode == "next_item" %}
+            <p class="text-[11px] uppercase tracking-wide text-blue-700">{% if operator_action or pilot_decision or post_mortem or synthesis %}Next Up In {{ queue_follow_up.lane_label }}{% else %}Suggested Queue Entry{% endif %}</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">{{ queue_follow_up.title }}</p>
+            <p class="mt-1 text-xs text-gray-500">{{ queue_follow_up.detail }}</p>
+          {% else %}
+            <p class="text-[11px] uppercase tracking-wide text-blue-700">Lane Clear</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">{{ queue_follow_up.title }}</p>
+            <p class="mt-1 text-xs text-gray-500">{{ queue_follow_up.detail }}</p>
+          {% endif %}
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            {% if queue_follow_up.mode == "next_item" %}
+              <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                <span class="font-semibold uppercase tracking-wide text-gray-500">{{ queue_follow_up.status_label }}</span>
+                <span class="text-gray-700">{{ queue_follow_up.status_value }}</span>
+              </span>
+              <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                <span class="font-semibold uppercase tracking-wide text-gray-500">{{ queue_follow_up.meta_label }}</span>
+                <span class="text-gray-700">{{ queue_follow_up.meta_value }}</span>
+              </span>
+              <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                <span class="font-semibold uppercase tracking-wide text-gray-500">Priority</span>
+                <span class="text-gray-700">{{ queue_follow_up.priority }}</span>
+              </span>
+              <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                <span class="font-semibold uppercase tracking-wide text-gray-500">Board Slice</span>
+                <span class="text-gray-700">{{ queue_follow_up.active_view_label }}</span>
+              </span>
+            {% else %}
+              <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                <span class="font-semibold uppercase tracking-wide text-gray-500">Cleared</span>
+                <span class="text-gray-700">{{ queue_follow_up.current_label }}</span>
+              </span>
+              {% if queue_follow_up.next_label %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Next Lane</span>
+                  <span class="text-gray-700">{{ queue_follow_up.next_label }}</span>
+                </span>
+              {% endif %}
+              {% if queue_follow_up.next_active_view_label %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Board Slice</span>
+                  <span class="text-gray-700">{{ queue_follow_up.next_active_view_label }}</span>
+                </span>
+              {% endif %}
+              {% if queue_follow_up.next_count %}
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Remaining</span>
+                  <span class="text-gray-700">{{ queue_follow_up.next_count }}</span>
+                </span>
+              {% endif %}
+            {% endif %}
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          {% if queue_follow_up.mode == "next_item" %}
+            <button
+              type="button"
+              onclick="window.returnResearchToQueue('{{ queue_follow_up.lane }}', '{{ queue_follow_up.active_view }}')"
+              class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+            >Focus {{ queue_follow_up.lane_label }}</button>
+            <button
+              class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded-lg border border-blue-500 transition-colors text-xs"
+              onclick="window.setResearchQueueAndActiveView('{{ queue_follow_up.lane }}', '{{ queue_follow_up.active_view }}', false)"
+              hx-get="/fragments/research/artifact-chain/{{ queue_follow_up.chain_id }}"
+              hx-target="#research-artifact-chain-viewer"
+              hx-swap="innerHTML"
+              hx-on::after-request="window.syncResearchWorkbench('{{ queue_follow_up.chain_id }}', '{{ queue_follow_up.lane }}', '{{ queue_follow_up.active_view }}')"
+            >{{ queue_follow_up.open_label }}</button>
+          {% elif queue_follow_up.primary_action_mode == "lane" %}
+            <button
+              type="button"
+              onclick="window.returnResearchToQueue('{{ queue_follow_up.next_lane }}', '{{ queue_follow_up.next_active_view }}')"
+              class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded-lg border border-blue-500 transition-colors text-xs"
+            >{{ queue_follow_up.primary_action_label }}</button>
+          {% else %}
+            <a
+              href="#research-intake"
+              class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded-lg border border-blue-500 transition-colors text-xs"
+            >{{ queue_follow_up.primary_action_label }}</a>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
+  {% if not error and queued_intake %}
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Job</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ queued_intake.job_id[:8] }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Source Class</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ queued_intake.source_class }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Credibility</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ "%.2f"|format(queued_intake.source_credibility) if queued_intake.source_credibility is not none else "-" }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Queue Depth</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ queued_intake.queue_depth }}</p>
+      </div>
+    </div>
+    <div class="mt-3 border border-gray-200 rounded-lg p-3">
+      <div class="flex justify-between gap-3 items-baseline">
+        <p class="text-sm font-semibold text-gray-800">Engine B Intake Queued</p>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">queued</span>
+      </div>
+      <p class="mt-2 text-sm text-gray-600">The intake has been queued. The chain will appear once the worker persists the first artifacts.</p>
+      <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2">
+        <div class="grid grid-cols-[100px_1fr] gap-2 items-start">
+          <span class="text-xs uppercase tracking-wide text-gray-400">Source IDs</span>
+          <span class="text-sm text-gray-700">{{ queued_intake.source_ids | join(", ") }}</span>
+        </div>
+        <div class="grid grid-cols-[100px_1fr] gap-2 items-start">
+          <span class="text-xs uppercase tracking-wide text-gray-400">Preview</span>
+          <span class="text-sm text-gray-700">{{ queued_intake.content_preview }}</span>
+        </div>
+      </div>
+    </div>
+  {% elif not error and synthesis %}
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
       <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
         <p class="text-[11px] uppercase tracking-wide text-gray-400">Chain</p>
@@ -35,15 +228,23 @@
       </div>
       <p class="mt-2 text-sm text-gray-600 whitespace-pre-wrap">{{ synthesis.summary }}</p>
     </div>
-    <div class="mt-3 flex justify-end">
+    <div class="mt-3 flex justify-end gap-2">
+      {% if synthesis.chain_id %}
+        <button
+          type="button"
+          onclick="window.returnResearchToQueue('{{ selected_queue_lane }}', '{{ return_to_active_view }}')"
+          class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        >{{ return_to_queue_label }}</button>
+      {% endif %}
       <button
         class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
         hx-get="/fragments/research/artifact-chain/{{ synthesis.chain_id }}"
         hx-target="#research-artifact-chain-viewer"
         hx-swap="innerHTML"
+        hx-on::after-request="window.syncResearchWorkbench('{{ synthesis.chain_id }}', '{{ selected_queue_lane }}', '{{ selected_active_view }}')"
       >Refresh Chain</button>
     </div>
-  {% elif operator_action %}
+  {% elif not error and operator_action %}
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
       <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
         <p class="text-[11px] uppercase tracking-wide text-gray-400">Action</p>
@@ -55,7 +256,7 @@
       </div>
       <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
         <p class="text-[11px] uppercase tracking-wide text-gray-400">Chain</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ operator_action.chain_id[:8] }}</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ operator_action.chain_id[:8] if operator_action.chain_id else "-" }}</p>
       </div>
       <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
         <p class="text-[11px] uppercase tracking-wide text-gray-400">Artifacts</p>
@@ -91,15 +292,23 @@
         </div>
       {% endif %}
     </div>
-    <div class="mt-3 flex justify-end">
-      <button
-        class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
-        hx-get="/fragments/research/artifact-chain/{{ operator_action.chain_id }}"
-        hx-target="#research-artifact-chain-viewer"
-        hx-swap="innerHTML"
-      >Refresh Chain</button>
-    </div>
-  {% elif pilot_decision %}
+    {% if operator_action.chain_id %}
+      <div class="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick="window.returnResearchToQueue('{{ selected_queue_lane }}', '{{ return_to_active_view }}')"
+          class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        >{{ return_to_queue_label }}</button>
+        <button
+          class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+          hx-get="/fragments/research/artifact-chain/{{ operator_action.chain_id }}"
+          hx-target="#research-artifact-chain-viewer"
+          hx-swap="innerHTML"
+          hx-on::after-request="window.syncResearchWorkbench('{{ operator_action.chain_id }}', '{{ selected_queue_lane }}', '{{ selected_active_view }}')"
+        >Refresh Chain</button>
+      </div>
+    {% endif %}
+  {% elif not error and pilot_decision %}
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
       <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
         <p class="text-[11px] uppercase tracking-wide text-gray-400">Decision</p>
@@ -138,15 +347,21 @@
         <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ pilot_decision.body | tojson(indent=2) }}</pre>
       </details>
     </div>
-    <div class="mt-3 flex justify-end">
+    <div class="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick="window.returnResearchToQueue('{{ selected_queue_lane }}', '{{ return_to_active_view }}')"
+          class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        >{{ return_to_queue_label }}</button>
       <button
         class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
         hx-get="/fragments/research/artifact-chain/{{ pilot_decision.chain_id }}"
         hx-target="#research-artifact-chain-viewer"
         hx-swap="innerHTML"
+        hx-on::after-request="window.syncResearchWorkbench('{{ pilot_decision.chain_id }}', '{{ selected_queue_lane }}', '{{ selected_active_view }}')"
       >Refresh Chain</button>
     </div>
-  {% elif post_mortem %}
+  {% elif not error and post_mortem %}
     <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
       <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
         <p class="text-[11px] uppercase tracking-wide text-gray-400">Artifact</p>
@@ -185,18 +400,296 @@
         <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ post_mortem.body | tojson(indent=2) }}</pre>
       </details>
     </div>
-    <div class="mt-3 flex justify-end">
+    <div class="mt-3 flex justify-end gap-2">
+        <button
+          type="button"
+          onclick="window.returnResearchToQueue('{{ selected_queue_lane }}', '{{ return_to_active_view }}')"
+          class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        >{{ return_to_queue_label }}</button>
       <button
         class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
         hx-get="/fragments/research/artifact-chain/{{ post_mortem.chain_id }}"
         hx-target="#research-artifact-chain-viewer"
         hx-swap="innerHTML"
+        hx-on::after-request="window.syncResearchWorkbench('{{ post_mortem.chain_id }}', '{{ selected_queue_lane }}', '{{ selected_active_view }}')"
       >Refresh Chain</button>
     </div>
-  {% else %}
-    <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center">
-      <p class="text-sm text-gray-500">No operator output yet.</p>
-      <p class="mt-1 text-xs text-gray-400">Select a chain above, then run Synthesize or Generate Post-Mortem.</p>
+  {% elif not error and active_chain %}
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-3">
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Selected Chain</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800 font-mono">{{ active_chain.chain_id[:8] }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Latest Artifact</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.latest.artifact_label if active_chain.latest else "-" }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Next Lane</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.next_lane }}</p>
+      </div>
+      <div class="bg-gray-100 border border-gray-300 rounded-lg p-3">
+        <p class="text-[11px] uppercase tracking-wide text-gray-400">Lifecycle</p>
+        <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.lifecycle.completed_count }}/{{ active_chain.lifecycle.total_count }}</p>
+      </div>
+    </div>
+    <div class="mt-3 border border-gray-200 rounded-lg p-3">
+      <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+        <div>
+          <p class="text-sm font-semibold text-gray-800">Ready Actions</p>
+          <p class="mt-1 text-sm text-gray-600">{{ active_chain.operator_posture_detail }}</p>
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs">
+          <span class="inline-flex items-center rounded-full border border-gray-300 bg-gray-50 px-3 py-1 font-semibold uppercase tracking-wide text-gray-600">Latest {{ active_chain.latest_created_label }}</span>
+          <span class="inline-flex items-center rounded-full border border-gray-300 bg-gray-50 px-3 py-1 font-semibold uppercase tracking-wide text-gray-600">Next {{ active_chain.next_operator_move }}</span>
+        </div>
+      </div>
+
+      <div class="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Operator Posture</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.operator_posture_title }}</p>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Latest Type</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.latest.artifact_label if active_chain.latest else "-" }}</p>
+        </div>
+        <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Ticker</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.latest.ticker if active_chain.latest and active_chain.latest.ticker else "-" }}</p>
+        </div>
+      </div>
+
+      {% if queue_alignment %}
+        <div class="mt-3 rounded-lg border p-3 {% if queue_alignment.tone == 'warning' %}border-amber-200 bg-amber-50{% elif queue_alignment.tone == 'positive' %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+          <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+            <div>
+              <p class="text-[11px] uppercase tracking-wide {% if queue_alignment.tone == 'warning' %}text-amber-700{% elif queue_alignment.tone == 'positive' %}text-emerald-700{% else %}text-gray-500{% endif %}">Queue Alignment</p>
+              <p class="mt-1 text-sm font-semibold text-gray-800">{{ queue_alignment.title }}</p>
+              <p class="mt-1 text-xs text-gray-500">{{ queue_alignment.detail }}</p>
+              <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Current</span>
+                  <span class="text-gray-700">{{ queue_alignment.current_label }}</span>
+                </span>
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Preferred</span>
+                  <span class="text-gray-700">{{ queue_alignment.preferred_label }}</span>
+                </span>
+                <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+                  <span class="font-semibold uppercase tracking-wide text-gray-500">Board Slice</span>
+                  <span class="text-gray-700">{{ queue_alignment.preferred_active_view_label }}</span>
+                </span>
+              </div>
+            </div>
+            {% if queue_alignment.show_action %}
+              <button
+                type="button"
+                onclick="window.setResearchQueueAndActiveView('{{ queue_alignment.preferred_lane }}', '{{ queue_alignment.preferred_active_view }}')"
+                class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+              >{{ queue_alignment.action_label }}</button>
+            {% endif %}
+          </div>
+        </div>
+      {% endif %}
+
+      <div class="mt-4">
+        <div class="flex justify-between gap-3 items-baseline">
+          <p class="text-[11px] uppercase tracking-wide text-gray-400">Lane Focus</p>
+          <p class="text-xs text-gray-500">Primary lane is highlighted; other lanes show what is waiting or available next.</p>
+        </div>
+        <div class="mt-2 grid grid-cols-1 lg:grid-cols-4 gap-3">
+          <div class="rounded-lg border p-3 {% if active_chain.review_ack_pending %}border-amber-200 bg-amber-50{% elif active_chain.review_context %}border-gray-200 bg-gray-50{% else %}border-gray-200 bg-white{% endif %}">
+            <p class="text-[11px] uppercase tracking-wide {% if active_chain.review_ack_pending %}text-amber-700{% else %}text-gray-400{% endif %}">Review Lane</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">
+              {% if active_chain.review_ack_pending %}
+                pending
+              {% elif active_chain.review_context %}
+                recorded
+              {% else %}
+                idle
+              {% endif %}
+            </p>
+            <p class="mt-1 text-xs text-gray-500">
+              {% if active_chain.review_context %}
+                {{ active_chain.review_context.recommended_action or "review" }}{% if active_chain.review_context.flag_count %} · {{ active_chain.review_context.flag_count }} flag{% if active_chain.review_context.flag_count != 1 %}s{% endif %}{% endif %}
+              {% else %}
+                No review trigger on this chain.
+              {% endif %}
+            </p>
+          </div>
+          <div class="rounded-lg border p-3 {% if active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss %}border-emerald-200 bg-emerald-50{% elif active_chain.rebalance_context %}border-gray-200 bg-gray-50{% else %}border-gray-200 bg-white{% endif %}">
+            <p class="text-[11px] uppercase tracking-wide {% if active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss %}text-emerald-700{% else %}text-gray-400{% endif %}">Rebalance Lane</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">
+              {% if active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss %}
+                pending
+              {% elif active_chain.rebalance_executed %}
+                executed
+              {% elif active_chain.rebalance_context %}
+                recorded
+              {% else %}
+                idle
+              {% endif %}
+            </p>
+            <p class="mt-1 text-xs text-gray-500">
+              {% if active_chain.rebalance_context %}
+                {{ active_chain.rebalance_context.move_count }} move{% if active_chain.rebalance_context.move_count != 1 %}s{% endif %} · cost {{ "%.4f"|format(active_chain.rebalance_context.estimated_cost or 0.0) }}
+              {% else %}
+                No rebalance proposal on this chain.
+              {% endif %}
+            </p>
+          </div>
+          <div class="rounded-lg border p-3 {% if active_chain.pilot_signoff_pending %}border-purple-200 bg-purple-50{% elif active_chain.pilot_decision %}border-gray-200 bg-gray-50{% else %}border-gray-200 bg-white{% endif %}">
+            <p class="text-[11px] uppercase tracking-wide {% if active_chain.pilot_signoff_pending %}text-purple-700{% else %}text-gray-400{% endif %}">Pilot Lane</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">
+              {% if active_chain.pilot_signoff_pending %}
+                pending
+              {% elif active_chain.pilot_decision %}
+                {{ active_chain.pilot_decision.body.operator_decision }}
+              {% else %}
+                idle
+              {% endif %}
+            </p>
+            <p class="mt-1 text-xs text-gray-500">
+              {% if active_chain.pilot_signoff_pending %}
+                Trade expression is ready for approve / reject.
+              {% elif active_chain.pilot_decision %}
+                Pilot decision is already in the chain record.
+              {% else %}
+                No pilot sign-off needed yet.
+              {% endif %}
+            </p>
+          </div>
+          <div class="rounded-lg border p-3 {% if not active_chain.review_ack_pending and not (active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss) and not active_chain.pilot_signoff_pending %}border-blue-200 bg-blue-50{% elif active_chain.can_generate_post_mortem %}border-gray-200 bg-gray-50{% else %}border-gray-200 bg-white{% endif %}">
+            <p class="text-[11px] uppercase tracking-wide {% if not active_chain.review_ack_pending and not (active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss) and not active_chain.pilot_signoff_pending %}text-blue-700{% else %}text-gray-400{% endif %}">Synthesis Lane</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">
+              {% if not active_chain.review_ack_pending and not (active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss) and not active_chain.pilot_signoff_pending %}
+                active
+              {% elif active_chain.can_generate_post_mortem %}
+                available
+              {% else %}
+                waiting
+              {% endif %}
+            </p>
+            <p class="mt-1 text-xs text-gray-500">
+              {{ active_chain.next_operator_move }}.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {% if active_chain.review_context %}
+        <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-amber-700">Review Trigger</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">
+            {{ active_chain.review_context.health_status or "review" }}{% if active_chain.review_context.recommended_action %} -> {{ active_chain.review_context.recommended_action }}{% endif %}
+          </p>
+          <p class="mt-1 text-xs text-gray-500">
+            Source {{ active_chain.review_context.trigger_source or "system monitor" }}{% if active_chain.review_context.flag_count %} with {{ active_chain.review_context.flag_count }} flag{% if active_chain.review_context.flag_count != 1 %}s{% endif %}{% endif %}.
+          </p>
+        </div>
+      {% endif %}
+
+      {% if active_chain.rebalance_context %}
+        <div class="mt-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-emerald-700">Rebalance Proposal</p>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain.rebalance_context.move_count }} move{% if active_chain.rebalance_context.move_count != 1 %}s{% endif %} queued</p>
+          <p class="mt-1 text-xs text-gray-500">
+            Approval {{ active_chain.rebalance_context.approval_status or "draft" }}, estimated cost {{ "%.4f"|format(active_chain.rebalance_context.estimated_cost or 0.0) }}.
+          </p>
+        </div>
+      {% endif %}
+
+      <div class="mt-4 flex flex-wrap gap-2">
+        {% if active_chain.review_ack_pending %}
+          {% for decision in ["revise", "park", "reject", "promote"] %}
+            <form hx-post="/api/actions/research/review-ack" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')">
+              <input type="hidden" name="chain_id" value="{{ active_chain.chain_id }}" />
+              <input type="hidden" name="decision" value="{{ decision }}" />
+              <input type="hidden" name="notes" value="Workbench action: {{ decision }}" />
+              <button type="submit" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs uppercase tracking-wide">{{ decision }}</button>
+            </form>
+          {% endfor %}
+          <form hx-post="/api/actions/research/confirm-kill" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')">
+            <input type="hidden" name="chain_id" value="{{ active_chain.chain_id }}" />
+            <input type="hidden" name="notes" value="Workbench confirm-kill." />
+            <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Confirm Kill</button>
+          </form>
+          <form hx-post="/api/actions/research/override-kill" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')">
+            <input type="hidden" name="chain_id" value="{{ active_chain.chain_id }}" />
+            <input type="hidden" name="notes" value="Workbench override-kill." />
+            <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Override Kill</button>
+          </form>
+        {% elif active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss %}
+          {% if active_chain.rebalance_can_execute %}
+            <form hx-post="/api/actions/research/execute-rebalance" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')">
+              <input type="hidden" name="chain_id" value="{{ active_chain.chain_id }}" />
+              <input type="hidden" name="notes" value="Workbench execute rebalance." />
+              <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs">Execute Rebalance</button>
+            </form>
+          {% endif %}
+          {% if active_chain.rebalance_can_dismiss %}
+            <form hx-post="/api/actions/research/dismiss-rebalance" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')">
+              <input type="hidden" name="chain_id" value="{{ active_chain.chain_id }}" />
+              <input type="hidden" name="notes" value="Workbench dismiss rebalance." />
+              <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs">Dismiss Rebalance</button>
+            </form>
+          {% endif %}
+        {% else %}
+          <button
+            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+            hx-post="/api/actions/research/synthesize"
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ active_chain.chain_id }}"})'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')"
+          >Synthesize</button>
+        {% endif %}
+
+        {% if not active_chain.review_ack_pending and not (active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss) and active_chain.pilot_signoff_pending %}
+          <button
+            class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1 rounded-lg border border-emerald-500 transition-colors text-xs"
+            hx-post="/api/actions/research/pilot-approve"
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ active_chain.chain_id }}"})'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')"
+          >Approve Pilot</button>
+          <button
+            class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1 rounded-lg border border-red-500 transition-colors text-xs"
+            hx-post="/api/actions/research/pilot-reject"
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ active_chain.chain_id }}"})'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')"
+          >Reject Pilot</button>
+        {% endif %}
+
+        {% if not active_chain.review_ack_pending and not (active_chain.rebalance_can_execute or active_chain.rebalance_can_dismiss) and active_chain.can_generate_post_mortem %}
+          <button
+            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+            hx-post="/api/actions/research/post-mortem"
+            hx-vals='js:window.getResearchActionVals({chain_id:"{{ active_chain.chain_id }}"})'
+            hx-target="#research-operator-output"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.refreshResearchChainViewer('{{ active_chain.chain_id }}')"
+          >{% if active_chain.post_mortem_count %}Regenerate Post-Mortem{% else %}Generate Post-Mortem{% endif %}</button>
+        {% endif %}
+      </div>
+    </div>
+    <div class="mt-3 flex justify-end">
+      <button
+        class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        hx-get="/fragments/research/artifact-chain/{{ active_chain.chain_id }}"
+        hx-target="#research-artifact-chain-viewer"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.syncResearchWorkbench('{{ active_chain.chain_id }}', '{{ selected_queue_lane }}', '{{ selected_active_view }}')"
+      >Refresh Chain</button>
+    </div>
+  {% elif not error %}
+    <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center bg-gray-50">
+      <p class="text-sm text-gray-500">{% if chain_id %}No operator output yet for this chain.{% else %}No operator output yet.{% endif %}</p>
+      <p class="mt-1 text-xs text-gray-400">{% if chain_id %}Use the chain viewer actions to create the first synthesis or decision artifact for chain {{ chain_id[:8] }}.{% else %}Open a chain, then act from the workbench. Synthesis, pilot sign-off, rebalance execution, and post-mortems will land here.{% endif %}</p>
     </div>
   {% endif %}
 </section>

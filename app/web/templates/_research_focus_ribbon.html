@@ -1,0 +1,244 @@
+<section
+  class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg"
+  data-focus-queue-lane="{{ queue_filter }}"
+  data-focus-active-view="{{ active_view }}"
+  data-auto-queue-sync="{{ 'true' if mode == 'selected' else 'false' }}"
+  data-skip-focus-auto-sync="{{ 'true' if suppress_auto_sync else 'false' }}"
+  data-focus-chain-id="{{ chain_id }}"
+  {% if chain_id %}data-research-chain-card="{{ chain_id }}"{% endif %}
+>
+  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+    <div>
+      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-emerald-600">Current Focus</p>
+      <div class="mt-2 flex flex-wrap items-center gap-2">
+        <h2 class="text-lg font-semibold text-gray-900">
+          {% if mode == "selected" %}
+            Selected Chain
+          {% elif mode == "recommended" %}
+            Recommended Focus
+          {% else %}
+            {{ focus_label }}
+          {% endif %}
+        </h2>
+        {% if chain_id %}
+          <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-gray-300 bg-gray-50 text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+            {{ ticker or "Untickered" }}
+          </span>
+          <span data-selected-chain-badge class="hidden inline-flex items-center px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+            selected
+          </span>
+        {% endif %}
+      </div>
+      <p class="mt-2 text-sm font-semibold text-gray-800">{{ title }}</p>
+      <p class="mt-1 text-sm text-gray-500">{{ detail }}</p>
+      {% if error %}
+        <p class="mt-2 text-xs text-amber-600">{{ error }}</p>
+      {% endif %}
+    </div>
+    <div class="text-right">
+      <span class="inline-flex items-center px-2.5 py-1 rounded-full border text-xs font-semibold uppercase tracking-wide {% if tone == 'positive' or tone == 'clear' %}border-emerald-200 bg-emerald-50 text-emerald-700{% elif tone == 'warning' or tone == 'urgent' %}border-amber-200 bg-amber-50 text-amber-700{% elif tone == 'negative' %}border-red-200 bg-red-50 text-red-700{% elif tone == 'closed' %}border-gray-300 bg-gray-100 text-gray-600{% else %}border-gray-300 bg-gray-50 text-gray-600{% endif %}">
+        {{ next_lane }}
+      </span>
+      <p class="mt-2 text-xs font-mono text-gray-500">
+        {% if chain_id %}
+          chain {{ chain_id[:8] }}
+        {% else %}
+          no selected chain
+        {% endif %}
+      </p>
+      <p class="mt-1 text-xs text-gray-400">{{ generated_at }}</p>
+    </div>
+  </div>
+
+  <div class="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-3">
+    <div class="rounded-lg border border-blue-200 bg-blue-50 p-3">
+      <p class="text-[11px] uppercase tracking-wide text-blue-700">Chain</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ ticker or "-" }}</p>
+      <p class="mt-1 text-xs text-gray-500">{{ engine or "engine pending" }}</p>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-500">{{ latest_meta_label }}</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest_label }}</p>
+      <p class="mt-1 text-xs text-gray-500">{{ status_label }}: {{ status_value }}</p>
+    </div>
+    <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <p class="text-[11px] uppercase tracking-wide text-amber-700">Queue Lane</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ current_queue_label }}</p>
+      <p class="mt-1 text-xs text-gray-500">
+        {% if current_queue_matches_focus %}
+          {% if mode == "selected" %}
+            Current queue already matches this chain's current lane.
+          {% elif mode == "recommended" %}
+            Current queue already matches this recommendation.
+          {% else %}
+            Queue is currently open across the full surface.
+          {% endif %}
+        {% elif mode == "selected" %}
+          Current queue is {{ current_queue_label }}. This chain is asking for {{ queue_label }}.
+        {% elif mode == "recommended" %}
+          Current queue is {{ current_queue_label }}. Loading this recommendation will switch to {{ queue_label }}.
+        {% else %}
+          Current queue is {{ current_queue_label }}.
+        {% endif %}
+      </p>
+    </div>
+    <div class="rounded-lg border border-cyan-200 bg-cyan-50 p-3">
+      <p class="text-[11px] uppercase tracking-wide text-cyan-700">Board Slice</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ current_active_view_label }}</p>
+      <p class="mt-1 text-xs text-gray-500">
+        {% if current_active_view_matches_focus %}
+          {% if mode == "selected" %}
+            Current board already matches this chain's working slice.
+          {% elif mode == "recommended" %}
+            Current board already matches this recommendation.
+          {% else %}
+            Active Chains stays open across the full board until a chain is selected.
+          {% endif %}
+        {% elif mode == "selected" %}
+          Current board is {{ current_active_view_label }}. This chain's working slice is {{ active_view_label }}.
+        {% elif mode == "recommended" %}
+          Current board is {{ current_active_view_label }}. Loading this recommendation will switch to {{ active_view_label }}.
+        {% else %}
+          Current board is {{ current_active_view_label }}.
+        {% endif %}
+      </p>
+    </div>
+    <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+      <p class="text-[11px] uppercase tracking-wide text-emerald-700">Next Move</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">{{ next_operator_move }}</p>
+      <p class="mt-1 text-xs text-gray-500">{{ activity_label }}: {{ activity_value }}</p>
+    </div>
+    <div class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <p class="text-[11px] uppercase tracking-wide text-gray-500">Progress</p>
+      <p class="mt-1 text-sm font-semibold text-gray-800">
+        {% if artifact_count is not none %}
+          {{ artifact_count }} artifact{% if artifact_count != 1 %}s{% endif %}
+        {% else %}
+          {{ started_label }}
+        {% endif %}
+      </p>
+      <p class="mt-1 text-xs text-gray-500">
+        {% if artifact_count is not none and lifecycle_summary %}
+          {{ lifecycle_summary }}
+        {% else %}
+          {{ started_value }}
+        {% endif %}
+      </p>
+    </div>
+  </div>
+
+  {% if action_readiness %}
+    <div class="mt-4">
+      <div class="flex justify-between gap-3 items-baseline">
+        <h3 class="text-sm font-semibold text-gray-800">Action Readiness</h3>
+        <p class="text-xs text-gray-400">which operator lanes are open right now</p>
+      </div>
+      <div class="mt-2 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+        {% for item in action_readiness %}
+          <div class="rounded-lg border p-3 {% if item.tone == 'warning' %}border-amber-200 bg-amber-50{% elif item.tone == 'positive' %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+            <p class="text-[11px] uppercase tracking-wide {% if item.tone == 'warning' %}text-amber-700{% elif item.tone == 'positive' %}text-emerald-700{% else %}text-gray-500{% endif %}">{{ item.label }}</p>
+            <p class="mt-1 text-sm font-semibold text-gray-800">{{ item.state }}</p>
+            <p class="mt-1 text-xs text-gray-500">{{ item.detail }}</p>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  <div class="mt-4 flex flex-wrap items-center gap-2">
+    {% if mode == "selected" %}
+      <button
+        type="button"
+        onclick="window.clearResearchSelection()"
+        class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm"
+      >Clear Focus</button>
+    {% endif %}
+    {% if mode == "selected" and quick_action_mode == "pilot" %}
+      <button
+        class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-emerald-500 transition-colors text-sm"
+        hx-post="/api/actions/research/pilot-approve"
+        hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
+        hx-target="#research-operator-output"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+      >Approve Pilot</button>
+      <button
+        class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-red-500 transition-colors text-sm"
+        hx-post="/api/actions/research/pilot-reject"
+        hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
+        hx-target="#research-operator-output"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+      >Reject Pilot</button>
+    {% elif mode == "selected" and quick_action_mode == "rebalance" %}
+      <form
+        hx-post="/api/actions/research/execute-rebalance"
+        hx-vals='js:window.getResearchActionVals()'
+        hx-target="#research-operator-output"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+      >
+        <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+        <input type="hidden" name="notes" value="Focus ribbon execute rebalance." />
+        <button type="submit" class="bg-emerald-600 hover:bg-emerald-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-emerald-500 transition-colors text-sm">Execute Rebalance</button>
+      </form>
+      <form
+        hx-post="/api/actions/research/dismiss-rebalance"
+        hx-vals='js:window.getResearchActionVals()'
+        hx-target="#research-operator-output"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+      >
+        <input type="hidden" name="chain_id" value="{{ chain_id }}" />
+        <input type="hidden" name="notes" value="Focus ribbon dismiss rebalance." />
+        <button type="submit" class="bg-red-600 hover:bg-red-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-red-500 transition-colors text-sm">Dismiss Rebalance</button>
+      </form>
+    {% elif mode == "selected" and quick_action_mode == "synthesis" %}
+      <button
+        class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm"
+        hx-post="/api/actions/research/synthesize"
+        hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
+        hx-target="#research-operator-output"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+      >Synthesize</button>
+      {% if can_generate_post_mortem %}
+        <button
+          class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm"
+          hx-post="/api/actions/research/post-mortem"
+          hx-vals='js:window.getResearchActionVals({chain_id:"{{ chain_id }}"})'
+          hx-target="#research-operator-output"
+          hx-swap="innerHTML"
+          hx-on::after-request="window.refreshResearchChainViewer('{{ chain_id }}')"
+        >{% if post_mortem_count %}Regenerate Post-Mortem{% else %}Generate Post-Mortem{% endif %}</button>
+      {% endif %}
+    {% elif mode == "selected" and quick_action_mode == "review" %}
+      <a
+        href="#research-operator-output"
+        onclick="window.setResearchQueueAndActiveView('review', 'operator')"
+        class="bg-amber-600 hover:bg-amber-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-amber-500 transition-colors text-sm"
+      >Open Review Workbench</a>
+      <p class="text-xs text-gray-500">Multi-path review acknowledgements stay in the workbench. Recommended call: {{ review_recommended_action or "review" }}.</p>
+    {% endif %}
+    {% if show_load_button and chain_id %}
+      <button
+        class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-blue-500 transition-colors text-sm"
+        onclick="window.setResearchQueueAndActiveView('{{ queue_filter }}', '{{ active_view }}', false)"
+        hx-get="/fragments/research/artifact-chain/{{ chain_id }}"
+        hx-target="#research-artifact-chain-viewer"
+        hx-swap="innerHTML"
+        hx-on::after-request="window.syncResearchWorkbench('{{ chain_id }}', '{{ queue_filter }}', '{{ active_view }}')"
+      >{{ load_button_label or "Load Suggested Chain" }}</button>
+    {% endif %}
+    <a
+      href="{{ queue_anchor }}"
+      onclick="window.setResearchQueueAndActiveView('{{ queue_filter }}', '{{ active_view }}')"
+      class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm"
+    >Open {{ queue_label }}</a>
+    <a
+      href="{{ secondary_anchor }}"
+      onclick="window.setResearchQueueAndActiveView('{{ queue_filter }}', '{{ active_view }}')"
+      class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1.5 rounded-lg border border-gray-300 transition-colors text-sm"
+    >{{ secondary_label }}</a>
+  </div>
+</section>
