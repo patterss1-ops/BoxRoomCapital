@@ -113,6 +113,31 @@ class TestPositions:
         positions = broker.get_positions()
         assert len(positions) == 1
 
+    def test_get_positions_maps_known_epic_to_configured_ticker_without_deal_map(self, broker, mock_session):
+        mock_session.get.return_value.json.return_value = {
+            "positions": [
+                {
+                    "position": {
+                        "dealId": "DEALQQQ",
+                        "direction": "BUY",
+                        "size": 0.01,
+                        "level": 24992.8,
+                    },
+                    "market": {
+                        "epic": "IX.D.NASDAQ.CASH.IP",
+                        "bid": 24995.8,
+                        "offer": 24996.8,
+                    },
+                }
+            ]
+        }
+
+        positions = broker.get_positions()
+
+        assert len(positions) == 1
+        assert positions[0].ticker == "QQQ"
+        assert positions[0].strategy == "unknown"
+
     def test_get_positions_network_error_returns_empty(self, broker, mock_session):
         """IG broker catches exceptions and returns empty list on error."""
         mock_session.get.side_effect = Exception("Network timeout")

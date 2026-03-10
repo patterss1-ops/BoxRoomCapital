@@ -56,6 +56,24 @@ class IGBroker(BaseBroker):
     def _account_number(self) -> str:
         return config.ig_account_number(bool(getattr(self, "is_demo", True)))
 
+    def _ticker_from_epic(self, epic: str) -> str:
+        epic_value = str(epic or "").strip()
+        if not epic_value:
+            return ""
+
+        fallback = epic_value
+        for ticker, details in dict(config.MARKET_MAP or {}).items():
+            if str(details.get("epic") or "").strip() != epic_value:
+                continue
+            ticker_value = str(ticker or "").strip()
+            if not ticker_value:
+                continue
+            if fallback == epic_value:
+                fallback = ticker_value
+            if not ticker_value.endswith("_trend"):
+                return ticker_value
+        return fallback
+
     def _protective_stop_distance(self, market_info: dict | None) -> str | None:
         if not config.IG_ATTACH_PROTECTIVE_STOPS:
             return None
@@ -218,7 +236,10 @@ class IGBroker(BaseBroker):
                 direction = "long" if pos.get("direction") == "BUY" else "short"
 
                 # Look up ticker and strategy from our deal map
-                ticker, strategy = self._deal_map.get(deal_id, (epic, "unknown"))
+                ticker, strategy = self._deal_map.get(
+                    deal_id,
+                    (self._ticker_from_epic(epic), "unknown"),
+                )
 
                 size = float(pos.get("size", pos.get("dealSize", 0)))
                 entry_price = float(pos.get("openLevel", pos.get("level", 0)))
