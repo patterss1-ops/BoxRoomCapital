@@ -20,6 +20,12 @@
   - `1fa15aa` — map fresh-session IG positions back to configured tickers
   - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
   - `256fa10` — allow live Engine A open/close flows to sync the ledger inline via `--sync-ledger`
+- The latest operator-surface commits are:
+  - `bbedeeb` — add concrete `--help` examples to `scripts/execute_engine_a_rebalance.py`
+  - `5d0f191` — add live/demo `--help` examples to `scripts/check_ig_access.py` and `scripts/sync_broker_snapshot.py`
+  - `f017661` / `307a112` — add research helper `--help` surfaces and correct the valid `news_wire` source-class examples
+  - `aa6cd7a` / `410a627` — add a real CLI surface to `scripts/bootstrap_research_market_data.py` and fix the executable entrypoint
+  - `d1bd33e` — add `--help` / `-h` handling to the detached-job shell helpers
 
 ## What Is Already Done
 
@@ -36,6 +42,7 @@
 ### Operational foundations
 - Research PostgreSQL readiness is surfaced in the control plane and research status views.
 - MVP market-data seeding and ingest tooling exists.
+- The market-data bootstrap entrypoint now has explicit `--start`, `--end`, and `--years` controls instead of a hard-coded trailing window.
 - Engine B default runtime uses the real backtest adapter instead of the old stub runner.
 - Manual Engine A execution exists end-to-end, including preview, commit, dispatch, and close helpers.
 
@@ -46,6 +53,7 @@
   - `POST /api/actions/research/override-kill`
   - `POST /api/actions/research/execute-rebalance`
   - `POST /api/actions/research/dismiss-rebalance`
+- The detached-job shell helpers now all handle `--help` / `-h` cleanly and point operators to concrete usage examples.
 
 ### Readiness surface
 - `/research` now has a top-level readiness card that summarizes:
@@ -87,6 +95,15 @@
 - `256fa10` — add inline ledger sync to Engine A execution
 - later verification: one-symbol live `NQ -> QQQ` smoke-close passed with inline ledger sync, leaving broker + ledger flat
 
+### 2026-03-10 operator-tooling cleanup sequence
+- `bbedeeb` — improve Engine A execution CLI help
+- `5d0f191` — improve broker CLI help examples
+- `f017661` — improve research CLI help examples
+- `307a112` — fix research validation CLI source-class examples
+- `aa6cd7a` — improve market-data bootstrap CLI
+- `410a627` — fix bootstrap market-data script entrypoint
+- `d1bd33e` — add help to detached job scripts
+
 ## Key Files To Re-open First
 
 ### Runtime / readiness
@@ -94,6 +111,7 @@
 - `scripts/research_readiness_report.py`
 - `research/market_data/bootstrap.py`
 - `research/market_data/seed_universe.py`
+- `scripts/bootstrap_research_market_data.py`
 - `research/shared/backtest_adapter.py`
 - `research/runtime.py`
 - `data/pg_connection.py`
@@ -118,6 +136,7 @@
 ### Session memory
 - `.claude/history/SESSION_LOG.md`
 - `ops/COMBINED_NEXT_STEPS.md`
+- `ops/OVERNIGHT_RUNNER.md`
 
 ## Tests Most Relevant To Current State
 

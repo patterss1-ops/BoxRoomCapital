@@ -225,6 +225,12 @@ Items 1-10 complete.
   - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
   - `1b205a5` — add a first-class broker-to-ledger sync CLI for post-trade reconciliation
   - `256fa10` — allow Engine A live execution flows to sync the ledger inline via `--sync-ledger`
+- Latest operator-tooling cleanup landed in:
+  - `bbedeeb` — add concrete `--help` examples to the Engine A execution CLI
+  - `5d0f191` — add live/demo help examples to the broker helper CLIs
+  - `f017661` / `307a112` — add research helper help surfaces and correct the valid `news_wire` source-class examples
+  - `aa6cd7a` / `410a627` — add explicit date-window controls to the market-data bootstrap CLI and fix its real entrypoint
+  - `d1bd33e` — add `--help` / `-h` handling to the detached-job shell helpers
 - Current validated live path on 2026-03-10:
   - single-symbol live `CL` open/hold/close passed
   - single-symbol live `GC` open/hold/close passed
@@ -237,3 +243,4 @@ Items 1-10 complete.
   - the held-batch round trip realized approximately `-0.68` versus the pre-hold cash balance
   - full-batch live validation is complete; any further run should be treated as intentional exposure, not infrastructure proving
   - the preferred low-friction live validation command is now `python scripts/execute_engine_a_rebalance.py --mode live --symbols NQ --size-mode min --commit --dispatch --allow-live --smoke-close --sync-ledger`
+  - the restart/operator surfaces are now standardized: all tracked research, broker, bootstrap, and detached-job entrypoints expose usable `--help` output
