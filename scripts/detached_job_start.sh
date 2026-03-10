@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: scripts/detached_job_start.sh <job_name> <command...>
+
+Start a detached background job and persist stdout/stderr/checkpoints under
+.runtime/detached_jobs/<job_name>/.
+
+Example:
+  ./scripts/detached_job_start.sh research_backlog "bash -lc 'echo start; sleep 5; echo done'"
+EOF
+}
+
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+  usage
+  exit 0
+fi
+
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 <job_name> <command...>"
+  usage
   exit 1
 fi
 

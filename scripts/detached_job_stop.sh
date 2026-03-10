@@ -1,8 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: scripts/detached_job_stop.sh <job_name> [--force]
+
+Stop a detached job gracefully, or send SIGKILL with --force if it does not exit.
+
+Examples:
+  ./scripts/detached_job_stop.sh research_backlog
+  ./scripts/detached_job_stop.sh research_backlog --force
+EOF
+}
+
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+  usage
+  exit 0
+fi
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  echo "Usage: $0 <job_name> [--force]"
+  usage
   exit 1
 fi
 

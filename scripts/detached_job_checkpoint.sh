@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: scripts/detached_job_checkpoint.sh <job_name> <message...>
+
+Append a timestamped checkpoint line to a detached job's checkpoint log.
+
+Example:
+  ./scripts/detached_job_checkpoint.sh research_backlog "completed phase 0 task 1"
+EOF
+}
+
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+  usage
+  exit 0
+fi
+
 if [[ $# -lt 2 ]]; then
-  echo "Usage: $0 <job_name> <message...>"
+  usage
   exit 1
 fi
 

@@ -1,8 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: scripts/detached_job_status.sh <job_name>
+
+Show detached-job state plus recent checkpoint/stdout/stderr tails.
+
+Example:
+  ./scripts/detached_job_status.sh research_backlog
+EOF
+}
+
+if [[ $# -eq 1 && ( "$1" == "--help" || "$1" == "-h" ) ]]; then
+  usage
+  exit 0
+fi
+
 if [[ $# -ne 1 ]]; then
-  echo "Usage: $0 <job_name>"
+  usage
   exit 1
 fi
 
