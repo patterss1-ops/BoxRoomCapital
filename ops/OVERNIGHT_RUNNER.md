@@ -9,6 +9,17 @@ Purpose: run long tasks in the background so work keeps running even if the UI/s
 - `scripts/detached_job_stop.sh`
 - `scripts/detached_job_checkpoint.sh`
 
+All four helpers support `--help` / `-h` and print concrete examples.
+
+Quick discovery:
+
+```bash
+./scripts/detached_job_start.sh --help
+./scripts/detached_job_status.sh --help
+./scripts/detached_job_stop.sh --help
+./scripts/detached_job_checkpoint.sh --help
+```
+
 ## Usage
 
 Start a detached job:
