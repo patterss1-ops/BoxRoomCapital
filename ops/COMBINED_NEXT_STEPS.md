@@ -209,8 +209,22 @@ These are the undelivered backlog items from Claude's review. Lower priority tha
 6. Pilot sign-off endpoints                [DONE — tranche 30, 2026-03-09]
 7. INT-3 E2E tests                         [DONE — 12 tests, 7 scenarios, 2026-03-10]
 8. Missing action endpoints                [DONE — tranche 31, 2026-03-09]
-9. Minimal-stake live trade on IG          [DONE — user confirmed no demo account is available; live IG smoke open/close and live dispatcher smoke both passed at 0.01 stake on US 500, and the Engine A research execute->dispatch->same-session close path passed live at 0.01 stake on NQ->QQQ with account flat afterward, 2026-03-10]
+9. Minimal-stake live trade on IG          [DONE — user confirmed no demo account is available; live IG smoke open/close and live dispatcher smoke both passed at 0.01 stake on US 500, the Engine A research execute->dispatch->same-session close path passed live at 0.01 stake on NQ->QQQ, and the bounded six-symbol Engine A live batch (CL/GC/HG/NG/QQQ/IWM) passed after stop-policy + dispatcher/session reuse fixes, with account flat afterward, 2026-03-10]
 10. Remaining UX polish                    [DONE — research workflow shell now defaults to current-state-first chain viewing, compressed workbench action results, archive history lenses, and queue-level next-decision guidance, 2026-03-10]
 ```
 
 Items 1-10 complete.
+
+## Post-Completion Operational State
+
+- Latest live execution hardening landed in:
+  - `97af3d2` — disable implicit IG protective stops by default
+  - `92504e4` — detect live Engine A position mismatches after dispatch
+  - `cd82bf6` — reuse connected broker sessions during multi-intent dispatch and fail the CLI when any queued intent is left retrying/partial
+- Current validated live path on 2026-03-10:
+  - single-symbol live `CL` open/hold/close passed
+  - single-symbol live `GC` open/hold/close passed
+  - full six-symbol live Engine A batch opened cleanly, survived the previous failure window with all 6 positions present at IG, and then flattened cleanly
+- Current operational state:
+  - live IG account flat after bounded validation
+  - full-batch live validation is complete; any further run should be treated as intentional exposure, not infrastructure proving
