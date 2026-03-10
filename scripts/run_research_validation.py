@@ -39,7 +39,21 @@ def _build_control() -> BotControlService:
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run DB-backed research validation")
+    parser = argparse.ArgumentParser(
+        description="Run DB-backed research validation",
+        epilog=(
+            "Examples:\n"
+            "  Validate Engine A against the current DB/runtime:\n"
+            "    python scripts/run_research_validation.py --engine engine_a\n"
+            "  Validate Engine B with a manual event:\n"
+            "    python scripts/run_research_validation.py --engine engine_b --source-class manual_event "
+            "--raw-content \"CPI downside surprise with broad duration rally.\"\n"
+            "  Validate both engines in one run:\n"
+            "    python scripts/run_research_validation.py --engine all --source-class manual_event "
+            "--raw-content \"OPEC headlines hit crude and rates reprice lower.\""
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--engine",
         choices=("engine_a", "engine_b", "all"),

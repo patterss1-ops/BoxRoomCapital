@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
@@ -18,6 +19,18 @@ from research.shared.decay_review import DecayReviewService
 from research.shared.kill_monitor import KillMonitor
 
 
+def _build_parser() -> argparse.ArgumentParser:
+    return argparse.ArgumentParser(
+        description="Emit the current research readiness report as JSON",
+        epilog=(
+            "Examples:\n"
+            "  Emit the current readiness report:\n"
+            "    python scripts/research_readiness_report.py"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
+
 def _build_control() -> BotControlService:
     control = BotControlService(PROJECT_ROOT)
     control.configure_research_services(
@@ -30,6 +43,7 @@ def _build_control() -> BotControlService:
 
 
 def main() -> int:
+    _build_parser().parse_args()
     control = _build_control()
     print(
         json.dumps(
