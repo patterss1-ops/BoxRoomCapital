@@ -45,11 +45,11 @@ def _build_parser() -> argparse.ArgumentParser:
             "Examples:\n"
             "  Validate Engine A against the current DB/runtime:\n"
             "    python scripts/run_research_validation.py --engine engine_a\n"
-            "  Validate Engine B with a manual event:\n"
-            "    python scripts/run_research_validation.py --engine engine_b --source-class manual_event "
+            "  Validate Engine B with inline news-wire content:\n"
+            "    python scripts/run_research_validation.py --engine engine_b --source-class news_wire "
             "--raw-content \"CPI downside surprise with broad duration rally.\"\n"
             "  Validate both engines in one run:\n"
-            "    python scripts/run_research_validation.py --engine all --source-class manual_event "
+            "    python scripts/run_research_validation.py --engine all --source-class news_wire "
             "--raw-content \"OPEC headlines hit crude and rates reprice lower.\""
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,

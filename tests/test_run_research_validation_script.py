@@ -17,8 +17,8 @@ def test_parser_help_includes_engine_a_engine_b_and_all_examples(monkeypatch, ca
     help_text = capsys.readouterr().out
 
     assert "--engine engine_a" in help_text
-    assert "--engine engine_b --source-class manual_event" in help_text
-    assert "--engine all --source-class manual_event" in help_text
+    assert "--engine engine_b --source-class news_wire" in help_text
+    assert "--engine all --source-class news_wire" in help_text
 
 
 def test_parser_restricts_engine_b_source_class_to_event_schema_values():

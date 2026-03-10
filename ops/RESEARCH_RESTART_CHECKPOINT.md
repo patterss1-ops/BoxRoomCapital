@@ -155,7 +155,7 @@ Run:
 ```bash
 python scripts/research_readiness_report.py
 python scripts/run_research_validation.py --engine engine_a
-python scripts/run_research_validation.py --engine engine_b --source-class manual_event
+python scripts/run_research_validation.py --engine engine_b --source-class news_wire --raw-content "CPI downside surprise with broad duration rally."
 ```
 
 Expected:
