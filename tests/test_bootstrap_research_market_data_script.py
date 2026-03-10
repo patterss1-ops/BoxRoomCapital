@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -19,6 +21,22 @@ def test_build_parser_help_includes_default_and_custom_examples(monkeypatch, cap
 
     assert "python scripts/bootstrap_research_market_data.py" in help_text
     assert "--start 2021-01-01 --end 2026-03-10" in help_text
+
+
+def test_script_entrypoint_renders_help_from_repo_root():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    result = subprocess.run(
+        [sys.executable, "scripts/bootstrap_research_market_data.py", "--help"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "python scripts/bootstrap_research_market_data.py" in result.stdout
+    assert "--start 2021-01-01 --end 2026-03-10" in result.stdout
 
 
 def test_resolve_window_defaults_to_trailing_five_years(monkeypatch):
