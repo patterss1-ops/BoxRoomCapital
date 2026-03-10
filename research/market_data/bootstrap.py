@@ -80,7 +80,11 @@ def ingest_seeded_market_data(
         )
         new_bars = [bar for bar in fetched if start <= bar.bar_timestamp.date() <= end]
         if latest is not None:
-            new_bars = [bar for bar in new_bars if bar.bar_timestamp > latest.bar_timestamp]
+            latest_ts = latest.bar_timestamp.replace(tzinfo=None) if latest.bar_timestamp.tzinfo else latest.bar_timestamp
+            new_bars = [
+                bar for bar in new_bars
+                if (bar.bar_timestamp.replace(tzinfo=None) if bar.bar_timestamp.tzinfo else bar.bar_timestamp) > latest_ts
+            ]
 
         if not new_bars:
             results.append(

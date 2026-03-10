@@ -85,6 +85,59 @@ IG_PASSWORD = os.getenv("IG_PASSWORD", "")
 IG_API_KEY = os.getenv("IG_API_KEY", "")
 IG_ACC_TYPE = os.getenv("IG_ACC_TYPE", "DEMO")  # "DEMO" or "LIVE"
 IG_ACC_NUMBER = os.getenv("IG_ACC_NUMBER", "")   # Your spread bet account number
+IG_DEMO_USERNAME = os.getenv("IG_DEMO_USERNAME", "")
+IG_DEMO_PASSWORD = os.getenv("IG_DEMO_PASSWORD", "")
+IG_DEMO_API_KEY = os.getenv("IG_DEMO_API_KEY", "")
+IG_DEMO_ACC_NUMBER = os.getenv("IG_DEMO_ACC_NUMBER", "")
+IG_LIVE_USERNAME = os.getenv("IG_LIVE_USERNAME", "")
+IG_LIVE_PASSWORD = os.getenv("IG_LIVE_PASSWORD", "")
+IG_LIVE_API_KEY = os.getenv("IG_LIVE_API_KEY", "")
+IG_LIVE_ACC_NUMBER = os.getenv("IG_LIVE_ACC_NUMBER", "")
+
+
+def broker_mode() -> str:
+    """Return the active broker mode after applying runtime overrides."""
+    value = str(_load_runtime_overrides().get("broker_mode", BROKER_MODE) or "").strip().lower()
+    return value if value in {"paper", "demo", "live"} else "paper"
+
+
+def ig_broker_is_demo() -> bool:
+    """Resolve whether the active IG target should use the demo environment."""
+    broker_mode_value = broker_mode()
+    if broker_mode_value == "demo":
+        return True
+    if broker_mode_value == "live":
+        return False
+    return str(IG_ACC_TYPE or "DEMO").strip().upper() != "LIVE"
+
+
+def ig_credentials(is_demo: bool) -> dict[str, str]:
+    """Return IG credentials for the requested environment."""
+    legacy_is_demo = str(IG_ACC_TYPE or "DEMO").strip().upper() != "LIVE"
+    if is_demo:
+        return {
+            "username": IG_DEMO_USERNAME or (IG_USERNAME if legacy_is_demo else ""),
+            "password": IG_DEMO_PASSWORD or (IG_PASSWORD if legacy_is_demo else ""),
+            "api_key": IG_DEMO_API_KEY or (IG_API_KEY if legacy_is_demo else ""),
+            "account_number": IG_DEMO_ACC_NUMBER or (IG_ACC_NUMBER if legacy_is_demo else ""),
+        }
+    return {
+        "username": IG_LIVE_USERNAME or IG_USERNAME,
+        "password": IG_LIVE_PASSWORD or IG_PASSWORD,
+        "api_key": IG_LIVE_API_KEY or IG_API_KEY,
+        "account_number": IG_LIVE_ACC_NUMBER or IG_ACC_NUMBER,
+    }
+
+
+def ig_account_number(is_demo: bool) -> str:
+    """Return the configured account number for the requested IG environment."""
+    return str(ig_credentials(is_demo).get("account_number") or "")
+
+
+def ig_credentials_available(is_demo: bool) -> bool:
+    """Return True when the requested IG environment has enough auth to connect."""
+    creds = ig_credentials(is_demo)
+    return bool(creds["username"] and creds["password"] and creds["api_key"])
 
 # PostgreSQL research database
 RESEARCH_DB_DSN = os.getenv("RESEARCH_DB_DSN") or os.getenv("DATABASE_URL") or "postgresql://localhost:5432/boxroom_research"
@@ -811,7 +864,7 @@ ENGINE_A_INTERVAL_SECONDS = _env_int(
     "ENGINE_A_INTERVAL_SECONDS", 300, min_value=5, max_value=86400
 )
 ENGINE_A_CAPITAL_BASE = _env_float(
-    "ENGINE_A_CAPITAL_BASE", 100000.0, min_value=1000.0, max_value=100000000.0
+    "ENGINE_A_CAPITAL_BASE", 750000.0, min_value=1000.0, max_value=100000000.0
 )
 DISPATCHER_INTERVAL_SECONDS = _env_int(
     "DISPATCHER_INTERVAL_SECONDS", 60, min_value=10, max_value=600

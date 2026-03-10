@@ -90,3 +90,31 @@ def test_no_trades_results_in_draft_status():
     )
 
     assert envelope.body["approval_status"] == "draft"
+
+
+def test_generate_rebalance_uses_per_instrument_cost_profiles():
+    targets = {
+        "ES": TargetPosition(
+            instrument="ES",
+            contracts=2,
+            notional=52_000.0,
+            weight=0.52,
+            forecast=0.7,
+            vol_contribution=0.08,
+        )
+    }
+
+    envelope = Rebalancer().generate_rebalance(
+        current_positions={"ES": 0},
+        target_positions=targets,
+        cost_model=CostModel(),
+        instrument_type="future",
+        broker="ibkr",
+        asset_class="futures",
+        instrument_profiles={
+            "ES": {"instrument_type": "micro_equity", "broker": "ibkr", "asset_class": "index"}
+        },
+    )
+
+    assert envelope.body["estimated_cost"] > 0.0
+    assert envelope.body["approval_status"] == "approved"

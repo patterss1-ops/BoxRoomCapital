@@ -1757,19 +1757,21 @@ def create_order_action(
     max_attempts: int = 1,
     request_payload: Optional[str] = None,
     db_path: str = DB_PATH,
+    conn: Optional[sqlite3.Connection] = None,
 ):
     """Create an order action record."""
     now = datetime.now(timezone.utc).isoformat()
-    conn = get_conn(db_path)
-    conn.execute(
+    connection = conn or get_conn(db_path)
+    connection.execute(
         """INSERT INTO order_actions
            (id, created_at, updated_at, correlation_id, action_type, status, ticker, spread_id,
             attempt, max_attempts, request_payload)
            VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?, ?)""",
         (action_id, now, now, correlation_id, action_type, ticker, spread_id, max_attempts, request_payload),
     )
-    conn.commit()
-    conn.close()
+    if conn is None:
+        connection.commit()
+        connection.close()
 
 
 def update_order_action(
@@ -1781,10 +1783,11 @@ def update_order_action(
     error_message: Optional[str] = None,
     result_payload: Optional[str] = None,
     db_path: str = DB_PATH,
+    conn: Optional[sqlite3.Connection] = None,
 ):
     """Transition an order action to a new state."""
-    conn = get_conn(db_path)
-    conn.execute(
+    connection = conn or get_conn(db_path)
+    connection.execute(
         """UPDATE order_actions
            SET updated_at=?,
                status=?,
@@ -1805,8 +1808,9 @@ def update_order_action(
             action_id,
         ),
     )
-    conn.commit()
-    conn.close()
+    if conn is None:
+        connection.commit()
+        connection.close()
 
 
 def get_order_actions(limit: int = 100, status: Optional[str] = None,

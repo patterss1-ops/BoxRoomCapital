@@ -81,6 +81,49 @@ def test_build_continuous_series_back_adjusts_roll(monkeypatch):
     assert [item.price for item in series] == [70.0, 72.0, 72.0, 73.0]
 
 
+def test_build_continuous_series_trims_overlapping_contract_history(monkeypatch):
+    first = FuturesContract(
+        instrument_id=1,
+        root_symbol="CL",
+        expiry_date=date(2026, 2, 1),
+        contract_code="CLG26",
+        roll_date=date(2026, 1, 3),
+    )
+    second = FuturesContract(
+        instrument_id=2,
+        root_symbol="CL",
+        expiry_date=date(2026, 3, 1),
+        contract_code="CLH26",
+    )
+    monkeypatch.setattr("research.market_data.futures.get_contracts", lambda root_symbol: [first, second])
+    monkeypatch.setattr("research.market_data.futures.get_roll_calendar", lambda root_symbol: [])
+
+    def _bars(instrument_id, start, end):
+        if instrument_id == 1:
+            return [
+                CanonicalBar(instrument_id=1, bar_date=date(2026, 1, 1), close=70.0, adj_close=70.0, session_template="cme"),
+                CanonicalBar(instrument_id=1, bar_date=date(2026, 1, 2), close=72.0, adj_close=72.0, session_template="cme"),
+                CanonicalBar(instrument_id=1, bar_date=date(2026, 1, 3), close=73.0, adj_close=73.0, session_template="cme"),
+            ]
+        return [
+            CanonicalBar(instrument_id=2, bar_date=date(2026, 1, 2), close=75.0, adj_close=75.0, session_template="cme"),
+            CanonicalBar(instrument_id=2, bar_date=date(2026, 1, 3), close=76.0, adj_close=76.0, session_template="cme"),
+            CanonicalBar(instrument_id=2, bar_date=date(2026, 1, 4), close=77.0, adj_close=77.0, session_template="cme"),
+        ]
+
+    monkeypatch.setattr("research.market_data.futures.get_canonical_bars", _bars)
+
+    series = build_continuous_series("CL")
+
+    assert [item.bar_date for item in series] == [
+        date(2026, 1, 1),
+        date(2026, 1, 2),
+        date(2026, 1, 3),
+        date(2026, 1, 4),
+    ]
+    assert [item.price for item in series] == [70.0, 72.0, 72.0, 73.0]
+
+
 def test_get_carry_series_returns_term_structure_diffs(monkeypatch):
     monkeypatch.setattr(
         "research.market_data.futures.get_contracts",

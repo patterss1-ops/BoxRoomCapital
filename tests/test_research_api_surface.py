@@ -179,6 +179,12 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     assert "card_label" in summary_template
     assert "recommended_card" in summary_template
     assert "active_view" in summary_template
+    assert "Current Artifact Snapshot" in chain_template
+    assert "Lineage History &amp; Debug" in chain_template
+    assert "Latest Saved Artifact" in operator_template
+    assert "Additional Updated Artifacts" in operator_template
+    assert "History Lens" in archive_template
+    assert "Next Decision" in alerts_template
     assert "syncResearchWorkbench" in app_js
     assert "refreshResearchChainViewer" in app_js
     assert "refreshResearchFocusRibbon" in app_js

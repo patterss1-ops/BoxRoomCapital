@@ -109,8 +109,10 @@ class OptionsBot(
 
         if self.mode == "live":
             self.broker = IGBroker(is_demo=False)
+        elif self.mode == "demo":
+            self.broker = IGBroker(is_demo=True)
         else:
-            self.broker = IGBroker(is_demo=(config.IG_ACC_TYPE == "DEMO"))
+            self.broker = IGBroker(is_demo=config.ig_broker_is_demo())
 
         if not self.broker.connect():
             logger.error("Failed to connect to IG. Aborting.")

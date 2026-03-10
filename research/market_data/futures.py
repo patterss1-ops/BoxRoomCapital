@@ -250,17 +250,21 @@ def build_continuous_series(root_symbol: str, method: str = "panama") -> list[Co
     roll_entries = {entry.from_contract: entry for entry in get_roll_calendar(root_symbol)}
 
     segments: list[tuple[FuturesContract, list]] = []
+    segment_start: date | None = None
     for index, contract in enumerate(contracts):
         bars = get_canonical_bars(contract.instrument_id, date.min, date.max)
         if not bars:
             continue
         segment_end = contract.roll_date or roll_entries.get(contract.contract_code, None)
         end_date = segment_end.roll_date if hasattr(segment_end, "roll_date") else contract.roll_date
-        if end_date is not None:
-            contract_bars = [bar for bar in bars if bar.bar_date < end_date]
-        else:
-            contract_bars = bars
+        contract_bars = [
+            bar
+            for bar in bars
+            if (segment_start is None or bar.bar_date >= segment_start)
+            and (end_date is None or bar.bar_date < end_date)
+        ]
         segments.append((contract, contract_bars))
+        segment_start = end_date
 
     continuous: list[ContinuousSeries] = []
     cumulative_adjustment = 0.0

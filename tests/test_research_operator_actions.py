@@ -1932,6 +1932,9 @@ def test_research_alerts_fragment_renders_review_pilot_and_rebalance_lanes(monke
     assert "Reject Pilot" in body
     assert "Execute Rebalance" in body
     assert "Dismiss Rebalance" in body
+    assert "Next Decision" in body
+    assert "Focus Review Lane" in body
+    assert "Open Next Review" in body
     assert "window.syncResearchWorkbench('chain-review', 'review', 'operator')" in body
     assert "window.syncResearchWorkbench('chain-pilot', 'pilot', 'operator')" in body
     assert "window.syncResearchWorkbench('chain-a', 'rebalance', 'all')" in body
@@ -2133,9 +2136,24 @@ def test_research_execute_rebalance_action_records_manual_trade_and_execution(mo
         ),
     ]
     fake_store = FakeArtifactStore(chains={"chain-a": chain})
+    queued_intents = []
+
+    def fake_create_order_intent_envelope(intent, action_type, actor, request_payload, **kwargs):
+        payload = intent.to_payload()
+        queued_intents.append(
+            {
+                **payload,
+                "action_type": action_type,
+                "actor": actor,
+                "request_payload": request_payload,
+            }
+        )
+        return {"intent_id": f"intent-{len(queued_intents)}", **payload}
 
     monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
     monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(server, "create_order_intent_envelope", fake_create_order_intent_envelope)
+    monkeypatch.setattr(server.config, "broker_mode", lambda: "paper")
 
     endpoint = _route_endpoint("/api/actions/research/execute-rebalance", "POST")
     response = endpoint(
@@ -2148,13 +2166,210 @@ def test_research_execute_rebalance_action_records_manual_trade_and_execution(mo
 
     assert response.status_code == 200
     assert "Rebalance Executed" in body
+    assert "queued for dispatcher" in body
+    assert "Latest Saved Artifact" in body
+    assert "Additional Updated Artifacts" in body
     assert fake_store.saved[-3].artifact_type == ArtifactType.REBALANCE_SHEET
     assert fake_store.saved[-3].body["approval_status"] == "approved"
     assert fake_store.saved[-3].body["decision_source"] == "operator"
     assert fake_store.saved[-2].artifact_type == ArtifactType.TRADE_SHEET
     assert fake_store.saved[-2].created_by == "operator:ops"
+    assert [instrument["broker"] for instrument in fake_store.saved[-2].body["instruments"]] == ["paper", "paper"]
     assert fake_store.saved[-1].artifact_type == ArtifactType.EXECUTION_REPORT
     assert fake_store.saved[-1].body["trades_submitted"] == 2
+    assert fake_store.saved[-1].body["trades_filled"] == 0
+    assert fake_store.saved[-1].body["venue"] == "QUEUED:paper"
+    assert len(queued_intents) == 2
+    assert {intent["instrument"] for intent in queued_intents} == {"ES", "NQ"}
+    assert {intent["broker_target"] for intent in queued_intents} == {"paper"}
+    assert {intent["account_type"] for intent in queued_intents} == {"PAPER"}
+    assert {intent["side"] for intent in queued_intents} == {"BUY", "SELL"}
+
+
+def test_research_execute_rebalance_action_routes_to_ig_proxies_in_demo_mode(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="regime-1",
+            chain_id="chain-a",
+            version=1,
+            artifact_type=ArtifactType.REGIME_SNAPSHOT,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:00:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "vol_regime": "normal",
+                "trend_regime": "strong_trend",
+                "carry_regime": "steep",
+                "macro_regime": "risk_on",
+                "sizing_factor": 0.9,
+                "active_overrides": [],
+                "indicators": {"vix": 18.0},
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="signal-1",
+            chain_id="chain-a",
+            version=2,
+            artifact_type=ArtifactType.ENGINE_A_SIGNAL_SET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:01:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "signals": {"ES:trend": {"normalized_value": 0.7}},
+                "forecast_weights": {"trend": 1.0},
+                "combined_forecast": {"ES": 0.7, "NQ": -0.3},
+                "regime_ref": "regime-1",
+            },
+        ),
+        ArtifactEnvelope(
+            artifact_id="rebalance-1",
+            chain_id="chain-a",
+            version=3,
+            artifact_type=ArtifactType.REBALANCE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:02:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "current_positions": {"ES": 1.0, "NQ": 0.0},
+                "target_positions": {"ES": 2.0, "NQ": -1.0},
+                "deltas": {"ES": 1.0, "NQ": -1.0},
+                "estimated_cost": 0.0042,
+                "approval_status": "draft",
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-a": chain})
+    queued_intents = []
+
+    def fake_create_order_intent_envelope(intent, action_type, actor, request_payload, **kwargs):
+        payload = intent.to_payload()
+        queued_intents.append(
+            {
+                **payload,
+                "action_type": action_type,
+                "actor": actor,
+                "request_payload": request_payload,
+            }
+        )
+        return {"intent_id": f"intent-{len(queued_intents)}", **payload}
+
+    def fake_build_trade_instruments(deltas, *, size_mode="auto", ig_market_details=None):
+        return (
+            "ig",
+            "min",
+            [],
+        )
+
+    def fake_build_trade_sheet(*, chain_id, rebalance, actor, artifact_store, size_mode="auto", ig_market_details=None, symbols=None):
+        envelope = ArtifactEnvelope(
+            artifact_type=ArtifactType.TRADE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker=rebalance.ticker,
+            edge_family=rebalance.edge_family,
+            chain_id=chain_id,
+            body={
+                "hypothesis_ref": "regime-1",
+                "experiment_ref": "signal-1",
+                "instruments": [
+                    {
+                        "ticker": "SPY",
+                        "instrument_type": "spread_bet",
+                        "broker": "ig",
+                        "contract_details": "root_symbol=ES;delta_contracts=1.0000;raw_order_qty=1.0000;route=ig;size_mode=min;order_qty=0.0100;proxy_symbol=SPY",
+                    },
+                    {
+                        "ticker": "QQQ",
+                        "instrument_type": "spread_bet",
+                        "broker": "ig",
+                        "contract_details": "root_symbol=NQ;delta_contracts=-1.0000;raw_order_qty=1.0000;route=ig;size_mode=min;order_qty=0.0100;proxy_symbol=QQQ",
+                    },
+                ],
+                "sizing": {
+                    "method": "risk_parity",
+                    "target_risk_pct": 0.12,
+                    "max_notional": 2.0,
+                    "sizing_parameters": {"broker_target": "ig", "size_mode": "min"},
+                },
+                "entry_rules": ["Submit manual Engine A rebalance approved from control plane."],
+                "exit_rules": ["Exit or resize on next Engine A rebalance decision."],
+                "holding_period_target": "daily_review",
+                "risk_limits": {
+                    "max_loss_pct": 5.0,
+                    "max_portfolio_impact_pct": 20.0,
+                    "max_correlated_exposure_pct": 40.0,
+                },
+                "kill_criteria": ["regime_change", "drawdown", "cost_exceeded"],
+            },
+            created_by=f"operator:{actor}",
+            tags=["engine_a", "trade_sheet", "manual_execute"],
+        )
+        envelope.artifact_id = artifact_store.save(envelope)
+        return envelope
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(server, "create_order_intent_envelope", fake_create_order_intent_envelope)
+    monkeypatch.setattr(server, "_build_manual_engine_a_trade_instruments", fake_build_trade_instruments)
+    monkeypatch.setattr(server, "_build_manual_engine_a_trade_sheet", fake_build_trade_sheet)
+    monkeypatch.setattr(server.config, "broker_mode", lambda: "demo")
+    monkeypatch.setattr(server.config, "ig_broker_is_demo", lambda: True)
+    monkeypatch.setattr(server.config, "ig_credentials_available", lambda is_demo: True)
+
+    endpoint = _route_endpoint("/api/actions/research/execute-rebalance", "POST")
+    response = endpoint(_build_form_request("/api/actions/research/execute-rebalance"), chain_id="chain-a")
+
+    assert response.status_code == 200
+    assert fake_store.saved[-2].artifact_type == ArtifactType.TRADE_SHEET
+    assert {instrument["ticker"] for instrument in fake_store.saved[-2].body["instruments"]} == {"SPY", "QQQ"}
+    assert {instrument["broker"] for instrument in fake_store.saved[-2].body["instruments"]} == {"ig"}
+    assert fake_store.saved[-1].body["venue"] == "QUEUED:ig"
+    assert {intent["instrument"] for intent in queued_intents} == {"SPY", "QQQ"}
+    assert {intent["broker_target"] for intent in queued_intents} == {"ig"}
+    assert {intent["account_type"] for intent in queued_intents} == {"SPREADBET"}
+
+
+def test_research_execute_rebalance_action_requires_ig_credentials_in_demo_mode(monkeypatch):
+    chain = [
+        ArtifactEnvelope(
+            artifact_id="rebalance-1",
+            chain_id="chain-a",
+            version=1,
+            artifact_type=ArtifactType.REBALANCE_SHEET,
+            engine=Engine.ENGINE_A,
+            ticker="ES",
+            created_at="2026-03-09T11:02:00Z",
+            created_by="system",
+            body={
+                "as_of": "2026-03-09T11:00:00Z",
+                "current_positions": {"ES": 1.0},
+                "target_positions": {"ES": 2.0},
+                "deltas": {"ES": 1.0},
+                "estimated_cost": 0.0042,
+                "approval_status": "draft",
+            },
+        ),
+    ]
+    fake_store = FakeArtifactStore(chains={"chain-a": chain})
+
+    monkeypatch.setattr(server, "ArtifactStore", lambda: fake_store)
+    monkeypatch.setattr(server, "_invalidate_research_cached_values", lambda: None)
+    monkeypatch.setattr(server.config, "broker_mode", lambda: "demo")
+    monkeypatch.setattr(server.config, "ig_broker_is_demo", lambda: True)
+    monkeypatch.setattr(server.config, "ig_credentials_available", lambda is_demo: False)
+
+    endpoint = _route_endpoint("/api/actions/research/execute-rebalance", "POST")
+    response = endpoint(_build_form_request("/api/actions/research/execute-rebalance"), chain_id="chain-a")
+    body = response.body.decode("utf-8")
+
+    assert response.status_code == 200
+    assert "Rebalance execution failed: IG demo credentials are incomplete for research execution" in body
+    assert fake_store.saved == []
 
 
 def test_research_dismiss_rebalance_action_blocks_latest_sheet(monkeypatch):
@@ -2719,6 +2934,8 @@ def test_research_operator_workflow_routes_chain_synthesis_post_mortem_and_archi
     archive_body = archive_response.body.decode("utf-8")
 
     assert "Research Chain Viewer" in chain_body
+    assert "Current Artifact Snapshot" in chain_body
+    assert "Lineage History &amp; Debug" in chain_body
     assert "score-1" in chain_body
     assert synth_response.status_code == 200
     assert "Thesis held through the revision cycle." in synth_body
@@ -2729,5 +2946,6 @@ def test_research_operator_workflow_routes_chain_synthesis_post_mortem_and_archi
     assert "Thesis held, but exits lagged." in post_mortem_body
     assert archive_response.status_code == 200
     assert "Completed Chains" in archive_body
+    assert "History Lens" in archive_body
     assert "Lifecycle" in archive_body
     assert "Post-Mortem" in archive_body

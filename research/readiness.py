@@ -7,6 +7,8 @@ from typing import Any, Callable
 
 import config
 from data.pg_connection import get_pg_connection, release_pg_connection, research_db_status
+from research.artifact_store import ArtifactStore
+from research.artifacts import ArtifactType, Engine
 from research.market_data.bootstrap import market_data_readiness
 from research.shared.sql import fetchall_dicts
 
@@ -33,6 +35,44 @@ def load_pipeline_stage_counts(
     return {str(row["current_stage"]): int(row["total"]) for row in rows}
 
 
+def load_engine_a_tradeability_diagnostics(
+    *,
+    artifact_store_factory: Callable[[], ArtifactStore] = ArtifactStore,
+) -> dict[str, Any]:
+    """Inspect the latest Engine A signal/rebalance pair for tradability blockers."""
+    store = artifact_store_factory()
+    latest_signal = next(
+        iter(
+            store.query(
+                artifact_type=ArtifactType.ENGINE_A_SIGNAL_SET,
+                engine=Engine.ENGINE_A,
+                limit=1,
+            )
+        ),
+        None,
+    )
+    latest_rebalance = next(
+        iter(
+            store.query(
+                artifact_type=ArtifactType.REBALANCE_SHEET,
+                engine=Engine.ENGINE_A,
+                limit=1,
+            )
+        ),
+        None,
+    )
+    combined_forecast = dict((latest_signal.body if latest_signal else {}) or {}).get("combined_forecast") or {}
+    deltas = dict((latest_rebalance.body if latest_rebalance else {}) or {}).get("deltas") or {}
+    max_abs_forecast = max((abs(float(value or 0.0)) for value in combined_forecast.values()), default=0.0)
+    nonzero_delta_count = sum(1 for value in deltas.values() if abs(float(value or 0.0)) > 0.0)
+    return {
+        "signal_as_of": str((latest_signal.body if latest_signal else {}).get("as_of") or ""),
+        "rebalance_as_of": str((latest_rebalance.body if latest_rebalance else {}).get("as_of") or ""),
+        "max_abs_forecast": round(max_abs_forecast, 6),
+        "nonzero_delta_count": int(nonzero_delta_count),
+    }
+
+
 def build_research_readiness_report(
     *,
     as_of: date | None = None,
@@ -41,6 +81,7 @@ def build_research_readiness_report(
     db_status_loader: Callable[[], dict[str, Any]] = research_db_status,
     market_data_loader: Callable[..., dict[str, Any]] = market_data_readiness,
     stage_counts_loader: Callable[[], dict[str, int]] = load_pipeline_stage_counts,
+    engine_a_diag_loader: Callable[[], dict[str, Any]] = load_engine_a_tradeability_diagnostics,
 ) -> dict[str, Any]:
     """Build a compact report for operational activation and validation readiness."""
     report_date = as_of or date.today()
@@ -49,11 +90,17 @@ def build_research_readiness_report(
 
     stage_counts: dict[str, int] = {}
     stage_count_error = ""
+    engine_a_diag: dict[str, Any] = {}
+    engine_a_diag_error = ""
     if bool(db.get("schema_ready")):
         try:
             stage_counts = dict(stage_counts_loader() or {})
         except Exception as exc:  # pragma: no cover - exercised by callers
             stage_count_error = str(exc)
+        try:
+            engine_a_diag = dict(engine_a_diag_loader() or {})
+        except Exception as exc:  # pragma: no cover - exercised by callers
+            engine_a_diag_error = str(exc)
 
     review_pending = int(stage_counts.get("review_pending", 0))
     pilot_pending = int(stage_counts.get("pilot_ready", 0))
@@ -63,7 +110,12 @@ def build_research_readiness_report(
         db=db,
         market_data_loader=market_data_loader,
     )
-    engine_a = _build_engine_check("Engine A", dict(pipeline.get("engine_a") or {}))
+    engine_a = _build_engine_check(
+        "Engine A",
+        dict(pipeline.get("engine_a") or {}),
+        tradeability_diag=engine_a_diag,
+        diag_error=engine_a_diag_error,
+    )
     engine_b = _build_engine_check("Engine B", dict(pipeline.get("engine_b") or {}))
     operator_queue = _build_operator_queue_check(
         review_pending=review_pending,
@@ -172,7 +224,13 @@ def _build_market_data_check(
     }
 
 
-def _build_engine_check(label: str, payload: dict[str, Any]) -> dict[str, Any]:
+def _build_engine_check(
+    label: str,
+    payload: dict[str, Any],
+    *,
+    tradeability_diag: dict[str, Any] | None = None,
+    diag_error: str = "",
+) -> dict[str, Any]:
     enabled = bool(payload.get("enabled", True))
     configured = bool(payload.get("configured", False))
     last_result = dict(payload.get("last_result") or {})
@@ -202,6 +260,24 @@ def _build_engine_check(label: str, payload: dict[str, Any]) -> dict[str, Any]:
         headline = raw_status
         if not enabled:
             detail = f"{detail} Service is disabled in config."
+        if label == "Engine A" and raw_status == "ok":
+            if diag_error:
+                status = "attention"
+                headline = "diag_error"
+                detail = f"{detail} Engine A tradability diagnostic failed: {diag_error}"
+            else:
+                diag = dict(tradeability_diag or {})
+                if (
+                    float(diag.get("max_abs_forecast") or 0.0) >= 0.10
+                    and int(diag.get("nonzero_delta_count") or 0) == 0
+                ):
+                    status = "attention"
+                    headline = "granularity_blocked"
+                    detail = (
+                        "Latest Engine A rebalance has zero executable deltas "
+                        f"despite max combined forecast {float(diag['max_abs_forecast']):.2f}; "
+                        "capital base or contract granularity is too small for the current universe."
+                    )
 
     return {
         "key": label.lower().replace(" ", "_"),
@@ -272,7 +348,10 @@ def _build_next_steps(*, checks: list[dict[str, Any]], routing_active: bool) -> 
     if by_key.get("market_data", {}).get("status") != "ready":
         steps.append("Run scripts/bootstrap_research_market_data.py to seed the MVP universe and ingest history.")
     if by_key.get("engine_a", {}).get("status") != "ready":
-        steps.append("Run Engine A against the seeded dataset and confirm a DB-backed rebalance chain is produced.")
+        if by_key.get("engine_a", {}).get("headline") == "granularity_blocked":
+            steps.append("Increase ENGINE_A_CAPITAL_BASE or shrink Engine A contract granularity/universe until the latest non-trivial forecasts produce executable deltas.")
+        else:
+            steps.append("Run Engine A against the seeded dataset and confirm a DB-backed rebalance chain is produced.")
     if by_key.get("engine_b", {}).get("status") != "ready":
         steps.append("Submit a real/manual Engine B event and verify stage-aware artifacts plus experiment output.")
     if by_key.get("operator_queue", {}).get("status") != "ready":

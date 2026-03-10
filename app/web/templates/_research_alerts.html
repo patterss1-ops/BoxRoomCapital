@@ -119,6 +119,51 @@
     </div>
   {% endif %}
 
+  {% if next_queue_item %}
+    <div class="mb-4 border border-blue-200 rounded-lg bg-blue-50 p-3">
+      <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-800">Next Decision</h3>
+          <p class="mt-1 text-sm font-semibold text-gray-800">{{ next_queue_item.title }}</p>
+          <p class="mt-1 text-xs text-gray-500">{{ next_queue_item.detail }}</p>
+          <div class="mt-2 flex flex-wrap gap-2 text-xs">
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">Lane</span>
+              <span class="text-gray-700">{{ next_queue_item.lane_label }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">{{ next_queue_item.status_label }}</span>
+              <span class="text-gray-700">{{ next_queue_item.status_value }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">{{ next_queue_item.meta_label }}</span>
+              <span class="text-gray-700">{{ next_queue_item.meta_value }}</span>
+            </span>
+            <span class="inline-flex items-center gap-2 rounded-full border border-gray-300 bg-white px-3 py-1">
+              <span class="font-semibold uppercase tracking-wide text-gray-500">Board Slice</span>
+              <span class="text-gray-700">{{ next_queue_item.active_view_label }}</span>
+            </span>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onclick="window.setResearchQueueAndActiveView('{{ next_queue_item.lane }}', '{{ next_queue_item.active_view }}')"
+            class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+          >Focus {{ next_queue_item.lane_label }}</button>
+          <button
+            class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1 rounded-lg border border-blue-500 transition-colors text-xs"
+            onclick="window.setResearchQueueAndActiveView('{{ next_queue_item.lane }}', '{{ next_queue_item.active_view }}', false)"
+            hx-get="/fragments/research/artifact-chain/{{ next_queue_item.chain_id }}"
+            hx-target="#research-artifact-chain-viewer"
+            hx-swap="innerHTML"
+            hx-on::after-request="window.syncResearchWorkbench('{{ next_queue_item.chain_id }}', '{{ next_queue_item.lane }}', '{{ next_queue_item.active_view }}')"
+          >{{ next_queue_item.open_label }}</button>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+
   {% if lane_counts.total_pending %}
     <div class="mb-4 border border-gray-200 rounded-lg bg-gray-50 p-3">
       <div class="flex justify-between items-baseline gap-4">

@@ -50,21 +50,32 @@ class IGBroker(BaseBroker):
         # EPICs that returned 403/404 — skip on future attempts
         self._blocked_epics: set = set()
 
+    def _credentials(self) -> dict[str, str]:
+        return config.ig_credentials(bool(getattr(self, "is_demo", True)))
+
+    def _account_number(self) -> str:
+        return config.ig_account_number(bool(getattr(self, "is_demo", True)))
+
     # ─── Connection ──────────────────────────────────────────────────────
 
     def connect(self) -> bool:
         """Authenticate with IG API using V2 session."""
         try:
+            creds = self._credentials()
+            if not (creds["username"] and creds["password"] and creds["api_key"]):
+                mode = "DEMO" if self.is_demo else "LIVE"
+                logger.error(f"IG {mode} credentials are incomplete")
+                return False
             self.session = requests.Session()
             self.session.headers.update({
                 "Content-Type": "application/json; charset=UTF-8",
                 "Accept": "application/json; charset=UTF-8",
-                "X-IG-API-KEY": config.IG_API_KEY,
+                "X-IG-API-KEY": creds["api_key"],
             })
 
             r = self.session.post(
                 f"{self.base_url}/session",
-                json={"identifier": config.IG_USERNAME, "password": config.IG_PASSWORD},
+                json={"identifier": creds["username"], "password": creds["password"]},
                 headers={**self.session.headers, "Version": "2"},
                 timeout=self._TIMEOUT,
             )
@@ -80,22 +91,23 @@ class IGBroker(BaseBroker):
 
             auth = r.json()
             current_acc = auth.get("currentAccountId", "")
+            account_number = self._account_number()
 
             # Switch to spread bet account if needed
-            if config.IG_ACC_NUMBER and current_acc != config.IG_ACC_NUMBER:
+            if account_number and current_acc != account_number:
                 sw = self.session.put(
                     f"{self.base_url}/session",
-                    json={"accountId": config.IG_ACC_NUMBER, "defaultAccount": "false"},
+                    json={"accountId": account_number, "defaultAccount": "false"},
                     headers={**self.session.headers, "Version": "1"},
                     timeout=self._TIMEOUT,
                 )
                 if sw.status_code == 200:
-                    logger.info(f"Switched to account {config.IG_ACC_NUMBER}")
+                    logger.info(f"Switched to account {account_number}")
                 else:
                     logger.warning(f"Account switch failed: {sw.status_code}")
 
             mode = "DEMO" if self.is_demo else "LIVE"
-            logger.info(f"IG {mode} connected. Account: {config.IG_ACC_NUMBER or current_acc}")
+            logger.info(f"IG {mode} connected. Account: {account_number or current_acc}")
             return True
 
         except Exception as e:
@@ -139,6 +151,7 @@ class IGBroker(BaseBroker):
 
         timeout_value = self._resolve_timeout(timeout)
         try:
+            account_number = self._account_number()
             r = self.session.get(
                 f"{self.base_url}/accounts",
                 headers=self._headers("1"),
@@ -149,7 +162,7 @@ class IGBroker(BaseBroker):
                 return AccountInfo(balance=0, equity=0, unrealised_pnl=0, open_positions=0)
 
             for acc in r.json().get("accounts", []):
-                if acc.get("accountId") == config.IG_ACC_NUMBER or acc.get("accountType") == "SPREADBET":
+                if acc.get("accountId") == account_number or (not account_number and acc.get("accountType") == "SPREADBET"):
                     bal = acc.get("balance", {})
                     balance = float(bal.get("balance", 0))
                     pnl = float(bal.get("profitLoss", 0))

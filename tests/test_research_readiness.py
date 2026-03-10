@@ -28,7 +28,9 @@ def test_load_pipeline_stage_counts_queries_pipeline_state():
     }
 
 
-def test_build_research_readiness_report_blocks_without_db():
+def test_build_research_readiness_report_blocks_without_db(monkeypatch):
+    import config as _config
+    monkeypatch.setattr(_config, "RESEARCH_SYSTEM_ACTIVE", False)
     report = build_research_readiness_report(
         as_of=date(2026, 3, 9),
         pipeline_status={
@@ -37,6 +39,7 @@ def test_build_research_readiness_report_blocks_without_db():
         },
         db_status={"status": "missing_dsn", "detail": "RESEARCH_DB_DSN is empty", "schema_ready": False},
         stage_counts_loader=lambda: {"review_pending": 9},
+        engine_a_diag_loader=lambda: {},
     )
 
     assert report["overall_status"] == "blocked"
@@ -46,7 +49,7 @@ def test_build_research_readiness_report_blocks_without_db():
     assert report["checks"][1]["key"] == "market_data"
     assert report["checks"][1]["status"] == "blocked"
     assert report["review_pending_count"] == 0
-    assert "Provision PostgreSQL" in report["issues"][0]
+    assert any("Provision PostgreSQL" in issue for issue in report["issues"])
 
 
 def test_build_research_readiness_report_highlights_partial_data_and_pending_signoff():
@@ -80,6 +83,7 @@ def test_build_research_readiness_report_highlights_partial_data_and_pending_sig
             ],
         },
         stage_counts_loader=lambda: {"pilot_ready": 1, "review_pending": 2},
+        engine_a_diag_loader=lambda: {"max_abs_forecast": 0.0, "nonzero_delta_count": 0},
     )
 
     by_key = {item["key"]: item for item in report["checks"]}
@@ -119,6 +123,7 @@ def test_build_research_readiness_report_allows_manual_validation_when_service_d
             "rows": [{"symbol": "SPY", "status": "ready", "latest_raw_bar": "2026-03-09"}],
         },
         stage_counts_loader=lambda: {},
+        engine_a_diag_loader=lambda: {"max_abs_forecast": 0.0, "nonzero_delta_count": 0},
     )
 
     by_key = {item["key"]: item for item in report["checks"]}
@@ -151,9 +156,42 @@ def test_build_research_readiness_report_suggests_cutover_when_green():
             "rows": [{"symbol": "SPY", "status": "ready", "latest_raw_bar": "2026-03-09"}],
         },
         stage_counts_loader=lambda: {},
+        engine_a_diag_loader=lambda: {"max_abs_forecast": 0.0, "nonzero_delta_count": 1},
     )
 
     assert report["overall_status"] == "ready"
-    assert report["issues"] == [
-        "Research readiness is green; enable RESEARCH_SYSTEM_ACTIVE when you want to leave mirror mode."
-    ]
+    assert report["issues"] == []
+
+
+def test_build_research_readiness_report_flags_engine_a_when_signals_exist_but_rebalance_is_flat():
+    report = build_research_readiness_report(
+        as_of=date(2026, 3, 10),
+        pipeline_status={
+            "engine_a": {
+                "enabled": True,
+                "configured": True,
+                "last_result": {"status": "ok", "as_of": "2026-03-10T16:46:15Z", "artifacts": 3},
+            },
+            "engine_b": {
+                "enabled": True,
+                "configured": True,
+                "last_result": {"status": "ok", "as_of": "2026-03-10T15:36:21Z", "current_stage": "scored"},
+            },
+        },
+        db_status={"status": "ready", "detail": "research schema ready", "schema_ready": True},
+        market_data_loader=lambda as_of: {
+            "instrument_count": 1,
+            "ready_count": 1,
+            "rows": [{"symbol": "SPY", "status": "ready", "latest_raw_bar": "2026-03-10"}],
+        },
+        stage_counts_loader=lambda: {},
+        engine_a_diag_loader=lambda: {"max_abs_forecast": 0.49, "nonzero_delta_count": 0},
+    )
+
+    by_key = {item["key"]: item for item in report["checks"]}
+
+    assert report["overall_status"] == "attention"
+    assert by_key["engine_a"]["status"] == "attention"
+    assert by_key["engine_a"]["headline"] == "granularity_blocked"
+    assert "capital base or contract granularity is too small" in by_key["engine_a"]["detail"]
+    assert any("Increase ENGINE_A_CAPITAL_BASE" in issue for issue in report["issues"])

@@ -108,7 +108,6 @@ from research.artifacts import (
     ArtifactType,
     Engine,
     ExecutionReport,
-    FillDetail,
     InstrumentSpec,
     PromotionOutcome,
     RebalanceSheet,
@@ -122,6 +121,17 @@ from research.dashboard import ResearchDashboardService
 from research.engine_b.source_scoring import SourceScoringService
 from research.model_router import ModelRouter
 from research.readiness import build_research_readiness_report
+from research.manual_execution import (
+    build_manual_engine_a_execution_report as _manual_build_engine_a_execution_report,
+    build_manual_engine_a_trade_instruments as _manual_build_engine_a_trade_instruments,
+    build_manual_engine_a_trade_sheet as _manual_build_engine_a_trade_sheet,
+    find_chain_artifact as _manual_find_chain_artifact,
+    latest_artifact_by_type as _manual_latest_artifact_by_type,
+    manual_engine_a_broker_target as _manual_engine_a_broker_target,
+    parse_contract_details as _manual_parse_contract_details,
+    queue_manual_engine_a_order_intents as _manual_queue_manual_engine_a_order_intents,
+    supersede_rebalance_sheet as _manual_supersede_rebalance_sheet,
+)
 from research.shared.decay_review import DecayReviewService
 from research.shared.kill_monitor import KillMonitor
 from research.shared.pilot_signoff import PilotSignoffService
@@ -209,10 +219,19 @@ def _get_or_create_broker() -> tuple[Optional[IGBroker], str]:
     if _broker is not None and _broker.is_connected():
         return _broker, ""
 
-    if not (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY):
-        return None, "IG credentials not configured (IG_USERNAME, IG_PASSWORD, IG_API_KEY)"
+    is_demo = config.ig_broker_is_demo()
+    if not config.ig_credentials_available(is_demo):
+        if is_demo:
+            return None, (
+                "IG demo credentials not configured. Set IG_DEMO_USERNAME, IG_DEMO_PASSWORD, "
+                "IG_DEMO_API_KEY (legacy fallback: IG_USERNAME, IG_PASSWORD, IG_API_KEY with IG_ACC_TYPE=DEMO)."
+            )
+        return None, (
+            "IG live credentials not configured. Set IG_LIVE_USERNAME, IG_LIVE_PASSWORD, "
+            "IG_LIVE_API_KEY (or legacy IG_USERNAME, IG_PASSWORD, IG_API_KEY)."
+        )
 
-    _broker = IGBroker(is_demo=(config.IG_ACC_TYPE == "DEMO"))
+    _broker = IGBroker(is_demo=is_demo)
     if _broker.connect():
         return _broker, ""
 
@@ -226,7 +245,7 @@ def _run_preflight_checks(logger: logging.Logger) -> dict[str, str]:
     Returns a dict of service_name -> "ok" | "missing".
     """
     checks = {
-        "ig_broker": "ok" if (config.IG_USERNAME and config.IG_PASSWORD and config.IG_API_KEY) else "missing",
+        "ig_broker": "ok" if config.ig_credentials_available(config.ig_broker_is_demo()) else "missing",
         "telegram": "ok" if (config.NOTIFICATIONS.get("telegram_token") and config.NOTIFICATIONS.get("telegram_chat_id")) else "missing",
         "anthropic_api": "ok" if os.getenv("ANTHROPIC_API_KEY") else "missing",
         "openai_api": "ok" if os.getenv("OPENAI_API_KEY") else "missing",
@@ -953,12 +972,11 @@ def _find_chain_artifact(
     *,
     artifact_store: ArtifactStore | None = None,
 ) -> ArtifactEnvelope | None:
-    store = artifact_store or ArtifactStore()
-    chain = store.get_chain(chain_id)
-    for envelope in reversed(chain):
-        if envelope.artifact_type == artifact_type:
-            return envelope
-    return None
+    return _manual_find_chain_artifact(
+        chain_id,
+        artifact_type,
+        artifact_store=artifact_store,
+    )
 
 
 def _serialize_research_synthesis_event(event: dict[str, Any]) -> dict[str, Any]:
@@ -2105,7 +2123,6 @@ def _operator_created_by(actor: str) -> str:
     clean_actor = str(actor or "").strip() or "operator"
     return clean_actor if clean_actor.startswith("operator:") else f"operator:{clean_actor}"
 
-
 def _build_operator_action_payload(
     *,
     chain_id: str,
@@ -2139,30 +2156,34 @@ def _supersede_rebalance_sheet(
     notes: str,
     artifact_store: ArtifactStore,
 ) -> ArtifactEnvelope:
-    clean_notes = str(notes or "").strip()
-    body = dict(rebalance.body)
-    body.update(
-        {
-            "approval_status": approval_status,
-            "decision_source": "operator",
-            "decided_by": str(actor or "").strip() or "operator",
-            "operator_notes": clean_notes or None,
-            "decided_at": _utc_now_iso(),
-        }
+    return _manual_supersede_rebalance_sheet(
+        rebalance=rebalance,
+        approval_status=approval_status,
+        actor=actor,
+        notes=notes,
+        artifact_store=artifact_store,
     )
-    envelope = ArtifactEnvelope(
-        artifact_type=ArtifactType.REBALANCE_SHEET,
-        engine=rebalance.engine,
-        ticker=rebalance.ticker,
-        edge_family=rebalance.edge_family,
-        chain_id=rebalance.chain_id,
-        parent_id=rebalance.artifact_id,
-        body=RebalanceSheet.model_validate(body),
-        created_by=_operator_created_by(actor),
-        tags=list(rebalance.tags or []),
+
+
+def _manual_engine_a_broker_target() -> str:
+    return _manual_engine_a_broker_target()
+
+
+def _parse_contract_details(contract_details: str | None) -> dict[str, str]:
+    return _manual_parse_contract_details(contract_details)
+
+
+def _build_manual_engine_a_trade_instruments(
+    deltas: dict[str, float],
+    *,
+    size_mode: str = "auto",
+    ig_market_details: dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, str, list[InstrumentSpec]]:
+    return _manual_build_engine_a_trade_instruments(
+        deltas,
+        size_mode=size_mode,
+        ig_market_details=ig_market_details,
     )
-    envelope.artifact_id = artifact_store.save(envelope)
-    return envelope
 
 
 def _build_manual_engine_a_trade_sheet(
@@ -2171,61 +2192,36 @@ def _build_manual_engine_a_trade_sheet(
     rebalance: ArtifactEnvelope,
     actor: str,
     artifact_store: ArtifactStore,
+    size_mode: str = "auto",
+    ig_market_details: dict[str, dict[str, Any]] | None = None,
+    symbols: list[str] | None = None,
 ) -> ArtifactEnvelope:
-    regime_artifact = _find_chain_artifact(chain_id, ArtifactType.REGIME_SNAPSHOT, artifact_store=artifact_store)
-    signal_artifact = _find_chain_artifact(chain_id, ArtifactType.ENGINE_A_SIGNAL_SET, artifact_store=artifact_store)
-    deltas = {
-        instrument: float(delta)
-        for instrument, delta in dict(rebalance.body).get("deltas", {}).items()
-        if abs(float(delta or 0.0)) > 0.0
-    }
-    if not deltas:
-        raise ValueError(f"Rebalance chain {chain_id[:8]} has no executable deltas")
-
-    instruments = [
-        InstrumentSpec(
-            ticker=instrument,
-            instrument_type="future",
-            broker="ibkr",
-            contract_details=f"delta_contracts={delta:.4f}",
-        )
-        for instrument, delta in deltas.items()
-    ]
-    trade_sheet = TradeSheet(
-        hypothesis_ref=str((regime_artifact.artifact_id if regime_artifact else rebalance.artifact_id) or ""),
-        experiment_ref=str((signal_artifact.artifact_id if signal_artifact else rebalance.artifact_id) or ""),
-        instruments=instruments,
-        sizing=SizingSpec(
-            method="risk_parity",
-            target_risk_pct=0.12,
-            max_notional=sum(abs(delta) for delta in deltas.values()),
-            sizing_parameters={
-                "generated_at": dict(rebalance.body).get("as_of") or _utc_now_iso(),
-                "decision_source": "operator_execute",
-            },
-        ),
-        entry_rules=["Submit manual Engine A rebalance approved from control plane."],
-        exit_rules=["Exit or resize on next Engine A rebalance decision."],
-        holding_period_target="daily_review",
-        risk_limits=ResearchRiskLimits(
-            max_loss_pct=5.0,
-            max_portfolio_impact_pct=20.0,
-            max_correlated_exposure_pct=40.0,
-        ),
-        kill_criteria=["regime_change", "drawdown", "cost_exceeded"],
-    )
-    envelope = ArtifactEnvelope(
-        artifact_type=ArtifactType.TRADE_SHEET,
-        engine=Engine.ENGINE_A,
-        ticker=rebalance.ticker,
-        edge_family=rebalance.edge_family,
+    return _manual_build_engine_a_trade_sheet(
         chain_id=chain_id,
-        body=trade_sheet,
-        created_by=_operator_created_by(actor),
-        tags=["engine_a", "trade_sheet", "manual_execute"],
+        rebalance=rebalance,
+        actor=actor,
+        artifact_store=artifact_store,
+        size_mode=size_mode,
+        ig_market_details=ig_market_details,
+        symbols=symbols,
     )
-    envelope.artifact_id = artifact_store.save(envelope)
-    return envelope
+
+
+def _queue_manual_engine_a_order_intents(
+    *,
+    chain_id: str,
+    rebalance: ArtifactEnvelope,
+    trade_sheet: ArtifactEnvelope,
+    actor: str,
+) -> list[dict[str, Any]]:
+    return _manual_queue_manual_engine_a_order_intents(
+        chain_id=chain_id,
+        rebalance=rebalance,
+        trade_sheet=trade_sheet,
+        actor=actor,
+        order_intent_creator=create_order_intent_envelope,
+        db_path=DB_PATH,
+    )
 
 
 def _build_manual_engine_a_execution_report(
@@ -2234,42 +2230,15 @@ def _build_manual_engine_a_execution_report(
     rebalance: ArtifactEnvelope,
     actor: str,
     artifact_store: ArtifactStore,
+    queued_intents: list[dict[str, Any]],
 ) -> ArtifactEnvelope:
-    rebalance_body = dict(rebalance.body)
-    fills = [
-        FillDetail(
-            instrument=instrument,
-            side="buy" if float(delta) > 0 else "sell",
-            quantity=abs(float(delta)),
-            price=100.0,
-            timestamp=rebalance_body.get("as_of") or _utc_now_iso(),
-            venue="MANUAL",
-        )
-        for instrument, delta in rebalance_body.get("deltas", {}).items()
-        if abs(float(delta or 0.0)) > 0.0
-    ]
-    report = ExecutionReport(
-        as_of=rebalance_body.get("as_of") or _utc_now_iso(),
-        trades_submitted=len(fills),
-        trades_filled=len(fills),
-        fills=fills,
-        slippage=0.0,
-        cost=float(rebalance_body.get("estimated_cost") or 0.0),
-        venue="MANUAL",
-        latency=0.0,
-    )
-    envelope = ArtifactEnvelope(
-        artifact_type=ArtifactType.EXECUTION_REPORT,
-        engine=Engine.ENGINE_A,
-        ticker=rebalance.ticker,
-        edge_family=rebalance.edge_family,
+    return _manual_build_engine_a_execution_report(
         chain_id=chain_id,
-        body=report,
-        created_by=_operator_created_by(actor),
-        tags=["engine_a", "execution", "manual_execute"],
+        rebalance=rebalance,
+        actor=actor,
+        artifact_store=artifact_store,
+        queued_intents=queued_intents,
     )
-    envelope.artifact_id = artifact_store.save(envelope)
-    return envelope
 
 
 def _build_review_retirement_memo(
@@ -2313,13 +2282,11 @@ def _latest_artifact_by_type(
     engine: Engine,
     artifact_store: ArtifactStore | None = None,
 ) -> ArtifactEnvelope | None:
-    store = artifact_store or ArtifactStore()
-    rows = store.query(
-        artifact_type=artifact_type,
+    return _manual_latest_artifact_by_type(
+        artifact_type,
         engine=engine,
-        limit=1,
+        artifact_store=artifact_store,
     )
-    return rows[0] if rows else None
 
 
 def _build_engine_a_regime_panel_context(
@@ -3664,8 +3631,8 @@ async def app_lifespan(_app: FastAPI):
     # Check IG credentials on startup
     if preflight["ig_broker"] == "missing":
         _logger.warning(
-            "IG credentials not configured. Set IG_USERNAME, IG_PASSWORD, IG_API_KEY in .env "
-            "to enable broker connection from the control plane."
+            "IG credentials not configured for the active broker mode. Set IG_DEMO_* or IG_LIVE_* "
+            "(legacy IG_* remains supported) to enable broker connection from the control plane."
         )
 
     # Auto-start scheduler and dispatcher if enabled
@@ -3920,7 +3887,7 @@ def create_app() -> FastAPI:
         info = broker.get_account_info()
         return {
             "ok": True,
-            "account": config.IG_ACC_NUMBER,
+            "account": config.ig_account_number(broker.is_demo),
             "mode": "DEMO" if broker.is_demo else "LIVE",
             "balance": info.balance,
             "equity": info.equity,
@@ -3936,7 +3903,7 @@ def create_app() -> FastAPI:
         positions = _broker.get_positions()
         return {
             "connected": True,
-            "account": config.IG_ACC_NUMBER,
+            "account": config.ig_account_number(_broker.is_demo),
             "mode": "DEMO" if _broker.is_demo else "LIVE",
             "balance": info.balance,
             "equity": info.equity,
@@ -5043,6 +5010,19 @@ def create_app() -> FastAPI:
                 chain_id=rebalance.chain_id,
                 error=f"Rebalance chain {rebalance.chain_id[:8]} has no executable deltas.",
             )
+        try:
+            _build_manual_engine_a_trade_instruments(
+                {
+                    instrument: float(delta)
+                    for instrument, delta in dict(rebalance.body).get("deltas", {}).items()
+                    if abs(float(delta or 0.0)) > 0.0
+                }
+            )
+        except Exception as exc:
+            return render_output(
+                chain_id=rebalance.chain_id,
+                error=f"Rebalance execution failed: {exc}",
+            )
 
         try:
             approved_rebalance = _supersede_rebalance_sheet(
@@ -5058,11 +5038,18 @@ def create_app() -> FastAPI:
                 actor=clean_actor or "operator",
                 artifact_store=store,
             )
+            queued_intents = _queue_manual_engine_a_order_intents(
+                chain_id=rebalance.chain_id,
+                rebalance=approved_rebalance,
+                trade_sheet=trade_sheet,
+                actor=clean_actor or "operator",
+            )
             execution_report = _build_manual_engine_a_execution_report(
                 chain_id=rebalance.chain_id,
                 rebalance=approved_rebalance,
                 actor=clean_actor or "operator",
                 artifact_store=store,
+                queued_intents=queued_intents,
             )
         except Exception as exc:
             return render_output(
@@ -5077,7 +5064,7 @@ def create_app() -> FastAPI:
                 chain_id=rebalance.chain_id,
                 title="Rebalance Executed",
                 status="approved",
-                summary="Engine A rebalance approved, tradesheet created, and execution report recorded.",
+                summary="Engine A rebalance approved, tradesheet created, and order intents queued for dispatcher.",
                 artifacts=[approved_rebalance, trade_sheet, execution_report],
             ),
         )
@@ -5942,7 +5929,7 @@ def create_app() -> FastAPI:
         if connected:
             info = snapshot.get("info")
             positions = snapshot.get("positions", [])
-            ctx["account"] = config.IG_ACC_NUMBER
+            ctx["account"] = config.ig_account_number(_broker.is_demo)
             ctx["mode"] = "DEMO" if _broker.is_demo else "LIVE"
             ctx["balance"] = info.balance
             ctx["equity"] = info.equity
@@ -7030,15 +7017,26 @@ def create_app() -> FastAPI:
     @app.get("/fragments/research/alerts", response_class=HTMLResponse)
     def research_alerts_fragment(request: Request, queue_lane: str = "all", chain_id: str = ""):
         clean_chain_id = str(chain_id or "").strip()
+        normalized_queue_lane = _normalize_research_queue_lane(queue_lane)
+        alerts_context = _get_research_alerts_context()
         return TEMPLATES.TemplateResponse(
             request,
             "_research_alerts.html",
             {
                 "request": request,
-                "selected_queue_lane": _normalize_research_queue_lane(queue_lane),
+                "selected_queue_lane": normalized_queue_lane,
                 "selected_chain_id": clean_chain_id,
                 "selected_chain_context": _build_research_selected_chain_queue_context(clean_chain_id),
-                **_get_research_alerts_context(),
+                "next_queue_item": (
+                    _build_research_next_queue_item_context(
+                        normalized_queue_lane,
+                        alerts=alerts_context,
+                        exclude_chain_id=clean_chain_id,
+                    )
+                    if not clean_chain_id
+                    else None
+                ),
+                **alerts_context,
             },
         )
 

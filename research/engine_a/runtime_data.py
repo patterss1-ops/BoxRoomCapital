@@ -90,6 +90,37 @@ def _percentile_rank(values: list[float], current: float) -> float:
     return round(100.0 * below / len(values), 2)
 
 
+_ENGINE_A_EXECUTION_PROFILES: dict[str, dict[str, Any]] = {
+    "ES": {"contract_multiplier": 5.0, "instrument_type": "micro_equity", "broker": "ibkr", "asset_class": "index"},
+    "NQ": {"contract_multiplier": 2.0, "instrument_type": "micro_equity", "broker": "ibkr", "asset_class": "index"},
+    "YM": {"contract_multiplier": 0.5, "instrument_type": "micro_equity", "broker": "ibkr", "asset_class": "index"},
+    "RTY": {"contract_multiplier": 5.0, "instrument_type": "micro_equity", "broker": "ibkr", "asset_class": "index"},
+    "ZN": {"contract_multiplier": 1000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "rates"},
+    "ZF": {"contract_multiplier": 1000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "rates"},
+    "ZB": {"contract_multiplier": 1000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "rates"},
+    "GC": {"contract_multiplier": 10.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "SI": {"contract_multiplier": 1000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "CL": {"contract_multiplier": 100.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "NG": {"contract_multiplier": 1000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "HG": {"contract_multiplier": 2500.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "6E": {"contract_multiplier": 125000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "fx"},
+    "6B": {"contract_multiplier": 62500.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "fx"},
+    "6J": {"contract_multiplier": 12500000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "fx"},
+    "ZC": {"contract_multiplier": 5000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "ZS": {"contract_multiplier": 5000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+    "ZW": {"contract_multiplier": 5000.0, "instrument_type": "standard", "broker": "ibkr", "asset_class": "commodity"},
+}
+
+
+def _execution_profile(root_symbol: str, multiplier: float) -> dict[str, Any]:
+    profile = dict(_ENGINE_A_EXECUTION_PROFILES.get(root_symbol, {}))
+    profile.setdefault("contract_multiplier", float(multiplier or 1.0))
+    profile.setdefault("instrument_type", "standard")
+    profile.setdefault("broker", "ibkr")
+    profile.setdefault("asset_class", "index")
+    return profile
+
+
 class EngineARuntimeDataProvider:
     """Assemble the numeric payload expected by EngineAPipeline from PostgreSQL."""
 
@@ -122,6 +153,7 @@ class EngineARuntimeDataProvider:
         vol_estimates: dict[str, float] = {}
         contract_sizes: dict[str, float] = {}
         current_positions: dict[str, float] = {}
+        instrument_profiles: dict[str, dict[str, Any]] = {}
 
         for root_symbol in root_symbols:
             front_contract = get_front_contract(root_symbol, as_of_date)
@@ -143,6 +175,7 @@ class EngineARuntimeDataProvider:
 
             instrument = get_instrument(front_contract.instrument_id)
             multiplier = float(instrument.multiplier) if instrument and instrument.multiplier is not None else 1.0
+            profile = _execution_profile(root_symbol, multiplier)
             current_price = float(multiple.current_price)
             next_price = float(multiple.next_price) if multiple.next_price is not None else current_price
             carry_points = get_carry_series(
@@ -162,8 +195,14 @@ class EngineARuntimeDataProvider:
                 "carry_history": [float(point["carry"]) for point in carry_points[-90:]],
             }
             vol_estimates[root_symbol] = max(0.05, round(_std(returns) * math.sqrt(252), 6))
-            contract_sizes[root_symbol] = max(1.0, abs(current_price * multiplier))
+            contract_sizes[root_symbol] = max(1.0, abs(current_price * float(profile["contract_multiplier"])))
             current_positions[root_symbol] = 0.0
+            instrument_profiles[root_symbol] = {
+                "instrument_type": str(profile["instrument_type"]),
+                "broker": str(profile["broker"]),
+                "asset_class": str(profile["asset_class"]),
+                "contract_multiplier": float(profile["contract_multiplier"]),
+            }
 
         if not price_history:
             raise ValueError("Insufficient canonical futures history to build Engine A inputs")
@@ -179,6 +218,7 @@ class EngineARuntimeDataProvider:
             "vol_estimates": vol_estimates,
             "correlations": correlations,
             "current_positions": current_positions,
+            "instrument_profiles": instrument_profiles,
             "capital": self._capital_base,
             "contract_sizes": contract_sizes,
             "instrument_type": "future",

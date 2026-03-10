@@ -128,6 +128,7 @@ class EngineAPipeline:
             instrument_type=market_data.get("instrument_type", "standard"),
             broker=market_data.get("broker", "ibkr"),
             asset_class=market_data.get("asset_class", "index"),
+            instrument_profiles=market_data.get("instrument_profiles"),
         )
         rebalance_artifact.chain_id = chain_id
         rebalance_artifact.tags = ["engine_a", "rebalance"]

@@ -18,6 +18,7 @@ from broker.paper import PaperBroker
 from data.order_intent_store import (
     claim_order_intent_for_dispatch,
     get_dispatchable_order_intents,
+    get_dispatchable_order_intents_by_ids,
     record_execution_metric,
     transition_order_intent,
 )
@@ -73,6 +74,15 @@ class IntentDispatcher:
     def run_once(self, limit: int = 50) -> DispatchRunSummary:
         """Process at most ``limit`` dispatchable intents in created_at order."""
         queue = get_dispatchable_order_intents(limit=limit, db_path=self.db_path)
+        return self._run_rows(queue)
+
+    def run_intent_ids(self, intent_ids: list[str]) -> DispatchRunSummary:
+        """Process a concrete set of dispatchable intent ids."""
+        queue = get_dispatchable_order_intents_by_ids(intent_ids, db_path=self.db_path)
+        return self._run_rows(queue)
+
+    def _run_rows(self, queue: list[dict]) -> DispatchRunSummary:
+        """Dispatch the provided queue rows in order."""
         summary = DispatchRunSummary(discovered=len(queue))
 
         try:
@@ -378,8 +388,7 @@ def default_broker_resolver(broker_name: str) -> BaseBroker:
     if key == "paper":
         return PaperBroker()
     if key == "ig":
-        is_demo = str(config.IG_ACC_TYPE or "DEMO").upper() != "LIVE"
-        return IGBroker(is_demo=is_demo)
+        return IGBroker(is_demo=config.ig_broker_is_demo())
     if key == "ibkr":
         return IBKRBroker()
     raise ValueError(f"Unsupported broker target '{broker_name}'")

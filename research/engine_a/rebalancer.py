@@ -31,6 +31,7 @@ class Rebalancer:
         instrument_type: str = "standard",
         broker: str = "ibkr",
         asset_class: str = "index",
+        instrument_profiles: dict[str, dict[str, str | float]] | None = None,
     ) -> ArtifactEnvelope:
         current = {instrument: float(value) for instrument, value in current_positions.items()}
         targets = {instrument: position.contracts for instrument, position in target_positions.items()}
@@ -47,12 +48,13 @@ class Rebalancer:
             if delta != 0:
                 per_contract_notional = abs(position.notional / position.contracts) if position.contracts else abs(position.notional)
                 trade_notional = abs(delta) * per_contract_notional
+                profile = dict((instrument_profiles or {}).get(instrument) or {})
                 estimate = cost_model.estimate_round_trip_cost(
-                    instrument_type=instrument_type,
-                    broker=broker,
+                    instrument_type=str(profile.get("instrument_type") or instrument_type),
+                    broker=str(profile.get("broker") or broker),
                     notional=max(trade_notional, 1.0),
                     holding_days=1,
-                    asset_class=asset_class,
+                    asset_class=str(profile.get("asset_class") or asset_class),
                 )
                 total_cost += estimate.total_round_trip
 

@@ -136,6 +136,10 @@ These are the undelivered backlog items from Claude's review. Lower priority tha
   - The filtered slice-navigation banner now also renders its selected-position and button-disabled state from the initial server response, so the board no longer flashes generic navigation copy before client-side selection restoration runs.
   - Latest review/rebalance demands now outrank older pilot-readiness state in the shared chain context, so the page reflects the most recent operator obligation instead of stale pilot prompts.
   - The chain viewer now has explicit timeline navigation and “current artifact” emphasis, so operators can jump through the chain without treating the lineage pane as a raw scroll dump.
+  - The chain viewer now promotes a dedicated current-artifact snapshot and tucks prior lineage plus timeline navigation behind an explicit `Lineage History & Debug` disclosure, so the default surface answers “where is this chain now?” before exposing debug history.
+  - Multi-artifact workbench action results now surface the latest saved artifact inline and collapse secondary artifacts behind `Additional Updated Artifacts`, reducing post-action scroll noise.
+  - The archive now has a persistent `History Lens` control row for `All`, `Completed`, `Syntheses`, `Post-Mortems`, and `Retirements`, so operators can move through closed-loop slices without rebuilding the rest of their archive filters each time.
+  - The decision queue now promotes a `Next Decision` banner when nothing is selected, pointing the operator to the next actionable review, pilot, or rebalance item in the current lane before they scan the full queue.
   - The workbench header now has a persistent current-focus ribbon, so the selected chain’s posture, lane, and next move stay visible even before the operator dives into the timeline or action pane.
   - The focus ribbon now exposes action-readiness state and fast-path actions for pilot, rebalance, and synthesis cases, while still routing multi-path review acknowledgements into the full workbench.
   - The focus ribbon now also carries the matching `Active Chains` slice and steers queue focus plus board focus together, so the page header, queue, and active board no longer drift apart when the operator follows the ribbon’s recommendation.
@@ -197,16 +201,16 @@ These are the undelivered backlog items from Claude's review. Lower priority tha
 ## Priority Order
 
 ```
-1. Provision PostgreSQL                    [User, 15 min]
-2. Seed market data via yfinance           [Codex, 30 min]
-3. Wire backtester to experiment service   [Codex, 1 tranche]
-4. Run Engine A on historical data         [Validate manually]
-5. Run Engine B full cycle                 [Validate manually]
-6. Pilot sign-off endpoints                [Codex, 1 tranche]
-7. INT-3 E2E tests                         [Codex, 1 tranche]
-8. Missing action endpoints                [Codex, 1 tranche]
-9. Paper trade on IG Demo                  [User + system]
-10. Remaining UX polish                    [Codex, 2-3 tranches]
+1. Provision PostgreSQL                    [DONE — schema initialized, 2026-03-10]
+2. Seed market data via yfinance           [DONE — 89 instruments, 111,956 bars, 2026-03-10]
+3. Wire backtester to experiment service   [DONE — ResearchBacktestAdapter already wired in runtime.py]
+4. Run Engine A on historical data         [DONE — DB-backed validation ok, 3 artifacts, 2026-03-10]
+5. Run Engine B full cycle                 [DONE — live validation ok, scored/PARK, 4 artifacts, 2026-03-10]
+6. Pilot sign-off endpoints                [DONE — tranche 30, 2026-03-09]
+7. INT-3 E2E tests                         [DONE — 12 tests, 7 scenarios, 2026-03-10]
+8. Missing action endpoints                [DONE — tranche 31, 2026-03-09]
+9. Minimal-stake live trade on IG          [DONE — user confirmed no demo account is available; live IG smoke open/close and live dispatcher smoke both passed at 0.01 stake on US 500, and the Engine A research execute->dispatch->same-session close path passed live at 0.01 stake on NQ->QQQ with account flat afterward, 2026-03-10]
+10. Remaining UX polish                    [DONE — research workflow shell now defaults to current-state-first chain viewing, compressed workbench action results, archive history lenses, and queue-level next-decision guidance, 2026-03-10]
 ```
 
-Items 1-3 unblock everything. Items 4-5 prove it works. Items 6-8 complete the spec. Item 9 is the goal.
+Items 1-10 complete.

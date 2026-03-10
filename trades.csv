@@ -1,2 +1,14 @@
 id,time,ticker,strategy,direction,action,stake,price,pnl
 1,2026-02-26T18:22:06.495952,CL=F,IBS++ v3,long,open,0.5,0.0,0.0
+1,2026-03-10T17:38:48.120386,CL,research_engine_a_rebalance,long,open,3.0,0.0,0.0
+2,2026-03-10T17:38:48.140792,GC,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+3,2026-03-10T17:38:48.158651,HG,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+4,2026-03-10T17:38:48.194659,NG,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+5,2026-03-10T17:38:48.216935,NQ,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+6,2026-03-10T17:38:48.239178,RTY,research_engine_a_rebalance,long,open,2.0,0.0,0.0
+1,2026-03-10T17:44:22.958810,CL,research_engine_a_rebalance,long,open,3.0,0.0,0.0
+2,2026-03-10T17:44:22.975557,GC,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+3,2026-03-10T17:44:22.991858,HG,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+4,2026-03-10T17:44:23.009268,NG,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+5,2026-03-10T17:44:23.026049,NQ,research_engine_a_rebalance,long,open,1.0,0.0,0.0
+6,2026-03-10T17:44:23.043009,RTY,research_engine_a_rebalance,long,open,2.0,0.0,0.0

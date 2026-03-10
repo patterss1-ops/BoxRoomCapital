@@ -264,6 +264,7 @@ def create_order_intent_envelope(
     action_id_value = action_id or uuid.uuid4().hex
     correlation_id_value = correlation_id or _default_correlation_id(action_type, intent.instrument)
     request_json = _json_dumps(request_payload)
+    conn = get_conn(db_path)
 
     # Keep compatibility with existing action state machine.
     create_order_action(
@@ -274,9 +275,8 @@ def create_order_intent_envelope(
         max_attempts=max_attempts,
         request_payload=request_json,
         db_path=db_path,
+        conn=conn,
     )
-
-    conn = get_conn(db_path)
     conn.execute(
         """INSERT INTO order_intents
            (intent_id, created_at, updated_at, correlation_id, action_id, strategy_id,
@@ -388,6 +388,7 @@ def transition_order_intent(
         error_message=error_message,
         result_payload=response_json,
         db_path=db_path,
+        conn=conn,
     )
 
     conn.execute(
@@ -527,6 +528,52 @@ def get_dispatchable_order_intents(
             OrderIntentStatus.QUEUED.value,
             OrderIntentStatus.RETRYING.value,
             limit,
+        ),
+    ).fetchall()
+    conn.close()
+
+    items = []
+    for row in rows:
+        payload = dict(row)
+        payload["risk_tags"] = _json_load(payload.get("risk_tags"))
+        payload["metadata"] = _json_load(payload.get("metadata"))
+        payload["max_attempts"] = int(payload.get("max_attempts", 1) or 1)
+        payload["action_attempt"] = int(payload.get("action_attempt", 0) or 0)
+        items.append(payload)
+    return items
+
+
+def get_dispatchable_order_intents_by_ids(
+    intent_ids: list[str],
+    db_path: str = DB_PATH,
+) -> list[dict[str, Any]]:
+    """
+    Get queued/retrying intents for a concrete set of intent ids.
+
+    Rows are returned oldest-first using the same shape as
+    ``get_dispatchable_order_intents``.
+    """
+    ensure_order_intent_schema(db_path)
+    clean_ids = [str(intent_id or "").strip() for intent_id in intent_ids if str(intent_id or "").strip()]
+    if not clean_ids:
+        return []
+
+    placeholders = ", ".join("?" for _ in clean_ids)
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        f"""SELECT oi.*,
+                  oa.max_attempts AS max_attempts,
+                  oa.attempt AS action_attempt
+           FROM order_intents oi
+           JOIN order_actions oa ON oi.action_id = oa.id
+           WHERE oi.intent_id IN ({placeholders})
+             AND oi.status IN (?, ?)
+             AND oi.latest_attempt < oa.max_attempts
+           ORDER BY oi.created_at ASC""",
+        (
+            *clean_ids,
+            OrderIntentStatus.QUEUED.value,
+            OrderIntentStatus.RETRYING.value,
         ),
     ).fetchall()
     conn.close()

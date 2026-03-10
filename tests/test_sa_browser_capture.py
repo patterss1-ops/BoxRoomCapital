@@ -738,6 +738,8 @@ def test_sa_quant_capture_webhook_stores_capture_and_signal(monkeypatch):
     recorded_events = []
     stored_features = []
 
+    import config as _config
+    monkeypatch.setattr(_config, "RESEARCH_SYSTEM_ACTIVE", False)
     _store = FakeWriteEventStore()
     monkeypatch.setattr(server, "EventStore", lambda *a, **kw: _store)
     recorded_events = _store.events
@@ -748,6 +750,7 @@ def test_sa_quant_capture_webhook_stores_capture_and_signal(monkeypatch):
         lambda ticker, features, feature_store, as_of=None: stored_features.append((ticker, features)) or "rec-1",
     )
     monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+    monkeypatch.setattr(server, "_queue_engine_b_intake", lambda **kw: {"ok": True, "job_id": "stub-eb"})
 
     endpoint = _route_endpoint("/api/webhooks/sa_quant_capture", "POST")
     response = asyncio.run(endpoint(_build_json_request("/api/webhooks/sa_quant_capture", _sample_payload())))
@@ -826,12 +829,16 @@ def test_sa_page_capture_webhook_queues_article_intel(monkeypatch):
     created_jobs = []
     analyzed = []
 
+    import config as _config
+    monkeypatch.setattr(_config, "RESEARCH_SYSTEM_ACTIVE", False)
     _store = FakeWriteEventStore()
     recorded_events = _store.events
     monkeypatch.setattr(server, "EventStore", lambda *a, **kw: _store)
     monkeypatch.setattr(server, "create_job", lambda **kwargs: created_jobs.append(kwargs))
     monkeypatch.setattr(server, "analyze_intel_async", lambda submission, job_id: analyzed.append((submission, job_id)))
     monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+    # Mirror mode also calls _queue_engine_b_intake; stub control to prevent real enqueue
+    monkeypatch.setattr(server, "_queue_engine_b_intake", lambda **kw: {"ok": True, "job_id": "stub-eb"})
 
     endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
     response = asyncio.run(
@@ -905,6 +912,9 @@ def test_sa_page_capture_webhook_accepts_expanded_market_news_story(monkeypatch)
     created_jobs = []
     analyzed = []
 
+    import config as _config
+    monkeypatch.setattr(_config, "RESEARCH_SYSTEM_ACTIVE", False)
+
     class _FakeEventStore:
         def __init__(self, *args, **kwargs):
             pass
@@ -927,6 +937,7 @@ def test_sa_page_capture_webhook_accepts_expanded_market_news_story(monkeypatch)
     monkeypatch.setattr(server, "create_job", lambda **kwargs: created_jobs.append(kwargs))
     monkeypatch.setattr(server, "analyze_intel_async", lambda submission, job_id: analyzed.append((submission, job_id)))
     monkeypatch.setattr(server, "_safe_log_event", lambda **kwargs: None)
+    monkeypatch.setattr(server, "_queue_engine_b_intake", lambda **kw: {"ok": True, "job_id": "stub-eb"})
 
     endpoint = _route_endpoint("/api/webhooks/sa_page_capture", "POST")
     response = asyncio.run(

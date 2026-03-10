@@ -61,6 +61,8 @@ def _stub_side_effects(monkeypatch, tmp_path):
     monkeypatch.setattr(server, "get_conn", lambda path=None: trade_db.get_conn(test_db))
     monkeypatch.setattr(server, "create_job", lambda **kw: None)
     monkeypatch.setattr(server, "log_event", lambda **kw: None)
+    monkeypatch.setattr(server.config, "RESEARCH_SYSTEM_ACTIVE", False)
+    monkeypatch.setattr(server, "_queue_engine_b_intake", lambda **kw: {"ok": True, "job_id": "stub-eb"})
     monkeypatch.setattr(
         "intelligence.intel_pipeline.analyze_intel_async",
         lambda sub, job_id: None,

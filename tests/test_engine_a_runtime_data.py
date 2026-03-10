@@ -44,8 +44,10 @@ def test_engine_a_runtime_provider_builds_pipeline_payload(monkeypatch):
     assert payload["price_history"]["ES"][-1] == 359.0
     assert payload["term_structure"]["ES"]["front_price"] == 5200.0
     assert payload["term_structure"]["ES"]["deferred_price"] == 5180.0
-    assert payload["contract_sizes"]["ES"] == 260000.0
+    assert payload["contract_sizes"]["ES"] == 26000.0
     assert payload["current_positions"]["ES"] == 0.0
+    assert payload["instrument_profiles"]["ES"]["instrument_type"] == "micro_equity"
+    assert payload["instrument_profiles"]["ES"]["contract_multiplier"] == 5.0
     assert set(payload["regime_inputs"]) == {"vix", "vix_percentile", "index_data", "yield_data", "macro_data"}
 
 

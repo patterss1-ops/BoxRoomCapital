@@ -15,6 +15,7 @@ from data.order_intent_store import (
     create_order_intent_envelope,
     get_execution_metrics,
     get_dispatchable_order_intents,
+    get_dispatchable_order_intents_by_ids,
     get_order_intent,
     get_order_intent_attempts,
     get_order_intent_transitions,
@@ -475,6 +476,64 @@ class TestIntentDispatcher:
 
         remaining = get_dispatchable_order_intents(limit=10, db_path=db)
         assert len(remaining) == 3
+
+    def test_dispatcher_can_target_specific_intent_ids(self, tmp_path):
+        db = self._init_db(tmp_path)
+        older = self._create_intent(db, instrument="OLD")
+        target_1 = self._create_intent(db, instrument="AAA")
+        target_2 = self._create_intent(db, instrument="BBB")
+
+        target_rows = get_dispatchable_order_intents_by_ids([target_1, target_2], db_path=db)
+        assert [row["intent_id"] for row in target_rows] == [target_1, target_2]
+
+        stub = StubBroker([
+            OrderResult(success=True, order_id="o1"),
+            OrderResult(success=True, order_id="o2"),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+        summary = dispatcher.run_intent_ids([target_1, target_2])
+
+        assert summary.discovered == 2
+        assert summary.completed == 2
+        assert get_order_intent(target_1, db_path=db)["status"] == "completed"
+        assert get_order_intent(target_2, db_path=db)["status"] == "completed"
+        assert get_order_intent(older, db_path=db)["status"] == "queued"
+
+    def test_dispatcher_completes_when_db_path_uses_cached_default_connection(self, tmp_path, monkeypatch):
+        db = str(tmp_path / "cached_default_dispatcher.db")
+        cache = getattr(trade_db._thread_local, "conns", None)
+        if cache:
+            for conn in list(cache.values()):
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+            cache.clear()
+
+        monkeypatch.setattr(trade_db, "DB_PATH", db)
+        trade_db.init_db(db)
+        intent_id = self._create_intent(db, side="BUY", max_attempts=2)
+
+        stub = StubBroker([
+            OrderResult(success=True, order_id="ord-default", fill_qty=2.0, fill_price=501.25),
+        ])
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+
+        summary = dispatcher.run_intent_ids([intent_id])
+
+        assert summary.discovered == 1
+        assert summary.completed == 1
+        row = get_order_intent(intent_id, db_path=db)
+        assert row is not None
+        assert row["status"] == "completed"
 
     def test_dispatcher_broker_connect_failure_marks_retrying(self, tmp_path):
         db = self._init_db(tmp_path)

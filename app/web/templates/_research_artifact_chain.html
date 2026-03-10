@@ -291,80 +291,143 @@
         </div>
       {% endif %}
 
-      <div class="mb-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
-        <div class="flex justify-between gap-3 items-baseline">
+      <div id="{{ latest.dom_id }}" class="mb-4 rounded-lg border border-blue-200 bg-white p-4">
+        <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
           <div>
-            <p class="text-[11px] uppercase tracking-wide text-gray-400">Timeline Navigation</p>
-            <p class="mt-1 text-sm font-semibold text-gray-800">Jump through the chain before opening raw lineage details.</p>
-          </div>
-          <p class="text-xs text-gray-500">{{ artifact_navigation|length }} artifact{% if artifact_navigation|length != 1 %}s{% endif %}</p>
-        </div>
-        <div class="mt-3 flex flex-wrap gap-2">
-          {% for nav in artifact_navigation %}
-            <a href="#{{ nav.dom_id }}" class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs {% if nav.is_latest %}border-blue-300 bg-blue-50 text-blue-700{% else %}border-gray-300 bg-white text-gray-700{% endif %}">
-              <span class="font-semibold uppercase tracking-wide">v{{ nav.version }}</span>
-              <span>{{ nav.label }}</span>
-              {% if nav.is_latest %}
-                <span class="font-semibold uppercase tracking-wide">current</span>
+            <p class="text-[11px] uppercase tracking-wide text-blue-700">Current Artifact Snapshot</p>
+            <div class="mt-1 flex items-center gap-2 flex-wrap">
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">
+                v{{ latest.version }}
+              </span>
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">current</span>
+              <span class="text-sm font-semibold text-gray-800">{{ latest.artifact_label }}</span>
+              {% if latest.ticker %}
+                <span class="text-xs font-mono text-gray-500">{{ latest.ticker }}</span>
               {% endif %}
-            </a>
-          {% endfor %}
+            </div>
+            <p class="mt-1 text-xs text-gray-400 font-mono">
+              {{ latest.sequence_label }} · {{ latest.artifact_id[:8] }}{% if latest.parent_id %} <- {{ latest.parent_id[:8] }}{% endif %}
+            </p>
+            <p class="mt-2 text-xs text-gray-500">This is the latest persisted state on the chain. Expand history only when you need the path that led here.</p>
+          </div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ latest.engine }}</span>
+            {% if latest.edge_family %}
+              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">{{ latest.edge_family }}</span>
+            {% endif %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ latest.status }}</span>
+          </div>
         </div>
-      </div>
-    {% endif %}
 
-    <div class="space-y-3">
-      {% for artifact in artifacts %}
-        <article id="{{ artifact.dom_id }}" class="border rounded-lg p-3 {% if artifact.is_latest %}border-blue-300 bg-blue-50/40{% else %}border-gray-200{% endif %}">
-          <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
-            <div>
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">
-                  v{{ artifact.version }}
-                </span>
-                {% if artifact.is_latest %}
-                  <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">current</span>
-                {% endif %}
-                <span class="text-sm font-semibold text-gray-800">{{ artifact.artifact_label }}</span>
-                {% if artifact.ticker %}
-                  <span class="text-xs font-mono text-gray-500">{{ artifact.ticker }}</span>
-                {% endif %}
+        <div class="mt-3 grid grid-cols-1 lg:grid-cols-[180px_1fr] gap-2 text-sm">
+          <span class="text-gray-400">Created</span>
+          <span class="text-gray-700 font-mono text-xs">{{ latest.created_at or "-" }}</span>
+        </div>
+        {% if latest.summary %}
+          <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2">
+            {% for item in latest.summary %}
+              <div class="grid grid-cols-[110px_1fr] gap-2 items-start">
+                <span class="text-xs uppercase tracking-wide text-gray-400">{{ item.label }}</span>
+                <span class="text-sm text-gray-700">{{ item.value }}</span>
               </div>
-              <p class="mt-1 text-xs text-gray-400 font-mono">
-                {{ artifact.sequence_label }} · {{ artifact.artifact_id[:8] }}{% if artifact.parent_id %} <- {{ artifact.parent_id[:8] }}{% endif %}
-              </p>
-            </div>
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ artifact.engine }}</span>
-              {% if artifact.edge_family %}
-                <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">{{ artifact.edge_family }}</span>
-              {% endif %}
-              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ artifact.status }}</span>
-            </div>
+            {% endfor %}
           </div>
+        {% endif %}
 
-          <div class="mt-3 grid grid-cols-1 lg:grid-cols-[180px_1fr] gap-2 text-sm">
-            <span class="text-gray-400">Created</span>
-            <span class="text-gray-700 font-mono text-xs">{{ artifact.created_at or "-" }}</span>
-          </div>
-          {% if artifact.summary %}
-            <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2">
-              {% for item in artifact.summary %}
-                <div class="grid grid-cols-[110px_1fr] gap-2 items-start">
-                  <span class="text-xs uppercase tracking-wide text-gray-400">{{ item.label }}</span>
-                  <span class="text-sm text-gray-700">{{ item.value }}</span>
-                </div>
+        <details class="mt-3">
+          <summary class="cursor-pointer text-sm font-semibold text-gray-600">Raw Body</summary>
+          <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ latest.body | tojson(indent=2) }}</pre>
+        </details>
+      </div>
+
+      {% if artifact_count > 1 %}
+        <details class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <summary class="cursor-pointer flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2">
+            <span class="text-sm font-semibold text-gray-800">Lineage History &amp; Debug</span>
+            <span class="text-xs text-gray-500">{{ artifact_count - 1 }} previous artifact{% if artifact_count - 1 != 1 %}s{% endif %}</span>
+          </summary>
+          <p class="mt-2 text-xs text-gray-500">Expand to inspect earlier steps, jump through the timeline, and open raw lineage details.</p>
+
+          <div class="mt-4 rounded-lg border border-gray-200 bg-white p-3">
+            <div class="flex justify-between gap-3 items-baseline">
+              <div>
+                <p class="text-[11px] uppercase tracking-wide text-gray-400">Timeline Navigation</p>
+                <p class="mt-1 text-sm font-semibold text-gray-800">Jump through the chain history without reopening the current state card.</p>
+              </div>
+              <p class="text-xs text-gray-500">{{ artifact_navigation|length }} total artifact{% if artifact_navigation|length != 1 %}s{% endif %}</p>
+            </div>
+            <div class="mt-3 flex flex-wrap gap-2">
+              {% for nav in artifact_navigation %}
+                <a href="#{{ nav.dom_id }}" class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs {% if nav.is_latest %}border-blue-300 bg-blue-50 text-blue-700{% else %}border-gray-300 bg-white text-gray-700{% endif %}">
+                  <span class="font-semibold uppercase tracking-wide">v{{ nav.version }}</span>
+                  <span>{{ nav.label }}</span>
+                  {% if nav.is_latest %}
+                    <span class="font-semibold uppercase tracking-wide">current</span>
+                  {% endif %}
+                </a>
               {% endfor %}
             </div>
-          {% endif %}
+          </div>
 
-          <details class="mt-3">
-            <summary class="cursor-pointer text-sm font-semibold text-gray-600">Raw Body</summary>
-            <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ artifact.body | tojson(indent=2) }}</pre>
-          </details>
-        </article>
-      {% endfor %}
-    </div>
+          <div class="mt-4 space-y-3">
+            {% for artifact in artifacts %}
+              {% if not artifact.is_latest %}
+                <article id="{{ artifact.dom_id }}" class="border border-gray-200 rounded-lg bg-white p-3">
+                  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                    <div>
+                      <div class="flex items-center gap-2 flex-wrap">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">
+                          v{{ artifact.version }}
+                        </span>
+                        <span class="text-sm font-semibold text-gray-800">{{ artifact.artifact_label }}</span>
+                        {% if artifact.ticker %}
+                          <span class="text-xs font-mono text-gray-500">{{ artifact.ticker }}</span>
+                        {% endif %}
+                      </div>
+                      <p class="mt-1 text-xs text-gray-400 font-mono">
+                        {{ artifact.sequence_label }} · {{ artifact.artifact_id[:8] }}{% if artifact.parent_id %} <- {{ artifact.parent_id[:8] }}{% endif %}
+                      </p>
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ artifact.engine }}</span>
+                      {% if artifact.edge_family %}
+                        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-amber-500/15 text-amber-500 border-amber-500/30">{{ artifact.edge_family }}</span>
+                      {% endif %}
+                      <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-bold uppercase tracking-wide border bg-gray-100 text-gray-500 border-gray-300">{{ artifact.status }}</span>
+                    </div>
+                  </div>
+
+                  <div class="mt-3 grid grid-cols-1 lg:grid-cols-[180px_1fr] gap-2 text-sm">
+                    <span class="text-gray-400">Created</span>
+                    <span class="text-gray-700 font-mono text-xs">{{ artifact.created_at or "-" }}</span>
+                  </div>
+                  {% if artifact.summary %}
+                    <div class="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-x-4 gap-y-2">
+                      {% for item in artifact.summary %}
+                        <div class="grid grid-cols-[110px_1fr] gap-2 items-start">
+                          <span class="text-xs uppercase tracking-wide text-gray-400">{{ item.label }}</span>
+                          <span class="text-sm text-gray-700">{{ item.value }}</span>
+                        </div>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+
+                  <details class="mt-3">
+                    <summary class="cursor-pointer text-sm font-semibold text-gray-600">Raw Body</summary>
+                    <pre class="mt-2 bg-gray-50 text-gray-500 font-mono text-xs rounded-lg p-3 overflow-auto max-h-80 leading-tight whitespace-pre-wrap break-words">{{ artifact.body | tojson(indent=2) }}</pre>
+                  </details>
+                </article>
+              {% endif %}
+            {% endfor %}
+          </div>
+        </details>
+      {% else %}
+        <div class="rounded-lg border border-dashed border-gray-300 bg-gray-50 p-3">
+          <p class="text-sm font-semibold text-gray-800">Lineage History &amp; Debug</p>
+          <p class="mt-1 text-xs text-gray-500">No earlier lineage yet. This chain only has its current artifact.</p>
+        </div>
+      {% endif %}
+    {% endif %}
   {% else %}
     <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center">
       <p class="text-sm text-gray-500">No research chain selected.</p>
