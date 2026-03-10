@@ -16,7 +16,17 @@ from broker.ig import IGBroker
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Validate read-only IG connectivity")
+    parser = argparse.ArgumentParser(
+        description="Validate read-only IG connectivity",
+        epilog=(
+            "Examples:\n"
+            "  Check the live account and market lookup using a longer timeout:\n"
+            "    python scripts/check_ig_access.py --mode live --timeout 10\n"
+            "  Check the demo account against a specific market EPIC:\n"
+            "    python scripts/check_ig_access.py --mode demo --epic IX.D.SPTRD.DAILY.IP"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--mode",
         choices=("auto", "demo", "live"),

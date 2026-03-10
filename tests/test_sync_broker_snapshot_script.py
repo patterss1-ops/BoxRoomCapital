@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import scripts.sync_broker_snapshot as script
 
@@ -18,6 +19,22 @@ class _FakeSummary:
             "cash_balance": 8108.43,
             "net_liquidation": 8107.91,
         }
+
+
+def test_parse_args_help_includes_live_and_demo_examples(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["sync_broker_snapshot.py", "--help"])
+
+    try:
+        script._parse_args()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("Expected argparse help to exit")
+
+    help_text = capsys.readouterr().out
+
+    assert "--broker ig --mode live --account-type SPREADBET --sleeve core" in help_text
+    assert "--broker ig --mode demo --account-type SPREADBET --sleeve sandbox" in help_text
 
 
 def test_main_syncs_live_ig_snapshot_and_reports_ledger_state(monkeypatch, capsys):

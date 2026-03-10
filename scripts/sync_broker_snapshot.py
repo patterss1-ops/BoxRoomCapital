@@ -18,7 +18,19 @@ from execution.reconciler import sync_broker_snapshot
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Sync one broker account snapshot into the local ledger")
+    parser = argparse.ArgumentParser(
+        description="Sync one broker account snapshot into the local ledger",
+        epilog=(
+            "Examples:\n"
+            "  Sync the live IG account into the core sleeve ledger:\n"
+            "    python scripts/sync_broker_snapshot.py --broker ig --mode live "
+            "--account-type SPREADBET --sleeve core\n"
+            "  Sync the demo IG account into a sandbox sleeve:\n"
+            "    python scripts/sync_broker_snapshot.py --broker ig --mode demo "
+            "--account-type SPREADBET --sleeve sandbox"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument(
         "--broker",
         choices=("ig",),
