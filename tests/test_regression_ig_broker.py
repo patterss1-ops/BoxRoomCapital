@@ -205,6 +205,45 @@ class TestOrderPlacement:
         )
         assert result is not None
 
+    def test_place_long_does_not_attach_protective_stop_by_default(self, broker, mock_session, monkeypatch):
+        mock_session.post.return_value.json.return_value = {"dealReference": "REF125"}
+        mock_session.post.return_value.status_code = 200
+        mock_session.get.return_value.status_code = 200
+        broker.get_epic = lambda ticker: "IX.D.TEST.IP"
+        broker.get_market_info = lambda epic: {
+            "dealingRules": {
+                "minNormalStopOrLimitDistance": {"value": 4},
+            },
+            "instrument": {"expiry": "DFB"},
+        }
+        monkeypatch.setattr("config.IG_ATTACH_PROTECTIVE_STOPS", False)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+
+        broker.place_long("FTSE", 1.0, "IBS++")
+
+        payload = mock_session.post.call_args.kwargs["json"]
+        assert payload["stopDistance"] is None
+
+    def test_place_long_attaches_opt_in_protective_stop(self, broker, mock_session, monkeypatch):
+        mock_session.post.return_value.json.return_value = {"dealReference": "REF126"}
+        mock_session.post.return_value.status_code = 200
+        mock_session.get.return_value.status_code = 200
+        broker.get_epic = lambda ticker: "IX.D.TEST.IP"
+        broker.get_market_info = lambda epic: {
+            "dealingRules": {
+                "minNormalStopOrLimitDistance": {"value": 4},
+            },
+            "instrument": {"expiry": "DFB"},
+        }
+        monkeypatch.setattr("config.IG_ATTACH_PROTECTIVE_STOPS", True)
+        monkeypatch.setattr("config.IG_PROTECTIVE_STOP_FACTOR", 2.0)
+        monkeypatch.setattr("time.sleep", lambda _: None)
+
+        broker.place_long("FTSE", 1.0, "IBS++")
+
+        payload = mock_session.post.call_args.kwargs["json"]
+        assert payload["stopDistance"] == "8.0"
+
 
 # ─── Close position (actual API: close_position(ticker, strategy)) ──────────
 

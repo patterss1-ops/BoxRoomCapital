@@ -56,6 +56,18 @@ class IGBroker(BaseBroker):
     def _account_number(self) -> str:
         return config.ig_account_number(bool(getattr(self, "is_demo", True)))
 
+    def _protective_stop_distance(self, market_info: dict | None) -> str | None:
+        if not config.IG_ATTACH_PROTECTIVE_STOPS:
+            return None
+        factor = float(config.IG_PROTECTIVE_STOP_FACTOR or 0.0)
+        if factor <= 0:
+            return None
+        rules = market_info.get("dealingRules", {}) if isinstance(market_info, dict) else {}
+        min_stop = rules.get("minNormalStopOrLimitDistance", {}).get("value")
+        if not min_stop:
+            return None
+        return str(float(min_stop) * factor)
+
     # ─── Connection ──────────────────────────────────────────────────────
 
     def connect(self) -> bool:
@@ -364,11 +376,7 @@ class IGBroker(BaseBroker):
 
             mkt_info = self.get_market_info(epic)
             if mkt_info:
-                rules = mkt_info.get("dealingRules", {})
-                min_stop = rules.get("minNormalStopOrLimitDistance", {}).get("value")
-                if min_stop:
-                    stop_distance = str(float(min_stop) * 2)  # 2x min for safety
-
+                stop_distance = self._protective_stop_distance(mkt_info)
                 # For futures/monthly contracts, use the expiry from market info
                 inst = mkt_info.get("instrument", {})
                 mkt_expiry = inst.get("expiry", "")

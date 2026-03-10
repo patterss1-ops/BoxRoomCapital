@@ -93,6 +93,8 @@ IG_LIVE_USERNAME = os.getenv("IG_LIVE_USERNAME", "")
 IG_LIVE_PASSWORD = os.getenv("IG_LIVE_PASSWORD", "")
 IG_LIVE_API_KEY = os.getenv("IG_LIVE_API_KEY", "")
 IG_LIVE_ACC_NUMBER = os.getenv("IG_LIVE_ACC_NUMBER", "")
+IG_ATTACH_PROTECTIVE_STOPS = _env_bool("IG_ATTACH_PROTECTIVE_STOPS", False)
+IG_PROTECTIVE_STOP_FACTOR = _env_float("IG_PROTECTIVE_STOP_FACTOR", 2.0, min_value=0.0, max_value=50.0)
 
 
 def broker_mode() -> str:
