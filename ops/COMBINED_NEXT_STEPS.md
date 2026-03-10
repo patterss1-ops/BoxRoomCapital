@@ -223,6 +223,7 @@ Items 1-10 complete.
   - `cd82bf6` — reuse connected broker sessions during multi-intent dispatch and fail the CLI when any queued intent is left retrying/partial
   - `1fa15aa` — map fresh-session IG positions back to configured tickers
   - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
+  - `1b205a5` — add a first-class broker-to-ledger sync CLI for post-trade reconciliation
 - Current validated live path on 2026-03-10:
   - single-symbol live `CL` open/hold/close passed
   - single-symbol live `GC` open/hold/close passed

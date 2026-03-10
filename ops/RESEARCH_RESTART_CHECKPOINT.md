@@ -56,6 +56,7 @@
   - next operational actions
 - CLI equivalent exists:
   - `python scripts/research_readiness_report.py`
+  - `python scripts/sync_broker_snapshot.py --broker ig --mode live --account-type SPREADBET --sleeve core`
 
 ### Live execution hardening
 - Manual Engine A execution now carries reference prices into order-intent metadata and execution metrics for both live and paper routing.
@@ -104,6 +105,7 @@
 - `research/manual_execution.py`
 - `scripts/execute_engine_a_rebalance.py`
 - `scripts/check_ig_access.py`
+- `scripts/sync_broker_snapshot.py`
 - `execution/dispatcher.py`
 - `broker/ig.py`
 
@@ -184,19 +186,7 @@ python scripts/execute_engine_a_rebalance.py --mode live --close-instruments CL=
 Then sync the flat account back into the ledger:
 
 ```bash
-python - <<'PY'
-import config
-from broker.ig import IGBroker
-from execution.reconciler import sync_broker_snapshot
-summary = sync_broker_snapshot(
-    broker=IGBroker(is_demo=False),
-    broker_name='ig',
-    account_id=config.ig_account_number(False),
-    account_type='SPREADBET',
-    sleeve='core',
-)
-print(summary.to_dict())
-PY
+python scripts/sync_broker_snapshot.py --broker ig --mode live --account-type SPREADBET --sleeve core
 ```
 
 ## The Next Coding Task
