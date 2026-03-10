@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -23,6 +24,7 @@ from research.artifacts import (
     SizingSpec,
     TradeSheet,
 )
+from research.market_data.futures import build_multiple_prices
 from utils.datetime_utils import utc_now_iso
 
 OrderIntentCreator = Callable[..., dict[str, Any]]
@@ -215,6 +217,33 @@ def _extract_snapshot_reference_price(market_info: dict[str, Any]) -> float | No
     return None
 
 
+def _parse_as_of_date(as_of: str | None) -> date:
+    text = str(as_of or "").strip()
+    if not text:
+        return datetime.utcnow().date()
+    return datetime.fromisoformat(text.replace("Z", "+00:00")).date()
+
+
+def fetch_engine_a_reference_prices(
+    root_symbols: list[str],
+    *,
+    as_of: str | None = None,
+) -> dict[str, float]:
+    as_of_date = _parse_as_of_date(as_of)
+    reference_prices: dict[str, float] = {}
+    for root_symbol in sorted({str(item or "").strip().upper() for item in root_symbols if str(item or "").strip()}):
+        try:
+            multiple = build_multiple_prices(root_symbol, as_of_date)
+        except Exception:
+            continue
+        if multiple is None:
+            continue
+        reference_price = float(getattr(multiple, "current_price", 0) or 0)
+        if reference_price > 0:
+            reference_prices[root_symbol] = reference_price
+    return reference_prices
+
+
 def fetch_ig_market_details(proxy_tickers: list[str]) -> IGMarketDetailMap:
     is_demo = config.ig_broker_is_demo()
     broker = IGBroker(is_demo=is_demo)
@@ -257,6 +286,7 @@ def build_manual_engine_a_trade_instruments(
     *,
     size_mode: str = "auto",
     ig_market_details: IGMarketDetailMap | None = None,
+    as_of: str | None = None,
 ) -> tuple[str, str, list[InstrumentSpec]]:
     if not deltas:
         raise ValueError("Rebalance has no executable deltas")
@@ -282,6 +312,11 @@ def build_manual_engine_a_trade_instruments(
             else {}
         )
     )
+    paper_reference_prices = (
+        fetch_engine_a_reference_prices(list(deltas), as_of=as_of)
+        if broker_target == "paper"
+        else {}
+    )
 
     for instrument, delta in deltas.items():
         raw_order_qty = abs(float(delta))
@@ -294,6 +329,9 @@ def build_manual_engine_a_trade_instruments(
             f"size_mode={resolved_size_mode}",
         ]
         if broker_target == "paper":
+            reference_price = float(paper_reference_prices.get(instrument, 0) or 0)
+            if reference_price > 0:
+                contract_details.append(f"reference_price={reference_price:.6f}")
             contract_details.append(f"order_qty={order_qty:.4f}")
             instruments.append(
                 InstrumentSpec(
@@ -388,6 +426,7 @@ def preview_manual_engine_a_rebalance(
         deltas,
         size_mode=size_mode,
         ig_market_details=ig_market_details,
+        as_of=dict(rebalance.body).get("as_of"),
     )
     return ManualEngineAExecutionPreview(
         chain_id=str(rebalance.chain_id or ""),
@@ -424,6 +463,7 @@ def build_manual_engine_a_trade_sheet(
         deltas,
         size_mode=size_mode,
         ig_market_details=ig_market_details,
+        as_of=dict(rebalance.body).get("as_of"),
     )
     trade_sheet = TradeSheet(
         hypothesis_ref=str((regime_artifact.artifact_id if regime_artifact else rebalance.artifact_id) or ""),

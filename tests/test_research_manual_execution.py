@@ -161,6 +161,10 @@ def test_preview_manual_engine_a_rebalance_filters_requested_symbols(monkeypatch
     fake_store = FakeArtifactStore(chains={"chain-a": _engine_a_chain()})
 
     monkeypatch.setattr("config.broker_mode", lambda: "paper")
+    monkeypatch.setattr(
+        "research.manual_execution.fetch_engine_a_reference_prices",
+        lambda root_symbols, as_of=None: {"NQ": 18876.5},
+    )
 
     preview = preview_manual_engine_a_rebalance(
         chain_id="chain-a",
@@ -170,6 +174,8 @@ def test_preview_manual_engine_a_rebalance_filters_requested_symbols(monkeypatch
 
     assert preview.deltas == {"NQ": -1.0}
     assert [instrument.ticker for instrument in preview.instruments] == ["NQ"]
+    parsed = parse_contract_details(preview.instruments[0].contract_details)
+    assert parsed["reference_price"] == "18876.500000"
 
 
 def test_execute_manual_engine_a_rebalance_persists_artifacts_and_intents(monkeypatch):
@@ -189,6 +195,10 @@ def test_execute_manual_engine_a_rebalance_persists_artifacts_and_intents(monkey
         return {"intent_id": f"intent-{len(queued_intents)}", **payload}
 
     monkeypatch.setattr("config.broker_mode", lambda: "paper")
+    monkeypatch.setattr(
+        "research.manual_execution.fetch_engine_a_reference_prices",
+        lambda root_symbols, as_of=None: {"ES": 6025.0, "NQ": 18876.5},
+    )
 
     result = execute_manual_engine_a_rebalance(
         chain_id="chain-a",
@@ -208,6 +218,7 @@ def test_execute_manual_engine_a_rebalance_persists_artifacts_and_intents(monkey
     assert len(result.queued_intents) == 2
     assert {intent["instrument"] for intent in queued_intents} == {"ES", "NQ"}
     assert {intent["broker_target"] for intent in queued_intents} == {"paper"}
+    assert {intent["metadata"]["reference_price"] for intent in queued_intents} == {6025.0, 18876.5}
 
 
 def test_execute_manual_engine_a_rebalance_queues_min_sized_live_intents(monkeypatch):
