@@ -1,16 +1,19 @@
 # Research Restart Checkpoint
 
-**Date:** 2026-03-09
-**State:** research-system build is materially complete; remaining work is live-environment activation and real-data validation.
+**Date:** 2026-03-10
+**State:** research-system build and live-path validation are complete; remaining work is an explicit trading decision, not infrastructure proving.
 
 ## Current Truth
 
-- User has said the PostgreSQL database exists and the Replit secret exists.
-- The current shell session does **not** see `RESEARCH_DB_DSN`.
-- Verification from this shell:
-  - `RESEARCH_DB_DSN=` (empty)
-- Practical consequence:
-  - do **not** assume the current shell can run DB-backed validation until the environment is refreshed or the var is exported into the session.
+- PostgreSQL-backed readiness and validation are working in the active runtime.
+- Research readiness is `ready`.
+- Engine A and Engine B both validated against the real DB/runtime on 2026-03-10.
+- No IG demo credentials are configured, so all bounded broker validation was done against live IG at minimum size.
+- The live IG account is currently flat after bounded validation.
+- The latest live hardening commits are:
+  - `97af3d2` — disable implicit IG protective stops by default
+  - `92504e4` — detect live Engine A position mismatches after dispatch
+  - `cd82bf6` — reuse connected broker sessions during multi-intent dispatch and fail the CLI when a live batch is partial/incomplete
 
 ## What Is Already Done
 
@@ -28,6 +31,7 @@
 - Research PostgreSQL readiness is surfaced in the control plane and research status views.
 - MVP market-data seeding and ingest tooling exists.
 - Engine B default runtime uses the real backtest adapter instead of the old stub runner.
+- Manual Engine A execution exists end-to-end, including preview, commit, dispatch, and close helpers.
 
 ### Operator workflows
 - Pilot approve/reject is implemented.
@@ -49,23 +53,23 @@
 - CLI equivalent exists:
   - `python scripts/research_readiness_report.py`
 
+### Live execution hardening
+- Manual Engine A execution now carries reference prices into order-intent metadata and execution metrics for both live and paper routing.
+- IG broker-side protective stops are opt-in instead of implicit defaults.
+- Live Engine A dispatch now reconciles intended instruments against current IG open positions.
+- Dispatcher now reuses an already-connected broker session across multiple queued intents instead of reauthenticating per intent.
+- CLI execution now fails loudly on partial dispatches and exposes per-intent statuses instead of returning a false `ok: true`.
+
 ## Most Recent Tranches
 
-### Tranche 29
-- Added:
-  - real Engine B backtest adapter
-  - MVP universe seeding
-  - market-data bootstrap helpers
-  - research DB readiness status
-
-### Tranche 30
-- Added explicit pilot sign-off artifacts, endpoints, UI, and promotion-gate enforcement.
-
-### Tranche 31
-- Added the remaining operator action endpoints for review kills and Engine A rebalance decisions.
-
-### Tranche 32
-- Added the shared readiness report plus `/research` readiness fragment and CLI script.
+### 2026-03-10 live-validation sequence
+- `5094013` — guard research validation `--source-class` inputs
+- `2f0c7db` — carry Engine A reference prices into execution intents
+- `3ada930` — add paper reference prices to manual Engine A intents
+- `92504e4` — detect live Engine A position mismatches after dispatch
+- `97af3d2` — disable implicit IG protective stops by default
+- `cd82bf6` — harden partial live Engine A dispatch handling
+- `d70ea69` — update ops note with the bounded full-batch live validation result
 
 ## Key Files To Re-open First
 
@@ -77,6 +81,7 @@
 - `research/shared/backtest_adapter.py`
 - `research/runtime.py`
 - `data/pg_connection.py`
+- `scripts/run_research_validation.py`
 
 ### Control plane / UI
 - `app/api/server.py`
@@ -86,6 +91,13 @@
 - `app/web/templates/_research_rebalance_panel.html`
 - `app/web/templates/_research_operator_output.html`
 
+### Execution / broker
+- `research/manual_execution.py`
+- `scripts/execute_engine_a_rebalance.py`
+- `scripts/check_ig_access.py`
+- `execution/dispatcher.py`
+- `broker/ig.py`
+
 ### Session memory
 - `.claude/history/SESSION_LOG.md`
 - `ops/COMBINED_NEXT_STEPS.md`
@@ -93,88 +105,77 @@
 ## Tests Most Relevant To Current State
 
 ### Recent green slices
-- operator actions / research surfaces:
-  - `pytest -q tests/test_research_operator_actions.py tests/test_research_api_surface.py tests/test_engine_a_api_surface.py tests/test_engine_a_dashboard_helpers.py`
-  - result: `22 passed`
-- adjacent regression:
-  - `pytest -q tests/test_promotion_gate_v2.py tests/test_research_artifact_viewer.py tests/test_kill_monitor.py tests/test_research_dashboard.py tests/test_engine_a_pipeline.py`
-  - result: `23 passed`
-- readiness / DB / market-data slice:
-  - `pytest -q tests/test_research_readiness.py tests/test_research_api_surface.py tests/test_market_data_bootstrap.py tests/test_pg_connection.py`
-  - result: `15 passed`
-- adjacent readiness regression:
-  - `pytest -q tests/test_engine_a_api_surface.py tests/test_engine_b_control.py tests/test_research_operator_actions.py`
-  - result: `18 passed`
+- manual execution / broker / dispatcher:
+  - `pytest tests/test_dispatcher.py tests/test_execute_engine_a_rebalance_script.py`
+  - result: `36 passed`
+- IG stop-policy / config / manual execution:
+  - `pytest tests/test_regression_ig_broker.py tests/test_ig_config.py tests/test_execute_engine_a_rebalance_script.py`
+  - result: `52 passed`
+- post-reconnect targeted slice:
+  - focused research/manual-execution/IG tests
+  - result: `100 passed`
 
 ## Immediate Resume Procedure
 
-### 1. Confirm the new shell sees the DB secret
+### 1. Confirm the account is flat before any live work
 Run:
 
 ```bash
-printf 'RESEARCH_DB_DSN=%s\n' "${RESEARCH_DB_DSN:+set}"
+python scripts/check_ig_access.py --mode live --timeout 10
 ```
 
 Expected:
 
-```bash
-RESEARCH_DB_DSN=set
-```
+- `open_positions: 0`
 
-### 2. Verify DB reachability and schema readiness
-Run:
-
-```bash
-python - <<'PY'
-from data.pg_connection import research_db_status
-print(research_db_status())
-PY
-```
-
-If schema is missing, run:
-
-```bash
-python - <<'PY'
-from data.pg_connection import init_research_schema
-init_research_schema()
-print("research schema initialized")
-PY
-```
-
-### 3. Re-check readiness report
+### 2. Re-check readiness and validation state
 Run:
 
 ```bash
 python scripts/research_readiness_report.py
+python scripts/run_research_validation.py --engine engine_a
+python scripts/run_research_validation.py --engine engine_b --source-class manual_event
 ```
 
-This should confirm whether the DB and market-data checks are still blocked or now actionable.
+Expected:
+- readiness reports `ready`
+- Engine A validation succeeds
+- Engine B validation succeeds with a scored artifact chain
 
-### 4. Seed and ingest market data
+### 3. Preview the latest bounded Engine A live batch
 Run:
 
 ```bash
-python scripts/bootstrap_research_market_data.py
+python scripts/execute_engine_a_rebalance.py --mode live --size-mode min
 ```
 
-Then rerun:
+### 4. If you intentionally want live exposure, use the bounded flow first
+Run:
 
 ```bash
-python scripts/research_readiness_report.py
+python scripts/execute_engine_a_rebalance.py --mode live --size-mode min --commit --dispatch --allow-live
 ```
 
-### 5. Next work phase after env is live
-- Execute the real-data validation tranche:
-  - Engine A on seeded historical data
-  - Engine B on one or more real/manual events
-- If the current codebase still lacks a dedicated validation runner, implement that next instead of doing more dashboard work.
+Then verify broker state after the hold window:
+
+```bash
+python scripts/check_ig_access.py --mode live --timeout 10
+```
+
+If the batch is only for validation, flatten it:
+
+```bash
+python scripts/execute_engine_a_rebalance.py --mode live --close-instruments CL=F,GC=F,HG=F,NG=F,QQQ,IWM
+```
 
 ## The Next Coding Task
 
-If resuming in a shell that can see `RESEARCH_DB_DSN`, the next concrete coding task is:
+There is no urgent coding gap left on the validated path.
 
-1. add a dedicated validation runner for live DB-backed checks
-2. persist the last successful validation timestamps/results into the readiness report
-3. run the real-data Engine A / Engine B validation flow
+If work resumes, the next task should be one of:
 
-This is the highest-value remaining work. UI/spec completion is no longer the bottleneck.
+1. keep the system in bounded-validation mode and stop here
+2. add richer operator reporting around partial dispatch / broker reconciliation history
+3. intentionally move from validation into a held live Engine A batch
+
+The decision boundary is operational now, not architectural.
