@@ -265,6 +265,14 @@ class IntentDispatcher:
         if broker is None:
             broker = self._broker_resolver(key)
             self._brokers[key] = broker
+        else:
+            is_connected = getattr(broker, "is_connected", None)
+            if callable(is_connected):
+                try:
+                    if bool(is_connected()):
+                        return broker
+                except Exception:  # pragma: no cover - defensive broker adapter guard
+                    logger.warning("Broker is_connected() check failed for '%s'", key, exc_info=True)
 
         connected = broker.connect()
         if not connected:

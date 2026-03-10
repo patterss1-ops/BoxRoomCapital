@@ -591,6 +591,41 @@ class TestIntentDispatcher:
         assert len(dispatcher._brokers) == 0
         assert stub.connected is False
 
+    def test_dispatcher_reuses_connected_broker_across_multiple_intents(self, tmp_path):
+        db = self._init_db(tmp_path)
+        first = self._create_intent(db, instrument="SPY")
+        second = self._create_intent(db, instrument="QQQ")
+
+        class CountingBroker(StubBroker):
+            def __init__(self):
+                super().__init__([
+                    OrderResult(success=True, order_id="ord-1"),
+                    OrderResult(success=True, order_id="ord-2"),
+                ])
+                self.connect_calls = 0
+
+            def connect(self) -> bool:
+                self.connect_calls += 1
+                self.connected = True
+                return True
+
+            def is_connected(self) -> bool:
+                return self.connected
+
+        stub = CountingBroker()
+        dispatcher = IntentDispatcher(
+            db_path=db,
+            broker_resolver=lambda _: stub,
+            disconnect_after_run=False,
+        )
+
+        summary = dispatcher.run_intent_ids([first, second])
+
+        assert summary.completed == 2
+        assert stub.connect_calls == 1
+        assert get_order_intent(first, db_path=db)["status"] == "completed"
+        assert get_order_intent(second, db_path=db)["status"] == "completed"
+
     def test_dispatcher_disconnect_after_run_default(self, tmp_path):
         db = self._init_db(tmp_path)
         self._create_intent(db)

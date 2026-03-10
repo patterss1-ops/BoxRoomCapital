@@ -365,3 +365,110 @@ def test_main_live_dispatch_returns_error_when_positions_do_not_reconcile(monkey
     assert payload["error"] == "live_position_mismatch"
     assert payload["status"] == "position_mismatch"
     assert payload["live_position_reconciliation"]["missing"] == ["QQQ"]
+
+
+def test_main_dispatch_returns_error_when_dispatcher_leaves_retrying_intents(monkeypatch, capsys):
+    preview = ManualEngineAExecutionPreview(
+        chain_id="chain-a",
+        rebalance=_FakeRebalance(),
+        deltas={"CL": 1.0, "NQ": 1.0},
+        broker_target="ig",
+        size_mode="min",
+        instruments=[_FakeInstrument("CL=F", "ig"), _FakeInstrument("QQQ", "ig")],
+    )
+
+    class _FakeDispatcher:
+        def __init__(self, actor="operator", disconnect_after_run=True):
+            self._brokers = {"ig": object()}
+
+        class _Summary:
+            def to_dict(self):
+                return {
+                    "claim_conflicts": 0,
+                    "completed": 1,
+                    "discovered": 2,
+                    "errors": 0,
+                    "failed": 0,
+                    "processed": 2,
+                    "retried": 1,
+                }
+
+        def run_intent_ids(self, intent_ids):
+            return self._Summary()
+
+        def disconnect_all(self):
+            return None
+
+    class _FakeResult:
+        approved_rebalance = type("Obj", (), {"artifact_id": "approved-1"})
+        trade_sheet = type("Obj", (), {"artifact_id": "trade-1"})
+        execution_report = type("Obj", (), {"artifact_id": "execution-1"})
+        queued_intents = [
+            {
+                "intent_id": "intent-cl",
+                "instrument": "CL=F",
+                "broker_target": "ig",
+                "account_type": "SPREADBET",
+                "side": "BUY",
+                "qty": 0.01,
+            },
+            {
+                "intent_id": "intent-qqq",
+                "instrument": "QQQ",
+                "broker_target": "ig",
+                "account_type": "SPREADBET",
+                "side": "BUY",
+                "qty": 0.01,
+            },
+        ]
+
+    monkeypatch.setattr(script, "preview_manual_engine_a_rebalance", lambda **kwargs: preview)
+    monkeypatch.setattr(script, "execute_manual_engine_a_rebalance", lambda **kwargs: _FakeResult())
+    monkeypatch.setattr(script, "IntentDispatcher", _FakeDispatcher)
+    monkeypatch.setattr(
+        script,
+        "get_order_intent",
+        lambda intent_id: {
+            "intent-cl": {"status": "completed", "latest_attempt": 1},
+            "intent-qqq": {"status": "retrying", "latest_attempt": 1},
+        }[intent_id],
+    )
+    monkeypatch.setattr(
+        script,
+        "_reconcile_live_ig_positions",
+        lambda queued_intents, broker: {
+            "requested": ["CL=F", "QQQ"],
+            "open": ["CL=F"],
+            "missing": ["QQQ"],
+            "unexpected": [],
+        },
+    )
+    monkeypatch.setattr(script.config, "BROKER_MODE", "paper")
+    monkeypatch.setattr(script.config, "_load_runtime_overrides", lambda: {})
+    monkeypatch.setattr(script, "_parse_args", lambda: script.argparse.Namespace(
+        mode="live",
+        size_mode="auto",
+        chain_id="",
+        actor="operator",
+        notes="notes",
+        commit=True,
+        dispatch=True,
+        allow_live=True,
+        allow_live_full_size=False,
+        smoke_close=False,
+        close_instruments="",
+        symbols="",
+    ))
+
+    exit_code = script.main()
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 1
+    assert payload["error"] == "dispatch_incomplete"
+    assert payload["status"] == "dispatch_incomplete"
+    assert payload["dispatch_summary"]["retried"] == 1
+    assert payload["intent_statuses"] == [
+        {"intent_id": "intent-cl", "instrument": "CL=F", "status": "completed", "latest_attempt": 1},
+        {"intent_id": "intent-qqq", "instrument": "QQQ", "status": "retrying", "latest_attempt": 1},
+    ]
+    assert payload["live_position_reconciliation"]["missing"] == ["QQQ"]

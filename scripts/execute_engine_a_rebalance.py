@@ -13,6 +13,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import config
+from data.order_intent_store import get_order_intent
 from execution.dispatcher import IntentDispatcher, default_broker_resolver
 from research.manual_execution import (
     execute_manual_engine_a_rebalance,
@@ -253,6 +254,41 @@ def _reconcile_live_ig_positions(
     }
 
 
+def _intent_status_snapshot(queued_intents: list[dict[str, object]]) -> list[dict[str, object]]:
+    rows: list[dict[str, object]] = []
+    for item in queued_intents:
+        intent_id = str(item.get("intent_id") or "").strip()
+        instrument = str(item.get("instrument") or "").strip()
+        snapshot = get_order_intent(intent_id) if intent_id else None
+        rows.append(
+            {
+                "intent_id": intent_id,
+                "instrument": instrument,
+                "status": str((snapshot or {}).get("status") or ""),
+                "latest_attempt": int((snapshot or {}).get("latest_attempt") or 0),
+            }
+        )
+    return rows
+
+
+def _dispatch_summary_incomplete(
+    dispatch_summary: dict[str, object],
+    *,
+    expected_intents: int,
+) -> bool:
+    summary = dict(dispatch_summary or {})
+    if int(summary.get("discovered", 0) or 0) != expected_intents:
+        return True
+    if int(summary.get("processed", 0) or 0) != expected_intents:
+        return True
+    if int(summary.get("completed", 0) or 0) != expected_intents:
+        return True
+    for key in ("retried", "failed", "errors", "claim_conflicts"):
+        if int(summary.get(key, 0) or 0) > 0:
+            return True
+    return False
+
+
 def main() -> int:
     args = _parse_args()
     if args.dispatch and not args.commit:
@@ -393,6 +429,27 @@ def main() -> int:
                 payload["dispatch_summary"] = dispatcher.run_intent_ids(
                     [str(item.get("intent_id") or "") for item in result.queued_intents]
                 ).to_dict()
+                if _dispatch_summary_incomplete(
+                    payload["dispatch_summary"],
+                    expected_intents=len(result.queued_intents),
+                ):
+                    payload["intent_statuses"] = _intent_status_snapshot(result.queued_intents)
+                    if broker_mode == "live" and preview.broker_target == "ig" and not args.smoke_close:
+                        broker = dispatcher._brokers.get("ig")
+                        if broker is not None:
+                            payload["live_position_reconciliation"] = _reconcile_live_ig_positions(
+                                result.queued_intents,
+                                broker=broker,
+                            )
+                    payload["ok"] = False
+                    payload["error"] = "dispatch_incomplete"
+                    payload["message"] = (
+                        "Dispatcher did not complete every queued intent; inspect dispatch_summary "
+                        "and intent_statuses before taking further action."
+                    )
+                    payload["status"] = "dispatch_incomplete"
+                    print(json.dumps(payload, indent=2, sort_keys=True))
+                    return 1
                 if broker_mode == "live" and preview.broker_target == "ig" and not args.smoke_close:
                     broker = dispatcher._brokers.get("ig")
                     if broker is not None:
