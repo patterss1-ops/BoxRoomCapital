@@ -221,10 +221,15 @@ Items 1-10 complete.
   - `97af3d2` — disable implicit IG protective stops by default
   - `92504e4` — detect live Engine A position mismatches after dispatch
   - `cd82bf6` — reuse connected broker sessions during multi-intent dispatch and fail the CLI when any queued intent is left retrying/partial
+  - `1fa15aa` — map fresh-session IG positions back to configured tickers
+  - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
 - Current validated live path on 2026-03-10:
   - single-symbol live `CL` open/hold/close passed
   - single-symbol live `GC` open/hold/close passed
   - full six-symbol live Engine A batch opened cleanly, survived the previous failure window with all 6 positions present at IG, and then flattened cleanly
+  - one intentional six-symbol held live Engine A batch was opened, inspected, synced into the ledger, and then flattened cleanly
 - Current operational state:
-  - live IG account flat after bounded validation
+  - live IG account flat after the held-batch round trip
+  - local ledger matches the flat broker state after post-close sync
+  - the held-batch round trip realized approximately `-0.68` versus the pre-hold cash balance
   - full-batch live validation is complete; any further run should be treated as intentional exposure, not infrastructure proving

@@ -9,11 +9,15 @@
 - Research readiness is `ready`.
 - Engine A and Engine B both validated against the real DB/runtime on 2026-03-10.
 - No IG demo credentials are configured, so all bounded broker validation was done against live IG at minimum size.
-- The live IG account is currently flat after bounded validation.
+- One intentional six-symbol held live Engine A batch was opened, inspected, and then flattened on 2026-03-10.
+- The live IG account is currently flat after that held-batch round trip.
+- The local ledger was synced after the close and now also shows no live IG positions.
 - The latest live hardening commits are:
   - `97af3d2` — disable implicit IG protective stops by default
   - `92504e4` — detect live Engine A position mismatches after dispatch
   - `cd82bf6` — reuse connected broker sessions during multi-intent dispatch and fail the CLI when a live batch is partial/incomplete
+  - `1fa15aa` — map fresh-session IG positions back to configured tickers
+  - `0deba3f` — persist IG deal mappings across reconnects via local open-position state
 
 ## What Is Already Done
 
@@ -59,6 +63,8 @@
 - Live Engine A dispatch now reconciles intended instruments against current IG open positions.
 - Dispatcher now reuses an already-connected broker session across multiple queued intents instead of reauthenticating per intent.
 - CLI execution now fails loudly on partial dispatches and exposes per-intent statuses instead of returning a false `ok: true`.
+- Fresh-session IG inspection now maps open positions back to configured tickers instead of surfacing raw EPICs.
+- IG open deals are now persisted into the local `positions` table on fill and reused on reconnect so exact ticker/strategy/deal-id context survives session loss.
 
 ## Most Recent Tranches
 
@@ -69,7 +75,10 @@
 - `92504e4` — detect live Engine A position mismatches after dispatch
 - `97af3d2` — disable implicit IG protective stops by default
 - `cd82bf6` — harden partial live Engine A dispatch handling
+- `1fa15aa` — map IG positions back to configured tickers
+- `0deba3f` — persist IG deal mappings across reconnects
 - `d70ea69` — update ops note with the bounded full-batch live validation result
+- `718da26` — refresh restart checkpoint after bounded live validation
 
 ## Key Files To Re-open First
 
@@ -111,6 +120,9 @@
 - IG stop-policy / config / manual execution:
   - `pytest tests/test_regression_ig_broker.py tests/test_ig_config.py tests/test_execute_engine_a_rebalance_script.py`
   - result: `52 passed`
+- latest IG reconnect / position-mapping slice:
+  - `pytest tests/test_regression_ig_broker.py`
+  - result: `42 passed`
 - post-reconnect targeted slice:
   - focused research/manual-execution/IG tests
   - result: `100 passed`
@@ -127,6 +139,7 @@ python scripts/check_ig_access.py --mode live --timeout 10
 Expected:
 
 - `open_positions: 0`
+- local ledger should also be able to sync back to `POSITIONS 0`
 
 ### 2. Re-check readiness and validation state
 Run:
@@ -166,6 +179,24 @@ If the batch is only for validation, flatten it:
 
 ```bash
 python scripts/execute_engine_a_rebalance.py --mode live --close-instruments CL=F,GC=F,HG=F,NG=F,QQQ,IWM
+```
+
+Then sync the flat account back into the ledger:
+
+```bash
+python - <<'PY'
+import config
+from broker.ig import IGBroker
+from execution.reconciler import sync_broker_snapshot
+summary = sync_broker_snapshot(
+    broker=IGBroker(is_demo=False),
+    broker_name='ig',
+    account_id=config.ig_account_number(False),
+    account_type='SPREADBET',
+    sleeve='core',
+)
+print(summary.to_dict())
+PY
 ```
 
 ## The Next Coding Task
