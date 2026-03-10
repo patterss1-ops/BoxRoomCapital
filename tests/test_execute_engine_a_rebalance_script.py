@@ -195,6 +195,51 @@ def test_main_close_only_uses_smoke_close_helper(monkeypatch, capsys):
     assert [item["instrument"] for item in payload["smoke_close_results"]] == ["CL=F", "GC=F"]
 
 
+def test_main_close_only_can_sync_live_ledger(monkeypatch, capsys):
+    monkeypatch.setattr(script.config, "BROKER_MODE", "paper")
+    monkeypatch.setattr(script.config, "_load_runtime_overrides", lambda: {})
+    monkeypatch.setattr(
+        script,
+        "_smoke_close_queued_instruments",
+        lambda queued_intents, strategy_id="research_engine_a_rebalance", broker=None: [
+            {"instrument": item["instrument"], "ok": True, "deal_id": f"close-{item['instrument']}", "fill_price": 0.0, "fill_qty": 0.01, "message": ""}
+            for item in queued_intents
+        ],
+    )
+    monkeypatch.setattr(
+        script,
+        "_sync_live_ig_ledger_snapshot",
+        lambda broker=None, account_type="SPREADBET", sleeve="core": {
+            "summary": {"positions_synced": 0},
+            "ledger_position_count": 0,
+            "ledger_cash_balance": 8107.75,
+            "ledger_buying_power": 8107.75,
+        },
+    )
+    monkeypatch.setattr(script, "_parse_args", lambda: script.argparse.Namespace(
+        mode="live",
+        size_mode="auto",
+        chain_id="",
+        actor="operator",
+        notes="notes",
+        commit=False,
+        dispatch=False,
+        allow_live=False,
+        allow_live_full_size=False,
+        smoke_close=False,
+        sync_ledger=True,
+        close_instruments="CL=F,GC=F",
+        symbols="",
+    ))
+
+    exit_code = script.main()
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == "closed_only"
+    assert payload["ledger_sync"]["ledger_position_count"] == 0
+
+
 def test_ig_market_details_from_preview_preserves_reference_price():
     preview = ManualEngineAExecutionPreview(
         chain_id="chain-a",
@@ -472,3 +517,99 @@ def test_main_dispatch_returns_error_when_dispatcher_leaves_retrying_intents(mon
         {"intent_id": "intent-qqq", "instrument": "QQQ", "status": "retrying", "latest_attempt": 1},
     ]
     assert payload["live_position_reconciliation"]["missing"] == ["QQQ"]
+
+
+def test_main_live_dispatch_can_sync_ledger_after_success(monkeypatch, capsys):
+    preview = ManualEngineAExecutionPreview(
+        chain_id="chain-a",
+        rebalance=_FakeRebalance(),
+        deltas={"NQ": 1.0},
+        broker_target="ig",
+        size_mode="min",
+        instruments=[_FakeInstrument("QQQ", "ig")],
+    )
+
+    class _FakeDispatcher:
+        def __init__(self, actor="operator", disconnect_after_run=True):
+            self._brokers = {"ig": object()}
+
+        class _Summary:
+            def to_dict(self):
+                return {
+                    "claim_conflicts": 0,
+                    "completed": 1,
+                    "discovered": 1,
+                    "errors": 0,
+                    "failed": 0,
+                    "processed": 1,
+                    "retried": 0,
+                }
+
+        def run_intent_ids(self, intent_ids):
+            return self._Summary()
+
+        def disconnect_all(self):
+            return None
+
+    class _FakeResult:
+        approved_rebalance = type("Obj", (), {"artifact_id": "approved-1"})
+        trade_sheet = type("Obj", (), {"artifact_id": "trade-1"})
+        execution_report = type("Obj", (), {"artifact_id": "execution-1"})
+        queued_intents = [
+            {
+                "intent_id": "intent-1",
+                "instrument": "QQQ",
+                "broker_target": "ig",
+                "account_type": "SPREADBET",
+                "side": "BUY",
+                "qty": 0.01,
+            }
+        ]
+
+    monkeypatch.setattr(script, "preview_manual_engine_a_rebalance", lambda **kwargs: preview)
+    monkeypatch.setattr(script, "execute_manual_engine_a_rebalance", lambda **kwargs: _FakeResult())
+    monkeypatch.setattr(script, "IntentDispatcher", _FakeDispatcher)
+    monkeypatch.setattr(
+        script,
+        "_reconcile_live_ig_positions",
+        lambda queued_intents, broker: {
+            "requested": ["QQQ"],
+            "open": ["QQQ"],
+            "missing": [],
+            "unexpected": [],
+        },
+    )
+    monkeypatch.setattr(
+        script,
+        "_sync_live_ig_ledger_snapshot",
+        lambda broker=None, account_type="SPREADBET", sleeve="core": {
+            "summary": {"positions_synced": 1},
+            "ledger_position_count": 1,
+            "ledger_cash_balance": 8108.0,
+            "ledger_buying_power": 8107.5,
+        },
+    )
+    monkeypatch.setattr(script.config, "BROKER_MODE", "paper")
+    monkeypatch.setattr(script.config, "_load_runtime_overrides", lambda: {})
+    monkeypatch.setattr(script, "_parse_args", lambda: script.argparse.Namespace(
+        mode="live",
+        size_mode="auto",
+        chain_id="",
+        actor="operator",
+        notes="notes",
+        commit=True,
+        dispatch=True,
+        allow_live=True,
+        allow_live_full_size=False,
+        smoke_close=False,
+        sync_ledger=True,
+        close_instruments="",
+        symbols="",
+    ))
+
+    exit_code = script.main()
+    payload = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert payload["status"] == "dispatched"
+    assert payload["ledger_sync"]["ledger_position_count"] == 1

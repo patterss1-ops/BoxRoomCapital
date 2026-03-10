@@ -54,7 +54,15 @@ def sync_broker_snapshot(
     Reads account + positions from the broker adapter, upserts account registry,
     replaces position rows, stores latest cash, and writes an account NAV snapshot.
     """
-    if not broker.connect():
+    is_connected = getattr(broker, "is_connected", None)
+    already_connected = False
+    if callable(is_connected):
+        try:
+            already_connected = bool(is_connected())
+        except Exception:  # pragma: no cover - defensive adapter guard
+            logger.warning("Broker is_connected() check failed for '%s'", broker_name, exc_info=True)
+
+    if not already_connected and not broker.connect():
         raise RuntimeError(f"Broker connect failed for '{broker_name}'")
 
     acct = broker.get_account_info()

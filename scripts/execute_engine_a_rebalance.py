@@ -15,6 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import config
 from data.order_intent_store import get_order_intent
 from execution.dispatcher import IntentDispatcher, default_broker_resolver
+from execution.ledger import get_latest_cash_balances, get_unified_positions
+from execution.reconciler import sync_broker_snapshot
 from research.manual_execution import (
     execute_manual_engine_a_rebalance,
     parse_contract_details,
@@ -77,6 +79,11 @@ def _parse_args() -> argparse.Namespace:
         "--close-instruments",
         default="",
         help="Comma-separated IG instruments to close without opening new positions.",
+    )
+    parser.add_argument(
+        "--sync-ledger",
+        action="store_true",
+        help="After a live IG action, sync the broker snapshot into the local ledger.",
     )
     return parser.parse_args()
 
@@ -289,6 +296,45 @@ def _dispatch_summary_incomplete(
     return False
 
 
+def _sync_live_ig_ledger_snapshot(
+    *,
+    broker=None,
+    account_type: str = "SPREADBET",
+    sleeve: str = "core",
+) -> dict[str, object]:
+    managed_broker = broker is None
+    active_broker = broker or default_broker_resolver("ig")
+    try:
+        account_id = config.ig_account_number(False)
+        summary = sync_broker_snapshot(
+            broker=active_broker,
+            broker_name="ig",
+            account_id=account_id,
+            account_type=account_type,
+            sleeve=sleeve,
+        )
+        ledger_positions = [
+            row
+            for row in get_unified_positions(broker="ig")
+            if str(row.get("account_id") or "") == account_id
+        ]
+        ledger_cash_rows = [
+            row
+            for row in get_latest_cash_balances()
+            if str(row.get("broker") or "") == "ig" and str(row.get("account_id") or "") == account_id
+        ]
+        latest_cash = ledger_cash_rows[-1] if ledger_cash_rows else {}
+        return {
+            "summary": summary.to_dict(),
+            "ledger_position_count": len(ledger_positions),
+            "ledger_cash_balance": float(latest_cash.get("balance", 0.0) or 0.0),
+            "ledger_buying_power": float(latest_cash.get("buying_power", 0.0) or 0.0),
+        }
+    finally:
+        if managed_broker:
+            active_broker.disconnect()
+
+
 def main() -> int:
     args = _parse_args()
     if args.dispatch and not args.commit:
@@ -316,6 +362,7 @@ def main() -> int:
             "requested_size_mode": str(args.size_mode or "auto"),
             "commit": bool(args.commit),
             "dispatch": bool(args.dispatch),
+            "sync_ledger": bool(getattr(args, "sync_ledger", False)),
             "close_instruments": list(close_instruments),
             "symbols": list(symbols),
         }
@@ -332,6 +379,20 @@ def main() -> int:
                 print(json.dumps(payload, indent=2, sort_keys=True))
                 return 1
             payload["ok"] = all(bool(item.get("ok")) for item in payload["smoke_close_results"])
+            if (
+                payload["ok"]
+                and bool(getattr(args, "sync_ledger", False))
+                and broker_mode == "live"
+                and payload["ig_target"] == "live"
+            ):
+                try:
+                    payload["ledger_sync"] = _sync_live_ig_ledger_snapshot()
+                except Exception as exc:
+                    payload["ok"] = False
+                    payload["error"] = "ledger_sync_failed"
+                    payload["message"] = str(exc)
+                    print(json.dumps(payload, indent=2, sort_keys=True))
+                    return 1
             payload["status"] = "closed_only"
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0 if payload["ok"] else 1
@@ -491,6 +552,10 @@ def main() -> int:
                     if not payload["ok"]:
                         print(json.dumps(payload, indent=2, sort_keys=True))
                         return 1
+                if bool(getattr(args, "sync_ledger", False)) and broker_mode == "live" and preview.broker_target == "ig":
+                    payload["ledger_sync"] = _sync_live_ig_ledger_snapshot(
+                        broker=dispatcher._brokers.get("ig"),
+                    )
             finally:
                 dispatcher.disconnect_all()
             if payload.get("status") != "smoke_closed":

@@ -160,6 +160,46 @@ class TestReconciler:
 
         assert raised is True
 
+    def test_sync_broker_snapshot_reuses_connected_broker(self, tmp_path):
+        db = self._init_db(tmp_path)
+
+        class ConnectedStubBroker(StubBroker):
+            def __init__(self, account, positions):
+                super().__init__(account=account, positions=positions, connect_ok=True)
+                self.connected = True
+                self.connect_calls = 0
+
+            def connect(self) -> bool:
+                self.connect_calls += 1
+                self.connected = True
+                return True
+
+            def is_connected(self) -> bool:
+                return self.connected
+
+        broker = ConnectedStubBroker(
+            account=AccountInfo(
+                balance=10_000.0,
+                equity=10_000.0,
+                unrealised_pnl=0.0,
+                open_positions=0,
+                currency="GBP",
+            ),
+            positions=[],
+        )
+
+        summary = sync_broker_snapshot(
+            broker=broker,
+            broker_name="paper",
+            account_id="PAPER-1",
+            account_type="PAPER",
+            sleeve="core",
+            db_path=db,
+        )
+
+        assert summary.positions_synced == 0
+        assert broker.connect_calls == 0
+
     def test_account_info_equity_helper(self):
         assert account_info_equity(None, fallback=1000.0) == 1000.0
         assert account_info_equity(AccountInfo(0.0, 0.0, 0.0, 0), fallback=1000.0) == 1000.0
