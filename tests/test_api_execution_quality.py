@@ -30,7 +30,7 @@ class TestExecutionQualityAPI:
     def test_default_response(self, client):
         """API returns valid JSON with all expected keys."""
         with patch(
-            "app.api.server.get_execution_quality_payload",
+            "app.api.routes.research.get_execution_quality_payload",
             return_value={
                 "window_label": "30d",
                 "window_start": "2026-02-01T00:00:00",
@@ -80,7 +80,7 @@ class TestExecutionQualityAPI:
     def test_custom_days_parameter(self, client):
         """API accepts days query parameter."""
         with patch(
-            "app.api.server.get_execution_quality_payload",
+            "app.api.routes.research.get_execution_quality_payload",
             return_value={"verdict": "healthy", "fills": {}, "slippage": {}, "latency": {}, "by_broker": [], "by_strategy": [], "window_label": "7d", "window_start": "", "window_end": "", "generated_at": ""},
         ) as mock_fn:
             response = client.get("/api/execution-quality?days=7")
@@ -97,7 +97,7 @@ class TestExecutionQualityFragment:
     def test_fragment_returns_html(self, client):
         """Fragment endpoint returns HTML containing expected elements."""
         with patch(
-            "app.api.server.get_execution_quality_payload",
+            "app.api.routes.fragments.get_execution_quality_payload",
             return_value={
                 "window_label": "30d",
                 "window_start": "2026-02-01T00:00:00",
@@ -155,7 +155,7 @@ class TestExecutionQualityFragment:
     def test_fragment_no_data(self, client):
         """Fragment handles no_data verdict gracefully."""
         with patch(
-            "app.api.server.get_execution_quality_payload",
+            "app.api.routes.fragments.get_execution_quality_payload",
             return_value={
                 "verdict": "no_data",
                 "generated_at": "",

@@ -12,6 +12,7 @@ from typing import Any, Callable, Optional
 
 import config
 from app.engine.options_engine import OptionsEngine
+from utils.atomic_write import atomic_write_json
 from data.pg_connection import research_db_status
 
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ class BotControlService:
             "kill_check": {"last_result": self._last_kill_check_result},
             "market_data_refresh": {"last_result": self._last_market_data_refresh_result},
         }
-        self.research_state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        atomic_write_json(self.research_state_file, payload)
 
     def _set_engine_a_result(self, payload: Optional[dict[str, Any]]) -> None:
         self._last_engine_a_result = dict(payload) if isinstance(payload, dict) else None
@@ -135,7 +136,7 @@ class BotControlService:
             "updated_at": datetime.now().isoformat(),
             **data,
         }
-        self.state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        atomic_write_json(self.state_file, payload)
 
     def status(self) -> dict[str, Any]:
         engine_state = self.engine.status()

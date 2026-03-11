@@ -48,7 +48,7 @@ def _route_endpoint(app, path: str):
 
 
 def test_api_portfolio_analytics_endpoint_uses_builder():
-    with patch("app.api.server.build_portfolio_analytics_payload", return_value=_sample_payload()) as mock_builder:
+    with patch("app.api.routes.research.build_portfolio_analytics_payload", return_value=_sample_payload()) as mock_builder:
         with patch("app.api.server.init_db"):
             app = create_app()
         endpoint = _route_endpoint(app, "/api/analytics/portfolio")

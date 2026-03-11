@@ -3,10 +3,13 @@ Trading Bot Configuration
 All strategy parameters match Pine Script defaults exactly.
 Broker: IG (spread betting via REST API)
 """
+import logging
 import os
 import json
 from pathlib import Path
 from dotenv import load_dotenv
+
+_cfg_log = logging.getLogger("config")
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
 
@@ -43,6 +46,7 @@ def _env_int(
     try:
         value = int(raw)
     except ValueError:
+        _cfg_log.warning("Config %s: could not parse %r as int, using default %s", name, raw, default)
         value = default
     if min_value is not None:
         value = max(min_value, value)
@@ -61,6 +65,7 @@ def _env_float(
     try:
         value = float(raw)
     except ValueError:
+        _cfg_log.warning("Config %s: could not parse %r as float, using default %s", name, raw, default)
         value = default
     if min_value is not None:
         value = max(min_value, value)
@@ -963,3 +968,19 @@ SIPP_STRATEGY_SLOTS = [
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 LOG_FILE = os.getenv("BOT_LOG_FILE", "trading_bot.log")
 TRADE_LOG_FILE = "trades.csv"
+
+
+# ─── STARTUP VALIDATION ─────────────────────────────────────────────────────
+
+def validate_critical_config() -> list[str]:
+    """Check essential params at startup. Returns list of warning strings."""
+    warnings: list[str] = []
+    is_demo = ig_broker_is_demo()
+    if not ig_credentials_available(is_demo):
+        mode = "DEMO" if is_demo else "LIVE"
+        warnings.append(f"IG {mode} credentials incomplete — broker will not connect")
+    if ADVISOR_ENABLED and not os.getenv("ANTHROPIC_API_KEY"):
+        warnings.append("ADVISOR_ENABLED=true but ANTHROPIC_API_KEY is not set")
+    if NOTIFICATIONS.get("enabled") and not NOTIFICATIONS.get("telegram_token"):
+        warnings.append("Notifications enabled but TELEGRAM_BOT_TOKEN is not set")
+    return warnings

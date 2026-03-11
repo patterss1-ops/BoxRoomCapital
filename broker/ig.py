@@ -5,6 +5,7 @@ Uses direct HTTP calls (proven working in ping test) instead of trading-ig libra
 API key from: https://labs.ig.com/
 """
 import logging
+import threading
 import time
 import requests
 from datetime import datetime
@@ -45,6 +46,7 @@ class IGBroker(BaseBroker):
             else "https://api.ig.com/gateway/deal"
         )
         self.session: Optional[requests.Session] = None
+        self._lock = threading.RLock()
 
         # Internal tracking: deal_id → (ticker, strategy)
         self._deal_map: dict[str, tuple[str, str]] = {}
@@ -113,6 +115,10 @@ class IGBroker(BaseBroker):
 
     def connect(self) -> bool:
         """Authenticate with IG API using V2 session."""
+        with self._lock:
+            return self._connect_unlocked()
+
+    def _connect_unlocked(self) -> bool:
         try:
             creds = self._credentials()
             if not (creds["username"] and creds["password"] and creds["api_key"]):
@@ -169,16 +175,18 @@ class IGBroker(BaseBroker):
 
     def is_connected(self) -> bool:
         """Return True if session tokens are set (authenticated)."""
-        if not self.session:
-            return False
-        headers = self.session.headers
-        return bool(headers.get("CST") and headers.get("X-SECURITY-TOKEN"))
+        with self._lock:
+            if not self.session:
+                return False
+            headers = self.session.headers
+            return bool(headers.get("CST") and headers.get("X-SECURITY-TOKEN"))
 
     def disconnect(self):
         """Let IG session expire naturally — explicit logout kills the web session."""
-        if self.session:
-            logger.info("IG session left to expire (preserves web session)")
-            self.session = None
+        with self._lock:
+            if self.session:
+                logger.info("IG session left to expire (preserves web session)")
+                self.session = None
 
     def _headers(self, version: str = "1") -> dict:
         """Get headers with specified API version."""
@@ -199,6 +207,10 @@ class IGBroker(BaseBroker):
 
     def get_account_info(self, timeout: Optional[float] = None) -> AccountInfo:
         """Get account balance and margin info."""
+        with self._lock:
+            return self._get_account_info_unlocked(timeout)
+
+    def _get_account_info_unlocked(self, timeout: Optional[float] = None) -> AccountInfo:
         if not self.session:
             return AccountInfo(balance=0, equity=0, unrealised_pnl=0, open_positions=0)
 
@@ -236,6 +248,10 @@ class IGBroker(BaseBroker):
 
     def get_positions(self, timeout: Optional[float] = None) -> list[Position]:
         """Get all open positions from IG."""
+        with self._lock:
+            return self._get_positions_unlocked(timeout)
+
+    def _get_positions_unlocked(self, timeout: Optional[float] = None) -> list[Position]:
         if not self.session:
             return []
 
@@ -300,15 +316,20 @@ class IGBroker(BaseBroker):
 
     def get_position(self, ticker: str, strategy: str) -> Optional[Position]:
         """Get position for a specific ticker+strategy."""
-        for p in self.get_positions():
-            if p.ticker == ticker and p.strategy == strategy:
-                return p
-        return None
+        with self._lock:
+            for p in self._get_positions_unlocked():
+                if p.ticker == ticker and p.strategy == strategy:
+                    return p
+            return None
 
     # ─── Market info ─────────────────────────────────────────────────────
 
     def get_market_info(self, epic: str, timeout: Optional[float] = None) -> Optional[dict]:
         """Get market details including min deal size and stop distance."""
+        with self._lock:
+            return self._get_market_info_unlocked(epic, timeout)
+
+    def _get_market_info_unlocked(self, epic: str, timeout: Optional[float] = None) -> Optional[dict]:
         if not self.session:
             return None
         if epic in self._blocked_epics:
@@ -334,13 +355,14 @@ class IGBroker(BaseBroker):
 
     def get_epic(self, ticker: str) -> Optional[str]:
         """Get the IG EPIC code for a ticker from config."""
-        market = config.MARKET_MAP.get(ticker)
-        if not market:
-            return None
-        epic = market["epic"]
-        if epic in self._blocked_epics:
-            return None  # Don't return blocked EPICs
-        return epic
+        with self._lock:
+            market = config.MARKET_MAP.get(ticker)
+            if not market:
+                return None
+            epic = market["epic"]
+            if epic in self._blocked_epics:
+                return None  # Don't return blocked EPICs
+            return epic
 
     def verify_markets(self) -> dict[str, bool]:
         """
@@ -348,6 +370,10 @@ class IGBroker(BaseBroker):
         Tries alternatives from EPIC_ALTERNATIVES if primary fails.
         Returns dict of {ticker: accessible}.
         """
+        with self._lock:
+            return self._verify_markets_unlocked()
+
+    def _verify_markets_unlocked(self) -> dict[str, bool]:
         if not self.session:
             return {}
 
@@ -399,11 +425,13 @@ class IGBroker(BaseBroker):
 
     def place_long(self, ticker: str, stake_per_point: float, strategy: str) -> OrderResult:
         """Open a long spread bet."""
-        return self._place_order(ticker, "BUY", stake_per_point, strategy)
+        with self._lock:
+            return self._place_order(ticker, "BUY", stake_per_point, strategy)
 
     def place_short(self, ticker: str, stake_per_point: float, strategy: str) -> OrderResult:
         """Open a short spread bet."""
-        return self._place_order(ticker, "SELL", stake_per_point, strategy)
+        with self._lock:
+            return self._place_order(ticker, "SELL", stake_per_point, strategy)
 
     def _place_order(self, ticker: str, direction: str, stake: float, strategy: str) -> OrderResult:
         """Place a spread bet order via raw REST API."""
@@ -549,6 +577,10 @@ class IGBroker(BaseBroker):
         E.g. search_term="US 500 PUT" to find S&P put options.
         Returns list of OptionMarket with bid/offer/strike info.
         """
+        with self._lock:
+            return self._search_option_markets_unlocked(search_term)
+
+    def _search_option_markets_unlocked(self, search_term: str) -> list[OptionMarket]:
         if not self.session:
             return []
 
@@ -611,6 +643,10 @@ class IGBroker(BaseBroker):
 
     def get_option_price(self, epic: str) -> Optional[OptionMarket]:
         """Get current price for a specific option EPIC."""
+        with self._lock:
+            return self._get_option_price_unlocked(epic)
+
+    def _get_option_price_unlocked(self, epic: str) -> Optional[OptionMarket]:
         if not self.session or epic in self._blocked_epics:
             return None
 
@@ -658,6 +694,10 @@ class IGBroker(BaseBroker):
 
     def validate_option_leg(self, epic: str, size: float) -> dict:
         """Validate option leg tradability and minimum deal size."""
+        with self._lock:
+            return self._validate_option_leg_unlocked(epic, size)
+
+    def _validate_option_leg_unlocked(self, epic: str, size: float) -> dict:
         info = self.get_market_info(epic)
         if not info:
             return {"ok": False, "code": "NO_MARKET_INFO", "message": f"No market info for {epic}"}
@@ -710,6 +750,20 @@ class IGBroker(BaseBroker):
         Both legs placed sequentially. If the first leg fills but the second fails,
         we immediately close the first leg to avoid naked exposure.
         """
+        with self._lock:
+            return self._place_option_spread_unlocked(
+                short_epic, long_epic, size, ticker, strategy, correlation_id
+            )
+
+    def _place_option_spread_unlocked(
+        self,
+        short_epic: str,
+        long_epic: str,
+        size: float,
+        ticker: str,
+        strategy: str,
+        correlation_id: str = "",
+    ) -> SpreadOrderResult:
         if not self.session:
             return SpreadOrderResult(success=False, message="Not connected")
 
@@ -770,6 +824,18 @@ class IGBroker(BaseBroker):
         correlation_id: str = "",
     ) -> SpreadOrderResult:
         """Close both legs of an option spread (buy back short, sell long)."""
+        with self._lock:
+            return self._close_option_spread_unlocked(
+                short_deal_id, long_deal_id, size, correlation_id
+            )
+
+    def _close_option_spread_unlocked(
+        self,
+        short_deal_id: str,
+        long_deal_id: str,
+        size: float,
+        correlation_id: str = "",
+    ) -> SpreadOrderResult:
         if not self.session:
             return SpreadOrderResult(success=False, message="Not connected")
 
@@ -908,6 +974,10 @@ class IGBroker(BaseBroker):
 
     def close_position(self, ticker: str, strategy: str) -> OrderResult:
         """Close an open position using _method DELETE header (proven working)."""
+        with self._lock:
+            return self._close_position_unlocked(ticker, strategy)
+
+    def _close_position_unlocked(self, ticker: str, strategy: str) -> OrderResult:
         if not self.session:
             return OrderResult(success=False, message="Not connected")
 

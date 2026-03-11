@@ -75,6 +75,20 @@ class TestApiHealth:
         assert resp.json()["status"] == "healthy"
 
 
+class TestStartupConfigValidation:
+    def test_lifespan_logs_config_warnings(self, monkeypatch, caplog):
+        monkeypatch.setattr(server.config, "validate_critical_config", lambda: ["Missing IG creds", "Missing telegram token"])
+        monkeypatch.setattr(server.config, "ORCHESTRATOR_ENABLED", False)
+        monkeypatch.setattr(server.config, "DISPATCHER_ENABLED", False)
+        monkeypatch.setattr(server.config, "INTRADAY_ENABLED", False)
+
+        with ASGITestClient(server.app):
+            pass
+
+        assert "Config validation: Missing IG creds" in caplog.text
+        assert "Config validation: Missing telegram token" in caplog.text
+
+
 class TestEquityCurve:
     def test_equity_curve_returns_sorted_data(self, monkeypatch):
         monkeypatch.setattr(
