@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 h-full min-h-0 overflow-y-auto pr-1">
 
   <div class="md:col-span-12">
     <section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
@@ -139,7 +139,7 @@
   <div class="md:col-span-12"
        id="research-panel"
        hx-get="/fragments/research{% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}{% endif %}"
-       hx-trigger="load delay:300ms, every 15s"
+       hx-trigger="load delay:300ms"
        hx-swap="innerHTML"></div>
 
   <div class="md:col-span-12" id="research-workbench">

@@ -58,6 +58,14 @@ class BotControlService:
         self._last_engine_b_result = self._load_persisted_result(persisted_research_state, "engine_b")
         self._last_decay_review_result = self._load_persisted_result(persisted_research_state, "decay_review")
         self._last_kill_check_result = self._load_persisted_result(persisted_research_state, "kill_check")
+        self._last_market_data_refresh_result = self._load_persisted_result(persisted_research_state, "market_data_refresh")
+        self._feed_aggregator: Optional[Any] = None
+        self._feed_aggregator_thread: Optional[threading.Thread] = None
+        self._feed_aggregator_stop_event = threading.Event()
+        self._rss_aggregator: Optional[Any] = None
+        self._rss_aggregator_stop_event = threading.Event()
+        self._x_feed_service: Optional[Any] = None
+        self._x_feed_stop_event = threading.Event()
 
     @staticmethod
     def _load_json_file(path: Path) -> dict[str, Any]:
@@ -84,6 +92,7 @@ class BotControlService:
             "engine_b": {"last_result": self._last_engine_b_result},
             "decay_review": {"last_result": self._last_decay_review_result},
             "kill_check": {"last_result": self._last_kill_check_result},
+            "market_data_refresh": {"last_result": self._last_market_data_refresh_result},
         }
         self.research_state_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -216,6 +225,14 @@ class BotControlService:
 
         schedule = list(DEFAULT_SCHEDULE)
         window_handlers: dict[str, Callable[..., Any]] = {}
+
+        if config.MARKET_DATA_REFRESH_ENABLED:
+            schedule.append(ScheduleWindow(
+                name="market_data_refresh",
+                hour=config.MARKET_DATA_REFRESH_HOUR,
+                minute=config.MARKET_DATA_REFRESH_MINUTE,
+            ))
+            window_handlers["market_data_refresh"] = self._run_market_data_refresh_window
 
         if config.ENGINE_A_ENABLED and self._engine_a_factory is not None:
             schedule.append(ScheduleWindow(name="engine_a_close_research", hour=21, minute=30))
@@ -631,6 +648,10 @@ class BotControlService:
             "decay_review": self.decay_review_status(),
             "kill_check": self.kill_check_status(),
             "intraday": self.intraday_status(),
+            "market_data_refresh": self.market_data_refresh_status(),
+            "feed_aggregator": self.feed_aggregator_status(),
+            "rss_aggregator": self.rss_aggregator_status(),
+            "x_feed_service": self.x_feed_service_status(),
             "last_dag_result": self._last_dag_result,
             "config": {
                 "orchestrator_enabled": config.ORCHESTRATOR_ENABLED,
@@ -643,6 +664,11 @@ class BotControlService:
                 "dispatcher_interval_seconds": config.DISPATCHER_INTERVAL_SECONDS,
                 "intraday_enabled": config.INTRADAY_ENABLED,
                 "intraday_poll_seconds": config.INTRADAY_POLL_SECONDS,
+                "market_data_refresh_enabled": config.MARKET_DATA_REFRESH_ENABLED,
+                "feed_aggregator_enabled": config.FEED_AGGREGATOR_ENABLED,
+                "rss_aggregator_enabled": config.RSS_AGGREGATOR_ENABLED,
+                "x_bookmarks_enabled": config.X_BOOKMARKS_ENABLED,
+                "advisor_enabled": config.ADVISOR_ENABLED,
             },
         }
 
@@ -740,6 +766,39 @@ class BotControlService:
                 except Exception as exc:
                     logger.error("Supervisor failed to restart Engine B worker: %s", exc)
 
+        # Restart feed aggregator if it crashed
+        if config.FEED_AGGREGATOR_ENABLED:
+            agg_dead = self._feed_aggregator is None or not self._feed_aggregator.running
+            if agg_dead and not self._feed_aggregator_stop_event.is_set():
+                try:
+                    result = self.start_feed_aggregator()
+                    restarted["feed_aggregator"] = result.get("status", "unknown")
+                    logger.warning("Supervisor restarted crashed feed aggregator")
+                except Exception as exc:
+                    logger.error("Supervisor failed to restart feed aggregator: %s", exc)
+
+        # Restart RSS aggregator if it crashed
+        if config.RSS_AGGREGATOR_ENABLED:
+            rss_dead = self._rss_aggregator is None or not self._rss_aggregator.running
+            if rss_dead and not self._rss_aggregator_stop_event.is_set():
+                try:
+                    result = self.start_rss_aggregator()
+                    restarted["rss_aggregator"] = result.get("status", "unknown")
+                    logger.warning("Supervisor restarted crashed RSS aggregator")
+                except Exception as exc:
+                    logger.error("Supervisor failed to restart RSS aggregator: %s", exc)
+
+        # Restart X feed service if it crashed
+        if config.X_BOOKMARKS_ENABLED:
+            x_dead = self._x_feed_service is None or not self._x_feed_service.running
+            if x_dead and not self._x_feed_stop_event.is_set():
+                try:
+                    result = self.start_x_feed_service()
+                    restarted["x_feed_service"] = result.get("status", "unknown")
+                    logger.warning("Supervisor restarted crashed X feed service")
+                except Exception as exc:
+                    logger.error("Supervisor failed to restart X feed service: %s", exc)
+
         # Restart intraday loop if it crashed
         if config.INTRADAY_ENABLED and self._intraday_loop is None:
             try:
@@ -823,6 +882,210 @@ class BotControlService:
             "skipped": max(0, len(alerts) - auto_kills),
             "error_count": 0,
         }
+
+    # ─── Market data refresh ────────────────────────────────────────────
+
+    def _run_market_data_refresh_window(self, window_name: str, db_path: str, dry_run: bool) -> dict[str, Any]:
+        """Scheduler handler: fetch yesterday's bars via yfinance, rebuild canonical bars."""
+        from datetime import date as date_type, timedelta as td
+        as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        try:
+            from research.market_data.bootstrap import ingest_seeded_market_data, market_data_readiness
+            from research.market_data.ingestion import IBKRAdapter
+
+            yesterday = date_type.today() - td(days=1)
+            today = date_type.today()
+
+            ingest_result = ingest_seeded_market_data(
+                start=yesterday, end=today, adapter=IBKRAdapter()
+            )
+            readiness = market_data_readiness(as_of=today)
+
+            self._last_market_data_refresh_result = {
+                "status": "ok",
+                "as_of": as_of,
+                "window": window_name,
+                "bars_ingested": ingest_result.get("bars_ingested", 0),
+                "ready_count": readiness.get("ready_count", 0),
+            }
+            self._persist_research_state()
+            return {
+                "items_processed": ingest_result.get("bars_ingested", 0),
+                "actions_taken": 1,
+                "error_count": 0,
+            }
+        except Exception as exc:
+            logger.warning("Market data refresh failed: %s", exc)
+            self._last_market_data_refresh_result = {
+                "status": "failed",
+                "as_of": as_of,
+                "window": window_name,
+                "error": str(exc),
+            }
+            self._persist_research_state()
+            return {"items_processed": 0, "actions_taken": 0, "error_count": 1, "error": str(exc)}
+
+    def market_data_refresh_status(self) -> dict[str, Any]:
+        """Return market data refresh state."""
+        return {
+            "enabled": config.MARKET_DATA_REFRESH_ENABLED,
+            "hour": config.MARKET_DATA_REFRESH_HOUR,
+            "minute": config.MARKET_DATA_REFRESH_MINUTE,
+            "last_result": self._last_market_data_refresh_result,
+        }
+
+    # ─── Feed aggregator lifecycle ────────────────────────────────────────
+
+    def start_feed_aggregator(self) -> dict[str, Any]:
+        """Start the automated feed aggregator for Engine B."""
+        if not config.FEED_AGGREGATOR_ENABLED:
+            return {"status": "disabled"}
+        if self._feed_aggregator is not None and self._feed_aggregator.running:
+            return {"status": "already_running"}
+
+        from intelligence.alpha_vantage_client import AlphaVantageClient
+        from intelligence.feed_aggregator import FeedAggregatorService
+        from intelligence.finnhub_news_client import FinnhubNewsClient
+        from intelligence.fred_client import FREDClient
+
+        tv_client = None
+        if config.FEED_AGGREGATOR_TV_ENABLED:
+            try:
+                from intelligence.tradingview_news_client import TradingViewNewsClient
+                tv_client = TradingViewNewsClient()
+            except Exception as exc:
+                logger.warning("TradingView news client init failed: %s", exc)
+
+        self._feed_aggregator = FeedAggregatorService(
+            finnhub_client=FinnhubNewsClient(),
+            av_client=AlphaVantageClient(),
+            fred_client=FREDClient(),
+            submit_fn=self.submit_engine_b_event,
+            tickers=config.FEED_AGGREGATOR_TICKERS,
+            fred_series=config.FEED_AGGREGATOR_FRED_SERIES,
+            finnhub_interval=config.FEED_AGGREGATOR_FINNHUB_INTERVAL,
+            av_interval=config.FEED_AGGREGATOR_AV_INTERVAL,
+            fred_interval=config.FEED_AGGREGATOR_FRED_INTERVAL,
+            tv_client=tv_client,
+            tv_interval=config.FEED_AGGREGATOR_TV_INTERVAL,
+        )
+        self._feed_aggregator.start()
+        self._write_state({"last_action": "feed-aggregator-start"})
+        logger.info("Feed aggregator started")
+        return {"status": "started"}
+
+    def stop_feed_aggregator(self) -> dict[str, Any]:
+        """Stop the feed aggregator."""
+        if self._feed_aggregator is None or not self._feed_aggregator.running:
+            return {"status": "not_running"}
+        self._feed_aggregator.stop()
+        self._write_state({"last_action": "feed-aggregator-stop"})
+        logger.info("Feed aggregator stopped")
+        return {"status": "stopped"}
+
+    def feed_aggregator_status(self) -> dict[str, Any]:
+        """Return feed aggregator state."""
+        if self._feed_aggregator is None:
+            return {"running": False, "enabled": config.FEED_AGGREGATOR_ENABLED}
+        return {
+            "enabled": config.FEED_AGGREGATOR_ENABLED,
+            **self._feed_aggregator.status(),
+        }
+
+    # ─── RSS aggregator lifecycle ─────────────────────────────────────────
+
+    def start_rss_aggregator(self) -> dict[str, Any]:
+        """Start the RSS feed aggregator for advisory context."""
+        if not config.RSS_AGGREGATOR_ENABLED:
+            return {"status": "disabled"}
+        if self._rss_aggregator is not None and self._rss_aggregator.running:
+            return {"status": "already_running"}
+
+        from intelligence.rss_aggregator import RSSAggregatorService, DEFAULT_RSS_FEEDS
+        import json as _json
+
+        feeds = dict(DEFAULT_RSS_FEEDS)
+        if config.RSS_FEEDS_OVERRIDE:
+            try:
+                feeds.update(_json.loads(config.RSS_FEEDS_OVERRIDE))
+            except Exception as exc:
+                logger.warning("RSS_FEEDS_OVERRIDE parse error: %s", exc)
+
+        submit_fn = self._get_engine_b_submit_fn()
+        self._rss_aggregator = RSSAggregatorService(
+            feeds=feeds,
+            submit_fn=submit_fn,
+            poll_interval=config.RSS_POLL_INTERVAL,
+        )
+        self._rss_aggregator.start()
+        logger.info("RSS aggregator started with %d feeds", len(feeds))
+        return {"status": "started", "feed_count": len(feeds)}
+
+    def stop_rss_aggregator(self) -> dict[str, Any]:
+        """Stop the RSS aggregator."""
+        if self._rss_aggregator is None or not self._rss_aggregator.running:
+            return {"status": "not_running"}
+        self._rss_aggregator.stop()
+        logger.info("RSS aggregator stopped")
+        return {"status": "stopped"}
+
+    def rss_aggregator_status(self) -> dict[str, Any]:
+        """Return RSS aggregator state."""
+        if self._rss_aggregator is None:
+            return {"running": False, "enabled": config.RSS_AGGREGATOR_ENABLED}
+        return {"enabled": config.RSS_AGGREGATOR_ENABLED, **self._rss_aggregator.status()}
+
+    # ─── X feed service lifecycle ─────────────────────────────────────────
+
+    def start_x_feed_service(self) -> dict[str, Any]:
+        """Start the X/Twitter bookmarks/likes poller."""
+        if not config.X_BOOKMARKS_ENABLED:
+            return {"status": "disabled"}
+        if self._x_feed_service is not None and self._x_feed_service.running:
+            return {"status": "already_running"}
+        if not config.X_BEARER_TOKEN:
+            return {"status": "no_credentials", "error": "X_BEARER_TOKEN not set"}
+
+        from intelligence.x_bookmarks import XBookmarksClient
+        from intelligence.x_feed_service import XFeedService
+
+        client = XBookmarksClient(bearer_token=config.X_BEARER_TOKEN)
+        submit_fn = self._get_engine_b_submit_fn()
+        self._x_feed_service = XFeedService(
+            client=client,
+            submit_fn=submit_fn,
+            poll_interval=config.X_BOOKMARKS_POLL_INTERVAL,
+        )
+        self._x_feed_service.start()
+        logger.info("X feed service started")
+        return {"status": "started"}
+
+    def stop_x_feed_service(self) -> dict[str, Any]:
+        """Stop the X feed service."""
+        if self._x_feed_service is None or not self._x_feed_service.running:
+            return {"status": "not_running"}
+        self._x_feed_service.stop()
+        logger.info("X feed service stopped")
+        return {"status": "stopped"}
+
+    def x_feed_service_status(self) -> dict[str, Any]:
+        """Return X feed service state."""
+        if self._x_feed_service is None:
+            return {"running": False, "enabled": config.X_BOOKMARKS_ENABLED}
+        return {"enabled": config.X_BOOKMARKS_ENABLED, **self._x_feed_service.status()}
+
+    def _get_engine_b_submit_fn(self):
+        """Return a submit function for Engine B intake, or a no-op if not available."""
+        def _noop_submit(**kwargs):
+            logger.debug("Engine B submit (no-op): %s", kwargs.get("raw_content", "")[:80])
+        if hasattr(self, '_engine_b_queue'):
+            def _queue_submit(**kwargs):
+                try:
+                    self._engine_b_queue.put_nowait(kwargs)
+                except Exception:
+                    _noop_submit(**kwargs)
+            return _queue_submit
+        return _noop_submit
 
     def _run_market_brief(self, brief_type: str) -> dict[str, Any]:
         """Generate a market brief (morning or evening) via the scheduler."""

@@ -865,6 +865,25 @@ RESEARCH_SYSTEM_ACTIVE = _env_bool("RESEARCH_SYSTEM_ACTIVE", False)
 ENGINE_A_INTERVAL_SECONDS = _env_int(
     "ENGINE_A_INTERVAL_SECONDS", 300, min_value=5, max_value=86400
 )
+
+# ─── DAILY MARKET DATA REFRESH ──────────────────────────────────────────────
+MARKET_DATA_REFRESH_ENABLED = _env_bool("MARKET_DATA_REFRESH_ENABLED", False)
+MARKET_DATA_REFRESH_HOUR = _env_int("MARKET_DATA_REFRESH_HOUR", 20, min_value=0, max_value=23)
+MARKET_DATA_REFRESH_MINUTE = _env_int("MARKET_DATA_REFRESH_MINUTE", 0, min_value=0, max_value=59)
+
+# ─── FEED AGGREGATOR (Engine B automated intake) ────────────────────────────
+FEED_AGGREGATOR_ENABLED = _env_bool("FEED_AGGREGATOR_ENABLED", False)
+FEED_AGGREGATOR_TICKERS = [
+    t.strip() for t in os.getenv("FEED_AGGREGATOR_TICKERS", "SPY,QQQ,AAPL,MSFT,NVDA").split(",") if t.strip()
+]
+FEED_AGGREGATOR_FINNHUB_INTERVAL = _env_int("FEED_AGGREGATOR_FINNHUB_INTERVAL", 300, min_value=60, max_value=3600)
+FEED_AGGREGATOR_AV_INTERVAL = _env_int("FEED_AGGREGATOR_AV_INTERVAL", 900, min_value=300, max_value=7200)
+FEED_AGGREGATOR_FRED_INTERVAL = _env_int("FEED_AGGREGATOR_FRED_INTERVAL", 3600, min_value=600, max_value=86400)
+FEED_AGGREGATOR_FRED_SERIES = [
+    t.strip() for t in os.getenv("FEED_AGGREGATOR_FRED_SERIES", "T10Y2Y,DFF,BAMLH0A0HYM2").split(",") if t.strip()
+]
+FEED_AGGREGATOR_TV_INTERVAL = _env_int("FEED_AGGREGATOR_TV_INTERVAL", 600, min_value=120, max_value=7200)
+FEED_AGGREGATOR_TV_ENABLED = _env_bool("FEED_AGGREGATOR_TV_ENABLED", True)  # on by default (no API key needed)
 ENGINE_A_CAPITAL_BASE = _env_float(
     "ENGINE_A_CAPITAL_BASE", 750000.0, min_value=1000.0, max_value=100000000.0
 )
@@ -880,6 +899,64 @@ NOTIFICATIONS = {
     "telegram_token": os.getenv("TELEGRAM_TOKEN", ""),
     "telegram_chat_id": _runtime_overrides.get("notifications_telegram_chat_id", os.getenv("TELEGRAM_CHAT_ID", "")),
 }
+
+# ─── ADVISORY MODULE ─────────────────────────────────────────────────────────
+
+ADVISOR_ENABLED = _env_bool("ADVISOR_ENABLED", False)
+ADVISOR_MODEL = os.getenv("ADVISOR_MODEL", "claude-opus-4-6")
+ADVISOR_MAX_CONTEXT_MESSAGES = _env_int("ADVISOR_MAX_CONTEXT_MESSAGES", 20, min_value=1, max_value=100)
+ADVISOR_MAX_MEMORY_ITEMS = _env_int("ADVISOR_MAX_MEMORY_ITEMS", 15, min_value=1, max_value=50)
+ADVISOR_SESSION_TIMEOUT_HOURS = _env_int("ADVISOR_SESSION_TIMEOUT_HOURS", 4, min_value=1, max_value=168)
+ADVISOR_MEMORY_EXTRACTION_ENABLED = _env_bool("ADVISOR_MEMORY_EXTRACTION_ENABLED", True)
+
+# RSS feed aggregator for advisory context
+RSS_AGGREGATOR_ENABLED = _env_bool("RSS_AGGREGATOR_ENABLED", False)
+RSS_POLL_INTERVAL = _env_int("RSS_POLL_INTERVAL", 1800, min_value=300, max_value=86400)
+RSS_FEEDS_OVERRIDE = os.getenv("RSS_FEEDS_OVERRIDE", "")
+
+# X/Twitter bookmarks polling
+X_BOOKMARKS_ENABLED = _env_bool("X_BOOKMARKS_ENABLED", False)
+X_BOOKMARKS_POLL_INTERVAL = _env_int("X_BOOKMARKS_POLL_INTERVAL", 1800, min_value=300, max_value=86400)
+
+# Advisory proactive alerts
+ADVISOR_WEEKLY_REVIEW_ENABLED = _env_bool("ADVISOR_WEEKLY_REVIEW_ENABLED", False)
+ADVISOR_WEEKLY_REVIEW_DAY = _env_int("ADVISOR_WEEKLY_REVIEW_DAY", 6, min_value=0, max_value=6)  # 6=Sunday
+ADVISOR_WEEKLY_REVIEW_HOUR = _env_int("ADVISOR_WEEKLY_REVIEW_HOUR", 18, min_value=0, max_value=23)
+ADVISOR_DAILY_CHECK_ENABLED = _env_bool("ADVISOR_DAILY_CHECK_ENABLED", False)
+ADVISOR_DRAWDOWN_ALERT_PCT = _env_float("ADVISOR_DRAWDOWN_ALERT_PCT", 10.0, min_value=1.0, max_value=50.0)
+
+# ─── SIPP STRATEGY SLOTS ────────────────────────────────────────────────────
+
+SIPP_STRATEGY_SLOTS = [
+    {
+        "id": "gtaa_sipp",
+        "strategy_class": "GTAAStrategy",
+        "strategy_version": "1.0",
+        "params": GTAA_PARAMS,
+        "sleeve": "sleeve_7_sipp",
+        "account_type": "SIPP",
+        "broker_target": "ibkr",
+        "tickers": ["SPY", "EFA", "IEF", "VNQ", "DBC"],
+        "base_qty": 1.0,
+        "risk_tags": ["trend_following", "monthly_rebalance", "sipp"],
+        "requirements": {"requires_spot_etf": True},
+        "enabled": False,
+    },
+    {
+        "id": "dual_momentum_sipp",
+        "strategy_class": "DualMomentumStrategy",
+        "strategy_version": "1.0",
+        "params": DUAL_MOMENTUM_PARAMS,
+        "sleeve": "sleeve_7_sipp",
+        "account_type": "SIPP",
+        "broker_target": "ibkr",
+        "tickers": ["SPY", "EFA", "AGG"],
+        "base_qty": 1.0,
+        "risk_tags": ["momentum", "monthly_rebalance", "sipp"],
+        "requirements": {"requires_spot_etf": True},
+        "enabled": False,
+    },
+]
 
 # ─── LOGGING ─────────────────────────────────────────────────────────────────
 

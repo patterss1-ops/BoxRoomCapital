@@ -1,0 +1,28 @@
+<!-- Advisory Memory Search Results fragment -->
+{% if memories %}
+<div class="border border-gray-200 rounded-md overflow-hidden mt-1">
+  <div class="text-[9px] text-gray-400 bg-gray-50 px-1.5 py-0.5 border-b border-gray-200">
+    {{ memories|length }} memor{{ 'y' if memories|length == 1 else 'ies' }}{% if query %} matching "{{ query }}"{% endif %}
+  </div>
+  {% for mem in memories %}
+  <div class="px-1.5 py-1 border-b border-gray-50 hover:bg-gray-50">
+    <div class="flex items-center gap-1.5">
+      <span class="text-[9px] font-semibold uppercase
+        {% if mem.memory_type == 'decision' %}text-blue-600
+        {% elif mem.memory_type == 'observation' %}text-emerald-600
+        {% elif mem.memory_type == 'preference' %}text-purple-600
+        {% elif mem.memory_type == 'bookmark' %}text-amber-600
+        {% else %}text-gray-500{% endif %}">{{ mem.memory_type or 'note' }}</span>
+      <span class="text-[9px] text-gray-400 font-mono">{{ mem.topic }}</span>
+      <span class="text-[8px] text-gray-300 font-mono ml-auto">{{ (mem.created_at or '')[:10] }}</span>
+    </div>
+    <p class="text-[10px] text-gray-700 font-mono mt-0.5">{{ mem.summary }}</p>
+    {% if mem.detail %}
+    <p class="text-[9px] text-gray-400 font-mono mt-0.5 truncate">{{ mem.detail[:200] }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% elif query %}
+<div class="text-[10px] text-gray-400 py-2 text-center">No memories found for "{{ query }}"</div>
+{% endif %}

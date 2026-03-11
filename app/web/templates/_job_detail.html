@@ -1,8 +1,9 @@
-<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
+<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full min-h-0 flex flex-col">
   <div class="flex justify-between items-baseline gap-4 mb-3">
     <h2 class="text-lg font-semibold text-gray-800">Job Output</h2>
     <p class="text-gray-400 text-sm">Selected job payload, derived summary, and errors.</p>
   </div>
+  <div class="flex-1 min-h-0 overflow-y-auto pr-1">
   {% if job %}
     <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5"><span class="text-gray-400 text-sm">Job ID</span><span class="font-mono text-gray-700 text-xs">{{ job.id[:8] }}</span></div>
     <div class="grid grid-cols-[160px_1fr] gap-2 items-start border-b border-gray-200 py-1.5"><span class="text-gray-400 text-sm">Type</span><span class="text-gray-700 text-sm">{{ job.job_type }}</span></div>
@@ -149,4 +150,5 @@
   {% else %}
     <p class="text-sm text-gray-400">No job selected yet.</p>
   {% endif %}
+  </div>
 </section>

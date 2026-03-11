@@ -1,0 +1,36 @@
+<!-- Advisory RSS News Feed fragment -->
+<div class="bg-white border border-gray-200 rounded-md p-1.5">
+  <div class="flex items-center justify-between mb-1">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">RSS News</h3>
+    <span class="text-[9px] text-gray-300 font-mono">{{ headlines|length }} items</span>
+  </div>
+  {% if headlines %}
+  <div class="space-y-0 max-h-64 overflow-y-auto">
+    {% for item in headlines %}
+    <div class="py-0.5 border-b border-gray-50">
+      <div class="flex items-start gap-1">
+        <span class="text-[8px] font-mono text-gray-300 flex-shrink-0 mt-0.5 w-16">{{ item.source or '—' }}</span>
+        <div class="min-w-0">
+          {% if item.url %}
+          <a href="{{ item.url }}" target="_blank" rel="noopener"
+             class="text-[10px] text-blue-600 hover:text-blue-800 hover:underline leading-tight block truncate">
+            {{ item.title }}
+          </a>
+          {% else %}
+          <span class="text-[10px] text-gray-700 leading-tight block truncate">{{ item.title }}</span>
+          {% endif %}
+          {% if item.summary %}
+          <p class="text-[9px] text-gray-400 leading-tight truncate mt-0">{{ item.summary[:120] }}</p>
+          {% endif %}
+        </div>
+      </div>
+      {% if item.published_at %}
+      <span class="text-[8px] text-gray-300 font-mono ml-16">{{ item.published_at[:16] }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-[10px] text-gray-400 py-3 text-center">No recent headlines. Enable RSS_AGGREGATOR_ENABLED to start polling feeds.</p>
+  {% endif %}
+</div>

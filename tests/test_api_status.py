@@ -230,7 +230,7 @@ class TestApiIncidents:
                     "source": "bot_event",
                 },
                 {
-                    "timestamp": "2026-03-05T19:24:54.063240",
+                    "timestamp": "2099-03-05T19:24:54.063240+00:00",
                     "category": "ERROR",
                     "title": "Startup recovery left unresolved actions",
                     "detail": "pending=8 recovered=0 unresolved=8",
@@ -244,6 +244,95 @@ class TestApiIncidents:
         items = resp.json()["items"]
         assert len(items) == 1
         assert items[0]["title"] == "Startup recovery left unresolved actions"
+
+    def test_incidents_filter_localhost_tradingview_rejections(self, monkeypatch):
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-10T21:49:55.151051",
+                    "category": "REJECTION",
+                    "title": "TradingView webhook rejected",
+                    "detail": '{"client_ip": "127.0.0.1", "reason": "missing webhook token"}',
+                    "source": "bot_event",
+                },
+                {
+                    "timestamp": "2099-03-10T19:32:27.519399+00:00",
+                    "category": "ERROR",
+                    "title": "Startup recovery left unresolved actions",
+                    "detail": "pending=2 recovered=0 unresolved=2",
+                    "source": "bot_event",
+                },
+            ],
+        )
+        with ASGITestClient(server.app) as client:
+            resp = client.get("/api/incidents?limit=10")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["title"] == "Startup recovery left unresolved actions"
+
+    def test_incidents_keep_non_localhost_tradingview_rejections(self, monkeypatch):
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-10T21:49:55.151051",
+                    "category": "REJECTION",
+                    "title": "TradingView webhook rejected",
+                    "detail": '{"client_ip": "203.0.113.10", "reason": "invalid webhook token"}',
+                    "source": "bot_event",
+                }
+            ],
+        )
+        with ASGITestClient(server.app) as client:
+            resp = client.get("/api/incidents?limit=10")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["title"] == "TradingView webhook rejected"
+
+    def test_active_incidents_hide_stale_bot_event_rows(self, monkeypatch):
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-01T19:32:27.519399+00:00",
+                    "category": "ERROR",
+                    "title": "Startup recovery left unresolved actions",
+                    "detail": "pending=2 recovered=0 unresolved=2",
+                    "source": "bot_event",
+                }
+            ],
+        )
+        with ASGITestClient(server.app) as client:
+            resp = client.get("/api/incidents?limit=10&mode=active")
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+    def test_active_incidents_keep_failed_order_action_rows(self, monkeypatch):
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-05T19:24:54.063240+00:00",
+                    "category": "FAILED",
+                    "title": "close_spread failed",
+                    "detail": "execution failure",
+                    "source": "order_action",
+                }
+            ],
+        )
+        with ASGITestClient(server.app) as client:
+            resp = client.get("/api/incidents?limit=10&mode=active")
+        assert resp.status_code == 200
+        items = resp.json()["items"]
+        assert len(items) == 1
+        assert items[0]["title"] == "close_spread failed"
 
 
 class TestTopStrip:
@@ -261,7 +350,7 @@ class TestTopStrip:
                     "source": "bot_event",
                 },
                 {
-                    "timestamp": "2026-03-05T19:24:54.063240",
+                    "timestamp": "2099-03-05T19:24:54.063240+00:00",
                     "category": "ERROR",
                     "title": "Startup recovery left unresolved actions",
                     "detail": "pending=8 recovered=0 unresolved=8",
@@ -274,6 +363,54 @@ class TestTopStrip:
         assert resp.status_code == 200
         assert "Startup recovery left unresolved actions" in resp.text
         assert "TradingView webhook rejected" not in resp.text
+
+    def test_top_strip_skips_localhost_tradingview_rejection(self, monkeypatch):
+        _stub_status(monkeypatch)
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-10T21:49:55.151051",
+                    "category": "REJECTION",
+                    "title": "TradingView webhook rejected",
+                    "detail": '{"client_ip": "::1", "reason": "missing webhook token"}',
+                    "source": "bot_event",
+                },
+                {
+                    "timestamp": "2099-03-10T19:32:27.519399+00:00",
+                    "category": "ERROR",
+                    "title": "Startup recovery left unresolved actions",
+                    "detail": "pending=2 recovered=0 unresolved=2",
+                    "source": "bot_event",
+                },
+            ],
+        )
+        with ASGITestClient(server.app) as client:
+            resp = client.get("/fragments/top-strip")
+        assert resp.status_code == 200
+        assert "Startup recovery left unresolved actions" in resp.text
+        assert "TradingView webhook rejected" not in resp.text
+
+    def test_top_strip_hides_stale_incidents(self, monkeypatch):
+        _stub_status(monkeypatch)
+        monkeypatch.setattr(
+            server,
+            "get_incidents",
+            lambda limit=50: [
+                {
+                    "timestamp": "2026-03-01T19:32:27.519399+00:00",
+                    "category": "ERROR",
+                    "title": "Startup recovery left unresolved actions",
+                    "detail": "pending=2 recovered=0 unresolved=2",
+                    "source": "bot_event",
+                }
+            ],
+        )
+        with ASGITestClient(server.app) as client:
+            resp = client.get("/fragments/top-strip")
+        assert resp.status_code == 200
+        assert "Startup recovery left unresolved actions" not in resp.text
 
 
 class TestApiControlActions:

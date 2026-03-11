@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="grid grid-cols-12 gap-2 h-full overflow-hidden">
+
+  <!-- LEFT COL: Wrappers + Holdings + Transactions (5 cols) -->
+  <div class="col-span-5 flex flex-col gap-2 overflow-y-auto">
+
+    <!-- Wrapper Summary Cards -->
+    <div id="advisory-holdings-panel"
+         hx-get="/fragments/advisory-holdings"
+         hx-trigger="load, every 30s"
+         hx-swap="innerHTML">
+      <div class="text-[10px] text-gray-400 py-4 text-center">Loading holdings...</div>
+    </div>
+
+    <!-- Record Transaction Form -->
+    <div class="bg-white border border-gray-200 rounded-md p-1.5">
+      <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Record Transaction</h3>
+      <form hx-post="/api/advisory/transaction"
+            hx-target="#tx-result"
+            hx-swap="innerHTML"
+            class="space-y-1">
+        <div class="grid grid-cols-4 gap-1">
+          <select name="tx_type" class="col-span-1 px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded">
+            <option value="buy">Buy</option>
+            <option value="sell">Sell</option>
+            <option value="deposit">Deposit</option>
+            <option value="withdrawal">Withdrawal</option>
+            <option value="dividend">Dividend</option>
+          </select>
+          <select name="wrapper" class="col-span-1 px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded">
+            <option value="ISA">ISA</option>
+            <option value="SIPP">SIPP</option>
+            <option value="GIA">GIA</option>
+          </select>
+          <input type="text" name="ticker" placeholder="VWRL.L"
+                 class="col-span-1 px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded" />
+          <button type="submit" class="col-span-1 px-2 py-1 text-[10px] font-semibold bg-blue-600 text-white rounded hover:bg-blue-700">
+            Record
+          </button>
+        </div>
+        <div class="grid grid-cols-4 gap-1">
+          <input type="number" name="quantity" placeholder="Qty" step="0.01"
+                 class="px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded" />
+          <input type="number" name="price" placeholder="Price" step="0.01"
+                 class="px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded" />
+          <input type="number" name="amount" placeholder="Amount (GBP)" step="0.01"
+                 class="px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded" />
+          <input type="text" name="notes" placeholder="Notes"
+                 class="px-1 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded" />
+        </div>
+      </form>
+      <div id="tx-result" class="mt-1 text-[10px] font-mono"></div>
+    </div>
+
+    <!-- Transaction History -->
+    <div id="advisory-transactions-panel"
+         hx-get="/fragments/advisory-transactions"
+         hx-trigger="load, every 15s"
+         hx-swap="innerHTML">
+      <div class="text-[10px] text-gray-400 py-2 text-center">Loading transactions...</div>
+    </div>
+
+    <!-- Advisor Memory -->
+    <div class="bg-white border border-gray-200 rounded-md p-1.5">
+      <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Advisor Memory</h3>
+      <form class="flex items-center gap-1"
+            hx-get="/fragments/advisory-memories"
+            hx-target="#advisory-memory-results"
+            hx-swap="innerHTML">
+        <input type="text" name="topic" id="memory-search-input"
+               placeholder="Search... (bonds, allocation, risk)"
+               class="flex-1 px-1.5 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded focus:outline-none focus:border-blue-400 text-gray-700" />
+        <button type="submit" class="px-2 py-1 text-[10px] font-semibold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Go</button>
+      </form>
+      <div id="advisory-memory-results"
+           hx-get="/fragments/advisory-memories?topic="
+           hx-trigger="load"
+           hx-swap="innerHTML"></div>
+    </div>
+  </div>
+
+  <!-- MIDDLE COL: Chat (4 cols) -->
+  <div class="col-span-4 flex flex-col bg-white border border-gray-200 rounded-md overflow-hidden">
+    <!-- Chat header -->
+    <div class="flex items-center justify-between px-2 py-1 border-b border-gray-200 bg-gray-50">
+      <div class="flex items-center gap-2">
+        <h2 class="text-[11px] font-semibold text-gray-700 uppercase tracking-wide">Advisor Chat</h2>
+        <span id="advisory-status" class="text-[9px] font-mono {% if advisor_enabled %}text-emerald-500{% else %}text-red-400{% endif %}">
+          {% if advisor_enabled %}Online{% else %}Disabled{% endif %}
+        </span>
+        <span id="advisory-spinner" class="htmx-indicator text-[10px] text-blue-500 font-mono">thinking...</span>
+      </div>
+      <span class="text-[9px] text-gray-400 font-mono" id="advisory-session-label">—</span>
+    </div>
+
+    <!-- Chat messages -->
+    <div id="advisory-chat-messages" class="flex-1 overflow-y-auto p-2 space-y-2"
+         hx-get="/fragments/advisory-chat"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+    </div>
+
+    <!-- Chat input -->
+    <div class="border-t border-gray-200 p-1.5 bg-gray-50">
+      <form id="advisory-chat-form"
+            hx-post="/api/advisory/chat"
+            hx-target="#advisory-chat-messages"
+            hx-swap="innerHTML"
+            hx-indicator="#advisory-spinner"
+            hx-on::after-request="this.querySelector('textarea').value = ''; scrollChatToBottom();">
+        <div class="flex items-end gap-1">
+          <textarea name="message" rows="2"
+                    placeholder="Ask about allocation, tax wrappers, market views..."
+                    class="flex-1 px-2 py-1 text-[11px] font-mono bg-white border border-gray-200 rounded resize-none focus:outline-none focus:border-blue-400 text-gray-800"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.closest('form').requestSubmit()}"></textarea>
+          <button type="submit" class="px-3 py-1.5 text-[10px] font-semibold bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">Send</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Past sessions -->
+    <div class="border-t border-gray-200 max-h-24 overflow-y-auto">
+      <div id="advisory-sessions-panel"
+           hx-get="/fragments/advisory-sessions"
+           hx-trigger="load, every 15s"
+           hx-swap="innerHTML">
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT COL: News Feed + Analysis (3 cols) -->
+  <div class="col-span-3 flex flex-col gap-2 overflow-y-auto">
+
+    <!-- Quick Actions -->
+    <div class="bg-white border border-gray-200 rounded-md p-1.5">
+      <div class="flex gap-1">
+        <button hx-post="/api/advisory/generate"
+                hx-target="#advisory-chat-messages"
+                hx-swap="innerHTML"
+                hx-indicator="#advisory-spinner"
+                class="flex-1 px-2 py-1 text-[10px] font-semibold bg-blue-600 text-white rounded hover:bg-blue-700">
+          Weekly Review
+        </button>
+        <button hx-get="/fragments/advisory-news?refresh=1"
+                hx-target="#advisory-news-panel"
+                hx-swap="innerHTML"
+                class="flex-1 px-2 py-1 text-[10px] font-semibold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+          Refresh News
+        </button>
+      </div>
+    </div>
+
+    <!-- RSS News Feed -->
+    <div id="advisory-news-panel"
+         hx-get="/fragments/advisory-news"
+         hx-trigger="load, every 120s"
+         hx-swap="innerHTML">
+      <div class="text-[10px] text-gray-400 py-4 text-center">Loading news...</div>
+    </div>
+
+    <!-- Feed Aggregator Intel -->
+    <div id="advisory-intel-panel"
+         hx-get="/fragments/advisory-intel"
+         hx-trigger="load, every 60s"
+         hx-swap="innerHTML">
+      <div class="text-[10px] text-gray-400 py-4 text-center">Loading intel...</div>
+    </div>
+  </div>
+</div>
+
+<script>
+function scrollChatToBottom() {
+  const el = document.getElementById('advisory-chat-messages');
+  if (el) setTimeout(() => el.scrollTop = el.scrollHeight, 100);
+}
+document.addEventListener('htmx:afterSwap', function(evt) {
+  if (evt.detail.target && evt.detail.target.id === 'advisory-chat-messages') {
+    scrollChatToBottom();
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+<div class="space-y-2">
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Engine</h3>
+    <div class="grid grid-cols-2 gap-1.5">
+      <div>
+        <p class="text-[10px] text-gray-400">State</p>
+        <p class="text-sm font-bold font-mono {% if status.running %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "RUN" if status.running else "STOP" }}</p>
+      </div>
+      <div>
+        <p class="text-[10px] text-gray-400">Kill</p>
+        <p class="text-sm font-bold font-mono {% if status.kill_switch_active %}text-red-500{% else %}text-emerald-400{% endif %}">{{ "ON" if status.kill_switch_active else "OFF" }}</p>
+      </div>
+      <div>
+        <p class="text-[10px] text-gray-400">Spreads</p>
+        <p class="text-sm font-bold font-mono text-gray-900">{{ status.open_spreads or 0 }}</p>
+      </div>
+      <div>
+        <p class="text-[10px] text-gray-400">Mode</p>
+        <p class="text-sm font-bold font-mono text-sky-400">{{ status.mode }}</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">P&L</h3>
+    <p class="text-lg font-bold font-mono {% if (summary.total_pnl or 0) >= 0 %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "%.2f"|format(summary.total_pnl or 0) }}</p>
+    <p class="text-[10px] text-gray-400 font-mono">Today {{ "%.2f"|format(summary.today_pnl or 0) }}</p>
+  </div>
+</div>

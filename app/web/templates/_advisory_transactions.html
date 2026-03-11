@@ -1,0 +1,49 @@
+<!-- Advisory Transactions History fragment -->
+<div class="bg-white border border-gray-200 rounded-md p-1.5">
+  <div class="flex items-center justify-between mb-1">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Transaction History</h3>
+    <span class="text-[9px] text-gray-300 font-mono">{{ transactions|length }} records</span>
+  </div>
+  {% if transactions %}
+  <div class="space-y-0 max-h-48 overflow-y-auto">
+    {% for tx in transactions %}
+    <div class="flex items-center justify-between py-0.5 border-b border-gray-50 text-[10px] font-mono">
+      <div class="flex items-center gap-1.5 min-w-0">
+        <span class="w-14 flex-shrink-0
+          {% if tx.tx_type == 'buy' %}text-emerald-600
+          {% elif tx.tx_type == 'sell' %}text-red-500
+          {% elif tx.tx_type == 'deposit' %}text-blue-600
+          {% elif tx.tx_type == 'withdrawal' %}text-orange-500
+          {% elif tx.tx_type == 'dividend' %}text-purple-600
+          {% else %}text-gray-500{% endif %}
+          font-semibold uppercase">{{ tx.tx_type }}</span>
+        <span class="text-gray-500 w-8">{{ tx.wrapper }}</span>
+        <span class="text-gray-700 truncate">{{ tx.ticker or '—' }}</span>
+        {% if tx.quantity %}
+        <span class="text-gray-400">x{{ "%.2f"|format(tx.quantity) }}</span>
+        {% endif %}
+        {% if tx.price %}
+        <span class="text-gray-400">@ {{ "%.2f"|format(tx.price) }}</span>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-1.5 flex-shrink-0">
+        <span class="{% if tx.amount >= 0 %}text-emerald-600{% else %}text-red-500{% endif %} font-semibold">
+          {{ "+" if tx.amount >= 0 }}&pound;{{ "%.2f"|format(tx.amount|abs) }}
+        </span>
+        <span class="text-gray-300 text-[9px] w-16 text-right">{{ tx.created_at[:10] }}</span>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% if summary %}
+  <div class="mt-1 pt-1 border-t border-gray-200 grid grid-cols-3 gap-1 text-[9px] font-mono">
+    {% if summary.deposit %}<div class="text-blue-600">Deposits: &pound;{{ "%.0f"|format(summary.deposit) }}</div>{% endif %}
+    {% if summary.withdrawal %}<div class="text-orange-500">Withdrawals: &pound;{{ "%.0f"|format(summary.withdrawal|abs) }}</div>{% endif %}
+    {% if summary.dividend %}<div class="text-purple-600">Dividends: &pound;{{ "%.0f"|format(summary.dividend) }}</div>{% endif %}
+    {% if summary.realized_pnl is defined %}<div class="text-gray-600">Realised P&L: &pound;{{ "%.0f"|format(summary.realized_pnl) }}</div>{% endif %}
+  </div>
+  {% endif %}
+  {% else %}
+  <p class="text-[10px] text-gray-400 py-2 text-center">No transactions recorded. Use the form above or /add via Telegram.</p>
+  {% endif %}
+</div>

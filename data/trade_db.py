@@ -630,6 +630,140 @@ def init_db(db_path: str = DB_PATH):
             ON idea_research_steps(idea_id);
         CREATE INDEX IF NOT EXISTS idx_research_steps_status
             ON idea_research_steps(status);
+
+        -- ── Advisory Module tables ──────────────────────────────────────
+
+        CREATE TABLE IF NOT EXISTS advisor_messages (
+            id TEXT PRIMARY KEY,
+            session_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            token_count INTEGER DEFAULT 0,
+            metadata TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_advisor_messages_session
+            ON advisor_messages(session_id);
+        CREATE INDEX IF NOT EXISTS idx_advisor_messages_created
+            ON advisor_messages(created_at);
+
+        CREATE TABLE IF NOT EXISTS advisor_memory (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            topic TEXT NOT NULL,
+            memory_type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            detail TEXT,
+            source_message_id TEXT,
+            confidence REAL DEFAULT 1.0,
+            expires_at TEXT,
+            superseded_by TEXT,
+            tags TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_advisor_memory_topic
+            ON advisor_memory(topic);
+        CREATE INDEX IF NOT EXISTS idx_advisor_memory_type
+            ON advisor_memory(memory_type);
+        CREATE INDEX IF NOT EXISTS idx_advisor_memory_created
+            ON advisor_memory(created_at);
+
+        CREATE TABLE IF NOT EXISTS advisor_sessions (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            last_active_at TEXT NOT NULL,
+            topic TEXT,
+            summary TEXT,
+            message_count INTEGER DEFAULT 0,
+            status TEXT DEFAULT 'active'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_advisor_sessions_status
+            ON advisor_sessions(status);
+        CREATE INDEX IF NOT EXISTS idx_advisor_sessions_active
+            ON advisor_sessions(last_active_at);
+
+        CREATE TABLE IF NOT EXISTS advisory_holdings (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            wrapper TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            name TEXT,
+            quantity REAL NOT NULL,
+            avg_cost REAL NOT NULL,
+            purchase_date TEXT,
+            currency TEXT DEFAULT 'GBP',
+            notes TEXT,
+            benchmark_ticker TEXT,
+            target_return_pct REAL,
+            status TEXT DEFAULT 'open',
+            closed_at TEXT,
+            close_price REAL,
+            UNIQUE(wrapper, ticker, status)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_advisory_holdings_wrapper
+            ON advisory_holdings(wrapper);
+        CREATE INDEX IF NOT EXISTS idx_advisory_holdings_status
+            ON advisory_holdings(status);
+
+        CREATE TABLE IF NOT EXISTS advisory_price_cache (
+            ticker TEXT NOT NULL,
+            price_date TEXT NOT NULL,
+            close_price REAL NOT NULL,
+            currency TEXT DEFAULT 'GBP',
+            fetched_at TEXT NOT NULL,
+            PRIMARY KEY (ticker, price_date)
+        );
+
+        CREATE TABLE IF NOT EXISTS wrapper_allowances (
+            id TEXT PRIMARY KEY,
+            tax_year TEXT NOT NULL,
+            wrapper TEXT NOT NULL,
+            annual_limit REAL NOT NULL,
+            used REAL DEFAULT 0,
+            notes TEXT,
+            UNIQUE(tax_year, wrapper)
+        );
+
+        CREATE TABLE IF NOT EXISTS advisory_rss_cache (
+            id TEXT PRIMARY KEY,
+            source TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            url TEXT,
+            published_at TEXT,
+            cached_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_advisory_rss_cached
+            ON advisory_rss_cache(cached_at);
+        CREATE INDEX IF NOT EXISTS idx_advisory_rss_source
+            ON advisory_rss_cache(source);
+
+        CREATE TABLE IF NOT EXISTS advisory_transactions (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            wrapper TEXT NOT NULL,
+            tx_type TEXT NOT NULL,
+            ticker TEXT,
+            quantity REAL,
+            price REAL,
+            amount REAL NOT NULL,
+            currency TEXT DEFAULT 'GBP',
+            notes TEXT,
+            reference TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_advisory_tx_created
+            ON advisory_transactions(created_at);
+        CREATE INDEX IF NOT EXISTS idx_advisory_tx_wrapper
+            ON advisory_transactions(wrapper);
+        CREATE INDEX IF NOT EXISTS idx_advisory_tx_type
+            ON advisory_transactions(tx_type);
     """)
 
     # ── Migrations: add columns to trade_ideas if missing ────────────────
@@ -2282,6 +2416,7 @@ def get_broker_positions(
 def get_broker_cash_balances(
     broker: Optional[str] = None,
     account_id: Optional[str] = None,
+    latest_only: bool = False,
     db_path: str = DB_PATH,
 ) -> list[dict]:
     """Return broker cash snapshots with optional broker/account filters (Claude schema)."""
@@ -2289,6 +2424,16 @@ def get_broker_cash_balances(
     query = """SELECT bc.*, ba.broker, ba.account_id
                FROM broker_cash_balances bc
                JOIN broker_accounts ba ON bc.broker_account_id = ba.id"""
+    if latest_only:
+        query += """
+               JOIN (
+                   SELECT broker_account_id, currency, MAX(synced_at) AS max_synced
+                   FROM broker_cash_balances
+                   GROUP BY broker_account_id, currency
+               ) latest
+                 ON bc.broker_account_id = latest.broker_account_id
+                AND bc.currency = latest.currency
+                AND bc.synced_at = latest.max_synced"""
     where: list[str] = []
     params: list[Any] = []
     if broker:
@@ -2338,8 +2483,24 @@ def get_unified_ledger_snapshot(
     """Return unified broker accounts, positions, cash balances, and NAV snapshots."""
     accounts = get_broker_accounts(db_path=db_path)
     positions = get_broker_positions(db_path=db_path)
-    cash_balances = get_broker_cash_balances(db_path=db_path)
-    nav = get_nav_snapshots(limit=nav_limit, db_path=db_path)
+    cash_balances = get_broker_cash_balances(latest_only=True, db_path=db_path)
+    nav = []
+    for row in get_nav_snapshots(limit=nav_limit, db_path=db_path):
+        normalized = dict(row)
+        normalized.setdefault("timestamp", row.get("snapshot_date") or row.get("created_at"))
+        normalized.setdefault("nav", row.get("net_liquidation"))
+        level = str(row.get("level") or "").strip().lower()
+        level_id = str(row.get("level_id") or "").strip()
+        broker = str(row.get("broker") or "").strip().upper()
+        if level == "fund":
+            normalized.setdefault("scope_label", "Fund")
+        elif level == "sleeve":
+            normalized.setdefault("scope_label", level_id or "Sleeve")
+        elif level == "account":
+            normalized.setdefault("scope_label", f"{broker} account" if broker else "Account")
+        else:
+            normalized.setdefault("scope_label", level_id or (level.title() if level else "-"))
+        nav.append(normalized)
 
     total_cash = sum(float(row.get("balance", 0) or 0) for row in cash_balances)
     # In Claude schema, equity ≈ balance + unrealised PnL; buying_power is available margin

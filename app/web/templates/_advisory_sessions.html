@@ -1,0 +1,23 @@
+<!-- Advisory Sessions fragment -->
+<div class="bg-white border border-gray-200 rounded-md p-1.5">
+  <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Conversations</h3>
+  <div class="space-y-0">
+    {% for conv in conversations %}
+    <div class="flex items-center justify-between py-0.5 border-b border-gray-50 hover:bg-gray-50 cursor-pointer text-[10px]"
+         hx-get="/fragments/advisory-chat?session_id={{ conv.id }}"
+         hx-target="#advisory-chat-messages"
+         hx-swap="innerHTML">
+      <div class="flex items-center gap-1.5 min-w-0">
+        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {% if conv.status == 'active' %}bg-emerald-400{% else %}bg-gray-300{% endif %}"></span>
+        <span class="text-gray-700 font-mono truncate">{{ conv.topic }}</span>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <span class="text-gray-400 font-mono">{{ conv.date }}</span>
+        <span class="text-gray-400 font-mono w-6 text-right">{{ conv.message_count }}</span>
+      </div>
+    </div>
+    {% else %}
+    <p class="text-[10px] text-gray-400 py-2 text-center">No conversations yet. Send a message to start.</p>
+    {% endfor %}
+  </div>
+</div>

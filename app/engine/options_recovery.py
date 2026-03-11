@@ -15,6 +15,7 @@ from data.trade_db import (
 )
 
 logger = logging.getLogger(__name__)
+_RECOVERABLE_OPTIONS_ACTION_TYPES = {"open_spread", "close_spread"}
 
 
 class OptionsRecoveryMixin:
@@ -22,6 +23,12 @@ class OptionsRecoveryMixin:
     def _startup_recover(self):
         from app.engine.options_bot import UK
         pending = get_order_actions_by_statuses(["queued", "running", "retrying"], limit=500)
+        if not pending:
+            return
+        pending = [
+            action for action in pending
+            if str(action.get("action_type", "") or "") in _RECOVERABLE_OPTIONS_ACTION_TYPES
+        ]
         if not pending:
             return
 
@@ -106,16 +113,6 @@ class OptionsRecoveryMixin:
                 )
                 failed += 1
                 continue
-
-            update_order_action(
-                action_id=action_id,
-                status="aborted",
-                attempt=max(attempt, 1),
-                recoverable=False,
-                error_code="UNKNOWN_ACTION_TYPE",
-                error_message=f"Unsupported action_type={action_type}",
-            )
-            failed += 1
 
         summary = f"pending={len(pending)} recovered={completed} unresolved={failed}"
         logger.info(f"Startup recovery complete ({summary})")

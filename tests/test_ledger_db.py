@@ -98,6 +98,9 @@ def test_unified_ledger_snapshot_reads_accounts_positions_cash_and_nav(tmp_path)
     # Claude schema: equity = balance + unrealised_pnl (5000 + 4.0 = 5004.0)
     assert snapshot["summary"]["total_equity"] == 5004.0
     assert len(snapshot["nav_snapshots"]) == 1
+    assert snapshot["cash_balances"][0]["balance"] == 5000.0
+    assert snapshot["nav_snapshots"][0]["timestamp"] == now
+    assert snapshot["nav_snapshots"][0]["scope_label"] == "options_income"
 
     report = trade_db.get_ledger_reconcile_report(stale_after_minutes=30, db_path=db_path)
     assert report["ok"] is True
@@ -177,3 +180,42 @@ def test_ledger_reconcile_flags_mismatch_orphans_and_stale_rows(tmp_path):
     assert report_clean["ok"] is True
     assert report_clean["orphan_position_count"] == 0
     assert report_clean["stale_position_count"] == 0
+
+
+def test_unified_ledger_snapshot_uses_latest_cash_balance_per_account(tmp_path):
+    db_path = _init_test_db(tmp_path)
+    older = "2026-03-10T20:32:06+00:00"
+    newer = "2026-03-10T20:48:00+00:00"
+
+    trade_db.upsert_broker_account(
+        broker="ig",
+        account_id="ACC-IG-1",
+        account_type="SPREADBET",
+        currency="GBP",
+        status="active",
+        db_path=db_path,
+    )
+    trade_db.upsert_broker_cash_balance(
+        broker="ig",
+        account_id="ACC-IG-1",
+        currency="GBP",
+        balance=8108.43,
+        as_of=older,
+        db_path=db_path,
+    )
+    trade_db.upsert_broker_cash_balance(
+        broker="ig",
+        account_id="ACC-IG-1",
+        currency="GBP",
+        balance=8107.74,
+        as_of=newer,
+        db_path=db_path,
+    )
+
+    snapshot = trade_db.get_unified_ledger_snapshot(nav_limit=5, db_path=db_path)
+
+    assert snapshot["summary"]["cash_rows"] == 1
+    assert snapshot["summary"]["total_cash"] == 8107.74
+    assert snapshot["summary"]["total_equity"] == 8107.74
+    assert len(snapshot["cash_balances"]) == 1
+    assert snapshot["cash_balances"][0]["synced_at"] == newer

@@ -152,6 +152,7 @@ class TestHTMXAttributePreservation:
     """HTMX-driven panels in pages reference correct fragment endpoints."""
 
     OVERVIEW_FRAGMENTS = [
+        "/fragments/overview-engine",
         "/fragments/risk-briefing",
         "/fragments/status",
         "/fragments/incidents",
@@ -227,6 +228,32 @@ class TestHTMXAttributePreservation:
         with open(path) as f:
             html = f.read()
         assert frag in html, f"research_page.html missing hx-get for {frag}"
+
+
+def test_incidents_page_uses_scrollable_panel_layout():
+    path = os.path.join(PROJECT_ROOT, "app", "web", "templates", "incidents_page.html")
+    with open(path) as f:
+        html = f.read()
+    assert "auto-rows-[minmax(18rem,1fr)]" in html
+    assert "min-h-0 overflow-hidden" in html
+    assert "incident_mode=active" in html
+    assert "incident_mode=history" in html
+
+
+def test_research_page_uses_scrollable_page_layout():
+    path = os.path.join(PROJECT_ROOT, "app", "web", "templates", "research_page.html")
+    with open(path) as f:
+        html = f.read()
+    assert "h-full min-h-0 overflow-y-auto" in html
+    assert 'id="research-panel"' in html
+    assert 'hx-trigger="load delay:300ms"' in html
+
+
+def test_app_js_refreshes_overview_engine_panel():
+    path = os.path.join(PROJECT_ROOT, "app", "web", "static", "app.js")
+    with open(path) as f:
+        js = f.read()
+    assert "#overview-engine-panel" in js
 
 
 # ═══════════════════════════════════════════════════════════════════════════

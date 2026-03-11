@@ -29,6 +29,7 @@
   function refreshCommonPanels() {
     const targets = [
       '#top-strip',
+      '#overview-engine-panel',
       '#jobs-panel',
       '#incidents-panel',
       '#events-panel',

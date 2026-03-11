@@ -186,12 +186,14 @@ def test_ledger_fragment_renders_snapshot_and_reconcile(monkeypatch):
             ],
             "nav_snapshots": [
                 {
-                    "timestamp": "2026-02-28T13:00:00Z",
-                    "sleeve": "options_income",
+                    "snapshot_date": "2026-02-28",
+                    "level": "sleeve",
+                    "level_id": "options_income",
                     "broker": "ig",
                     "account_id": "ACC-1",
-                    "nav": 15800.0,
+                    "net_liquidation": 15800.0,
                     "cash": 15000.0,
+                    "scope_label": "options_income",
                 }
             ],
         },
@@ -211,6 +213,8 @@ def test_ledger_fragment_renders_snapshot_and_reconcile(monkeypatch):
     assert response.status_code == 200
     assert "Ledger" in response.text
     assert "SPY" in response.text
+    assert "options_income" in response.text
+    assert "15800.00" in response.text
 
 
 def test_overview_and_trading_pages_include_ledger_panel():

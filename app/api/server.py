@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 import html
+import ipaddress
 import logging
 import os
 import time
@@ -191,6 +192,7 @@ _INTELLIGENCE_FEED_CACHE_TTL_SECONDS = 15.0
 _PORTFOLIO_ANALYTICS_CACHE_TTL_SECONDS = 30.0
 _RESEARCH_CACHE_TTL_SECONDS = 15.0
 _LEDGER_CACHE_TTL_SECONDS = 15.0
+_ACTIVE_INCIDENT_EVENT_LOOKBACK = timedelta(minutes=60)
 _EVENT_STREAM_HEARTBEAT_SECONDS = 10.0
 _RESEARCH_FRAGMENT_CACHE_KEYS = (
     "research-operating-summary",
@@ -4075,8 +4077,8 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/incidents")
-    def api_incidents(limit: int = 50):
-        return {"items": _visible_incidents(limit=limit)}
+    def api_incidents(limit: int = 50, mode: str = "history"):
+        return {"items": _visible_incidents(limit=limit, mode=mode)}
 
     @app.get("/api/control-actions")
     def api_control_actions(limit: int = 50):
@@ -5687,12 +5689,26 @@ def create_app() -> FastAPI:
             ctx,
         )
 
+    @app.get("/advisory", response_class=HTMLResponse)
+    def advisory_page(request: Request):
+        return TEMPLATES.TemplateResponse(
+            request,
+            "advisory_page.html",
+            {
+                **_page_context(request=request, page_key="advisory", title="Advisory | Trading Bot"),
+                "advisor_enabled": config.ADVISOR_ENABLED,
+            },
+        )
+
     @app.get("/incidents", response_class=HTMLResponse)
-    def incidents_page(request: Request):
+    def incidents_page(request: Request, incident_mode: str = "active"):
         return TEMPLATES.TemplateResponse(
             request,
             "incidents_page.html",
-            _page_context(request=request, page_key="incidents", title="Incidents & Jobs | Trading Bot"),
+            {
+                **_page_context(request=request, page_key="incidents", title="Incidents & Jobs | Trading Bot"),
+                "incident_mode": _normalize_incident_mode(incident_mode),
+            },
         )
 
     @app.get("/intel", response_class=HTMLResponse)
@@ -5807,7 +5823,7 @@ def create_app() -> FastAPI:
     @app.get("/fragments/top-strip", response_class=HTMLResponse)
     def top_strip_fragment(request: Request):
         payload = build_status_payload()
-        latest = _visible_incidents(limit=1)
+        latest = _visible_incidents(limit=1, mode="active")
         latest_incident = latest[0] if latest else None
         return TEMPLATES.TemplateResponse(
             request,
@@ -5830,6 +5846,19 @@ def create_app() -> FastAPI:
                 "status": payload["engine"],
                 "summary": payload["summary"],
                 "open_positions": payload["open_option_positions"],
+            },
+        )
+
+    @app.get("/fragments/overview-engine", response_class=HTMLResponse)
+    def overview_engine_fragment(request: Request):
+        payload = build_status_payload()
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_overview_engine.html",
+            {
+                "request": request,
+                "status": payload["engine"],
+                "summary": payload["summary"],
             },
         )
 
@@ -6150,11 +6179,16 @@ def create_app() -> FastAPI:
         )
 
     @app.get("/fragments/incidents", response_class=HTMLResponse)
-    def incidents_fragment(request: Request):
+    def incidents_fragment(request: Request, mode: str = "active"):
+        incident_mode = _normalize_incident_mode(mode)
         return TEMPLATES.TemplateResponse(
             request,
             "_incidents.html",
-            {"request": request, "incidents": _visible_incidents(limit=25)},
+            {
+                "request": request,
+                "incidents": _visible_incidents(limit=25, mode=incident_mode),
+                "incident_mode": incident_mode,
+            },
         )
 
     @app.get("/fragments/control-actions", response_class=HTMLResponse)
@@ -8136,9 +8170,94 @@ def create_app() -> FastAPI:
                 "Commands:\n"
                 "/analyze <text> - Analyze content for trade ideas\n"
                 "/status - Bot status\n"
+                "/advisor - Toggle advisory mode\n"
+                "/recall <topic> - Search advisory memory\n"
+                "/holdings - Show portfolio holdings\n"
+                "/add <WRAPPER> <TICKER> <QTY> <COST> - Add holding\n"
+                "/close <TICKER> <PRICE> - Close holding\n"
+                "/performance - Portfolio performance report\n"
                 "Forward X/Twitter links to auto-analyze\n"
-                "Paste any text to analyze",
+                "Paste any text to analyze (or chat with advisor)",
             )
+        elif text == "/advisor":
+            if config.ADVISOR_ENABLED:
+                _telegram_reply(chat_id, "Advisory mode is ON. Send any message to chat with your advisor.")
+            else:
+                _telegram_reply(chat_id, "Advisory module is disabled. Set ADVISOR_ENABLED=true in .env")
+        elif text.startswith("/recall"):
+            topic = text.replace("/recall", "", 1).strip()
+            if not topic:
+                _telegram_reply(chat_id, "Usage: /recall <topic>\nExample: /recall bonds")
+            elif config.ADVISOR_ENABLED:
+                try:
+                    engine = _get_advisory_engine()
+                    result = engine.recall(topic)
+                    _telegram_reply_long(chat_id, result)
+                except Exception as exc:
+                    logger.error("Recall error: %s", exc, exc_info=True)
+                    _telegram_reply(chat_id, f"Recall failed: {exc}")
+            else:
+                _telegram_reply(chat_id, "Advisory module is disabled.")
+        elif text == "/holdings":
+            try:
+                from intelligence.advisory_holdings import format_holdings_telegram
+                result = format_holdings_telegram()
+                _telegram_reply_long(chat_id, result)
+            except Exception as exc:
+                logger.error("Holdings error: %s", exc, exc_info=True)
+                _telegram_reply(chat_id, f"Holdings failed: {exc}")
+        elif text.startswith("/add "):
+            parts = text.split()
+            if len(parts) < 5:
+                _telegram_reply(chat_id, "Usage: /add <WRAPPER> <TICKER> <QTY> <AVG_COST>\nExample: /add ISA VWRL.L 100 85.50")
+            else:
+                try:
+                    from intelligence.advisory_holdings import add_holding
+                    wrapper = parts[1].upper()
+                    ticker = parts[2]
+                    qty = float(parts[3])
+                    cost = float(parts[4])
+                    holding_id = add_holding(wrapper=wrapper, ticker=ticker, quantity=qty, avg_cost=cost)
+                    _telegram_reply(chat_id, f"Added: {qty} {ticker} in {wrapper} @ {cost}\nID: {holding_id[:8]}")
+                except Exception as exc:
+                    logger.error("Add holding error: %s", exc, exc_info=True)
+                    _telegram_reply(chat_id, f"Failed: {exc}")
+        elif text.startswith("/close "):
+            parts = text.split()
+            if len(parts) < 3:
+                _telegram_reply(chat_id, "Usage: /close <TICKER> <PRICE>\nExample: /close VWRL.L 91.20")
+            else:
+                try:
+                    from intelligence.advisory_holdings import get_holdings, close_holding
+                    ticker = parts[1]
+                    price = float(parts[2])
+                    holdings = get_holdings(status="open")
+                    matched = [h for h in holdings if h["ticker"] == ticker]
+                    if not matched:
+                        _telegram_reply(chat_id, f"No open holding found for {ticker}")
+                    else:
+                        result = close_holding(matched[0]["id"], price)
+                        _telegram_reply(chat_id, f"Closed {ticker} @ {price}\nP&L: {result.get('realized_pnl', 0):+.2f}")
+                except Exception as exc:
+                    logger.error("Close holding error: %s", exc, exc_info=True)
+                    _telegram_reply(chat_id, f"Failed: {exc}")
+        elif text == "/performance":
+            try:
+                from intelligence.advisory_holdings import format_performance_telegram
+                result = format_performance_telegram()
+                _telegram_reply_long(chat_id, result)
+            except Exception as exc:
+                logger.error("Performance error: %s", exc, exc_info=True)
+                _telegram_reply(chat_id, f"Performance failed: {exc}")
+        elif config.ADVISOR_ENABLED and not is_x_content:
+            # Route to advisory engine for conversational interaction
+            try:
+                engine = _get_advisory_engine()
+                response = engine.process_message(chat_id, text)
+                _telegram_reply_long(chat_id, response)
+            except Exception as exc:
+                logger.error("Advisory engine error: %s", exc, exc_info=True)
+                _telegram_reply(chat_id, f"Advisory error: {exc}")
         else:
             # Treat any other text as content to analyze
             submission = IntelSubmission(
@@ -8182,6 +8301,374 @@ def create_app() -> FastAPI:
                 _telegram_reply(chat_id, f"Analyzing... (job {job_id[:8]})")
 
         return {"ok": True}
+
+    # ─── Advisory API endpoints ──────────────────────────────────────────
+
+    _advisory_engine_instance = None
+
+    def _get_advisory_engine():
+        """Lazily create or reuse a single AdvisoryEngine instance."""
+        nonlocal _advisory_engine_instance
+        if _advisory_engine_instance is None:
+            from intelligence.advisor import AdvisoryEngine
+            _advisory_engine_instance = AdvisoryEngine()
+        return _advisory_engine_instance
+
+    @app.get("/api/advisory/holdings")
+    def advisory_holdings_api(wrapper: str = None):
+        """Current holdings by wrapper."""
+        try:
+            from intelligence.advisory_holdings import calculate_portfolio_snapshot
+            snapshot = calculate_portfolio_snapshot()
+            if wrapper:
+                wrapper_data = snapshot.get("wrappers", {}).get(wrapper.upper())
+                if not wrapper_data:
+                    return {"ok": False, "error": f"No holdings in {wrapper}"}
+                return {"ok": True, "wrapper": wrapper.upper(), **wrapper_data}
+            return {"ok": True, **snapshot}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @app.get("/api/advisory/performance")
+    def advisory_performance_api():
+        """P&L + benchmark comparison."""
+        try:
+            from intelligence.advisory_holdings import calculate_portfolio_snapshot
+            snapshot = calculate_portfolio_snapshot()
+            return {"ok": True, **snapshot}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @app.get("/api/advisory/conversations")
+    def advisory_conversations_api(limit: int = 10):
+        """Recent advisory sessions."""
+        try:
+            from intelligence.advisor import get_conn
+            from data.trade_db import DB_PATH
+            conn = get_conn(DB_PATH)
+            rows = conn.execute(
+                "SELECT * FROM advisor_sessions ORDER BY last_active_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            sessions = [dict(r) for r in rows]
+            return {"ok": True, "sessions": sessions}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @app.get("/api/advisory/memories")
+    def advisory_memories_api(topic: str = "", limit: int = 20):
+        """Search advisory memories."""
+        try:
+            from intelligence.advisor import search_advisor_memories
+            from data.trade_db import DB_PATH
+            memories = search_advisor_memories(DB_PATH, topic or "", limit=limit)
+            return {"ok": True, "memories": memories}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    @app.post("/api/advisory/generate")
+    async def advisory_generate_api():
+        """Trigger proactive advisory brief."""
+        if not config.ADVISOR_ENABLED:
+            return {"ok": False, "error": "Advisory module disabled"}
+        try:
+            engine = _get_advisory_engine()
+            chat_id = config.NOTIFICATIONS.get("telegram_chat_id", "")
+            response = engine.process_message(
+                int(chat_id) if chat_id else 0,
+                "Generate a proactive weekly strategy review. Summarise market moves, portfolio performance, "
+                "news themes, and any actions you recommend this week.",
+            )
+            if chat_id:
+                _telegram_reply_long(int(chat_id), response)
+            return {"ok": True, "response": response[:500]}
+        except Exception as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+    # ─── Advisory HTMX fragments ────────────────────────────────────────
+
+    @app.get("/fragments/advisory-holdings", response_class=HTMLResponse)
+    def advisory_holdings_fragment(request: Request):
+        """HTMX fragment: wrapper cards with holdings."""
+        wrappers = []
+        try:
+            from intelligence.advisory_holdings import calculate_portfolio_snapshot, get_wrapper_summary
+            snapshot = calculate_portfolio_snapshot()
+            summaries = get_wrapper_summary()
+            for name in ["ISA", "SIPP", "GIA"]:
+                w_data = snapshot.get("wrappers", {}).get(name, {})
+                allow = summaries.get(name, {})
+                holdings_list = w_data.get("holdings", [])
+                wrappers.append({
+                    "name": name,
+                    "nav": w_data.get("value", 0),
+                    "pnl": w_data.get("pnl", 0),
+                    "pnl_pct": w_data.get("pnl_pct", 0),
+                    "allowance_limit": allow.get("limit") if name in ("ISA", "SIPP") else None,
+                    "allowance_used": allow.get("used", 0),
+                    "top_holdings": [
+                        {
+                            "ticker": h.get("ticker", ""),
+                            "pnl": h.get("pnl", 0),
+                            "weight": round(h.get("value", 0) / max(w_data.get("value", 1), 1) * 100, 1) if w_data.get("value") else 0,
+                        }
+                        for h in holdings_list[:5]
+                    ],
+                })
+        except Exception as exc:
+            logger.warning("Advisory holdings fragment error: %s", exc)
+        return TEMPLATES.TemplateResponse(
+            request, "_advisory.html", {"request": request, "wrappers": wrappers},
+        )
+
+    @app.get("/fragments/advisory-sessions", response_class=HTMLResponse)
+    def advisory_sessions_fragment(request: Request):
+        """HTMX fragment: recent advisory conversations."""
+        conversations = []
+        try:
+            from data.trade_db import get_conn, DB_PATH
+            conn = get_conn(DB_PATH)
+            rows = conn.execute(
+                "SELECT id, topic, last_active_at, message_count, status "
+                "FROM advisor_sessions ORDER BY last_active_at DESC LIMIT 10"
+            ).fetchall()
+            for r in rows:
+                conversations.append({
+                    "id": r["id"],
+                    "topic": r["topic"] or "General",
+                    "date": (r["last_active_at"] or "")[:16],
+                    "message_count": r["message_count"] or 0,
+                    "status": r["status"] or "active",
+                })
+        except Exception as exc:
+            logger.debug("Advisory sessions fragment: %s", exc)
+        return TEMPLATES.TemplateResponse(
+            request, "_advisory_sessions.html",
+            {"request": request, "conversations": conversations},
+        )
+
+    @app.get("/fragments/advisory-chat", response_class=HTMLResponse)
+    def advisory_chat_fragment(request: Request, session_id: str = ""):
+        """HTMX fragment: chat message history for current/latest session."""
+        messages = []
+        active_session_id = ""
+        try:
+            from intelligence.advisor import get_active_session, get_advisor_messages
+            from data.trade_db import DB_PATH
+            timeout = getattr(config, "ADVISOR_SESSION_TIMEOUT_HOURS", 4)
+            session = get_active_session(DB_PATH, timeout_hours=timeout)
+            if session_id:
+                active_session_id = session_id
+            elif session:
+                active_session_id = session["id"]
+            if active_session_id:
+                raw_msgs = get_advisor_messages(DB_PATH, active_session_id, limit=50)
+                for m in raw_msgs:
+                    messages.append({
+                        "role": m.get("role", "user"),
+                        "content": m.get("content", ""),
+                        "created_at": (m.get("created_at", ""))[:16],
+                    })
+        except Exception as exc:
+            logger.debug("Advisory chat fragment: %s", exc)
+        return TEMPLATES.TemplateResponse(
+            request, "_advisory_chat.html",
+            {"request": request, "messages": messages, "session_id": active_session_id},
+        )
+
+    @app.get("/fragments/advisory-memories", response_class=HTMLResponse)
+    def advisory_memories_fragment(request: Request, topic: str = ""):
+        """HTMX fragment: memory search results."""
+        memories = []
+        try:
+            from intelligence.advisor import search_advisor_memories
+            from data.trade_db import DB_PATH
+            memories = search_advisor_memories(DB_PATH, topic, limit=15)
+        except Exception as exc:
+            logger.debug("Advisory memories fragment: %s", exc)
+        return TEMPLATES.TemplateResponse(
+            request, "_advisory_memories.html",
+            {"request": request, "memories": memories, "query": topic},
+        )
+
+    @app.post("/api/advisory/chat")
+    async def advisory_chat_api(request: Request):
+        """Web chat endpoint — processes message and returns updated chat HTML fragment."""
+        if not config.ADVISOR_ENABLED:
+            return HTMLResponse(
+                '<div class="text-[10px] text-red-500 py-2 text-center">'
+                'Advisory module disabled. Set ADVISOR_ENABLED=true</div>'
+            )
+        try:
+            form = await request.form()
+            message = str(form.get("message", "")).strip()
+            if not message:
+                return HTMLResponse("")
+
+            from intelligence.advisor import get_active_session, get_advisor_messages
+            from data.trade_db import DB_PATH
+
+            engine = _get_advisory_engine()
+            chat_id = int(config.NOTIFICATIONS.get("telegram_chat_id", "0") or "0")
+            _response = engine.process_message(chat_id, message)
+
+            # Return full updated chat
+            timeout = getattr(config, "ADVISOR_SESSION_TIMEOUT_HOURS", 4)
+            session = get_active_session(DB_PATH, timeout_hours=timeout)
+            messages = []
+            session_id = ""
+            if session:
+                session_id = session["id"]
+                raw_msgs = get_advisor_messages(DB_PATH, session_id, limit=50)
+                for m in raw_msgs:
+                    messages.append({
+                        "role": m.get("role", "user"),
+                        "content": m.get("content", ""),
+                        "created_at": (m.get("created_at", ""))[:16],
+                    })
+            return TEMPLATES.TemplateResponse(
+                request, "_advisory_chat.html",
+                {"request": request, "messages": messages, "session_id": session_id},
+            )
+        except Exception as exc:
+            logger.error("Advisory chat error: %s", exc, exc_info=True)
+            return HTMLResponse(
+                f'<div class="text-[10px] text-red-500 py-2 text-center">Error: {html.escape(str(exc))}</div>'
+            )
+
+    # ── Advisory: transaction recording ────────────────────────────────────
+    @app.post("/api/advisory/transaction")
+    async def advisory_transaction_api(request: Request):
+        """Record a transaction (buy/sell/deposit/withdrawal/dividend)."""
+        try:
+            form = await request.form()
+            tx_type = str(form.get("tx_type", "")).strip().lower()
+            wrapper = str(form.get("wrapper", "")).strip().upper()
+            ticker = str(form.get("ticker", "")).strip().upper() or None
+            quantity = float(form.get("quantity") or 0)
+            price = float(form.get("price") or 0)
+            amount = float(form.get("amount") or 0)
+            notes = str(form.get("notes", "")).strip() or None
+
+            from intelligence.advisory_holdings import (
+                record_buy, record_sell, record_cash, record_dividend,
+            )
+
+            if tx_type == "buy":
+                if not ticker or quantity <= 0 or price <= 0:
+                    return HTMLResponse(
+                        '<span class="text-red-500">Buy requires ticker, quantity > 0, price > 0</span>'
+                    )
+                record_buy(wrapper=wrapper, ticker=ticker, quantity=quantity, price=price, notes=notes)
+                msg = f"Recorded buy: {ticker} x{quantity:.2f} @ £{price:.2f} in {wrapper}"
+
+            elif tx_type == "sell":
+                if not ticker or quantity <= 0 or price <= 0:
+                    return HTMLResponse(
+                        '<span class="text-red-500">Sell requires ticker, quantity > 0, price > 0</span>'
+                    )
+                result = record_sell(wrapper=wrapper, ticker=ticker, quantity=quantity, price=price, notes=notes)
+                pnl = result.get("realized_pnl", 0)
+                msg = f"Recorded sell: {ticker} x{quantity:.2f} @ £{price:.2f} in {wrapper} (P&L: £{pnl:.2f})"
+
+            elif tx_type in ("deposit", "withdrawal"):
+                if amount <= 0:
+                    return HTMLResponse(
+                        '<span class="text-red-500">Deposit/withdrawal requires amount > 0</span>'
+                    )
+                record_cash(wrapper=wrapper, tx_type=tx_type, amount=amount, notes=notes)
+                msg = f"Recorded {tx_type}: £{amount:.2f} in {wrapper}"
+
+            elif tx_type == "dividend":
+                if amount <= 0:
+                    return HTMLResponse(
+                        '<span class="text-red-500">Dividend requires amount > 0</span>'
+                    )
+                record_dividend(wrapper=wrapper, ticker=ticker or "", amount=amount, notes=notes)
+                msg = f"Recorded dividend: £{amount:.2f} for {ticker or 'cash'} in {wrapper}"
+
+            else:
+                return HTMLResponse(
+                    f'<span class="text-red-500">Unknown tx_type: {html.escape(tx_type)}</span>'
+                )
+
+            return HTMLResponse(f'<span class="text-emerald-600">{html.escape(msg)}</span>')
+
+        except Exception as exc:
+            logger.error("Transaction record error: %s", exc, exc_info=True)
+            return HTMLResponse(
+                f'<span class="text-red-500">Error: {html.escape(str(exc))}</span>'
+            )
+
+    # ── Advisory: transaction history fragment ────────────────────────────
+    @app.get("/fragments/advisory-transactions", response_class=HTMLResponse)
+    def advisory_transactions_fragment(request: Request):
+        """HTMX fragment: recent transactions."""
+        try:
+            from intelligence.advisory_holdings import get_transactions, get_transaction_summary
+
+            transactions = get_transactions(limit=100)
+            summary = get_transaction_summary()
+
+            return TEMPLATES.TemplateResponse(
+                request, "_advisory_transactions.html",
+                {"request": request, "transactions": transactions, "summary": summary},
+            )
+        except Exception as exc:
+            logger.error("Transactions fragment error: %s", exc, exc_info=True)
+            return HTMLResponse(
+                f'<div class="text-[10px] text-red-500 py-2 text-center">Error: {html.escape(str(exc))}</div>'
+            )
+
+    # ── Advisory: RSS news fragment ───────────────────────────────────────
+    @app.get("/fragments/advisory-news", response_class=HTMLResponse)
+    def advisory_news_fragment(request: Request, refresh: str = ""):
+        """HTMX fragment: recent RSS headlines."""
+        try:
+            from intelligence.advisor import get_recent_rss_headlines
+            from data.trade_db import DB_PATH
+
+            headlines = get_recent_rss_headlines(DB_PATH, hours=48, limit=30)
+
+            return TEMPLATES.TemplateResponse(
+                request, "_advisory_news.html",
+                {"request": request, "headlines": headlines},
+            )
+        except Exception as exc:
+            logger.error("News fragment error: %s", exc, exc_info=True)
+            return HTMLResponse(
+                f'<div class="text-[10px] text-red-500 py-2 text-center">Error: {html.escape(str(exc))}</div>'
+            )
+
+    # ── Advisory: feed aggregator intel fragment ──────────────────────────
+    @app.get("/fragments/advisory-intel", response_class=HTMLResponse)
+    def advisory_intel_fragment(request: Request):
+        """HTMX fragment: recent feed aggregator events."""
+        try:
+            from data.trade_db import DB_PATH, get_conn
+            from datetime import timedelta
+
+            conn = get_conn(DB_PATH)
+            cutoff = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+            rows = conn.execute(
+                """SELECT event_type, source, symbol, headline, detail, created_at
+                   FROM research_events
+                   WHERE created_at > ?
+                   ORDER BY created_at DESC
+                   LIMIT 30""",
+                (cutoff,),
+            ).fetchall()
+            events = [dict(r) for r in rows]
+
+            return TEMPLATES.TemplateResponse(
+                request, "_advisory_intel.html",
+                {"request": request, "events": events},
+            )
+        except Exception as exc:
+            logger.error("Intel fragment error: %s", exc, exc_info=True)
+            return HTMLResponse(
+                f'<div class="text-[10px] text-red-500 py-2 text-center">Error: {html.escape(str(exc))}</div>'
+            )
 
     @app.get("/api/intel/history")
     def intel_history(limit: int = 20):
@@ -8444,6 +8931,25 @@ def _telegram_reply(chat_id: int, text: str) -> None:
         logger.warning("Telegram reply failed: %s", e)
 
 
+def _telegram_reply_long(chat_id: int, text: str) -> None:
+    """Send a long reply, splitting at Telegram's 4096 char limit."""
+    if len(text) <= 4096:
+        _telegram_reply(chat_id, text)
+        return
+    chunks = []
+    while text:
+        if len(text) <= 4096:
+            chunks.append(text)
+            break
+        split_at = text.rfind("\n", 0, 4096)
+        if split_at < 100:
+            split_at = 4096
+        chunks.append(text[:split_at])
+        text = text[split_at:].lstrip("\n")
+    for chunk in chunks:
+        _telegram_reply(chat_id, chunk)
+
+
 def action_message(text: str, ok: bool) -> str:
     css = "action-msg ok" if ok else "action-msg error"
     return f"<div class='{css}'>{text}</div>"
@@ -8451,24 +8957,98 @@ def action_message(text: str, ok: bool) -> str:
 
 def _is_test_artifact_incident(item: Optional[dict[str, Any]]) -> bool:
     """Hide FastAPI TestClient-generated incidents from operator-facing UI."""
-    if not item:
-        return False
-    detail = item.get("detail")
-    if not isinstance(detail, str):
-        return False
-    try:
-        payload = json.loads(detail)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    payload = _incident_detail_payload(item)
+    if payload is None:
         return False
     return payload.get("client_ip") == "testclient"
 
 
-def _visible_incidents(limit: int = 25) -> list[dict[str, Any]]:
-    """Return incidents intended for operators, excluding test artifacts."""
+def _incident_detail_payload(item: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """Parse structured incident detail payloads when present."""
+    if not item:
+        return None
+    detail = item.get("detail")
+    if not isinstance(detail, str):
+        return None
+    try:
+        payload = json.loads(detail)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _is_loopback_client_ip(value: Any) -> bool:
+    clean = str(value or "").strip().lower()
+    if not clean:
+        return False
+    if clean == "localhost":
+        return True
+    if clean.startswith("[") and "]" in clean:
+        clean = clean[1:clean.index("]")]
+    elif clean.count(":") == 1:
+        host, port = clean.rsplit(":", 1)
+        if port.isdigit():
+            clean = host
+    try:
+        return ipaddress.ip_address(clean).is_loopback
+    except ValueError:
+        return False
+
+
+def _is_localhost_tradingview_rejection_incident(item: Optional[dict[str, Any]]) -> bool:
+    """Hide local webhook rejection noise from the operator incident feed."""
+    if not item or item.get("title") != "TradingView webhook rejected":
+        return False
+    payload = _incident_detail_payload(item)
+    if payload is None:
+        return False
+    return _is_loopback_client_ip(payload.get("client_ip"))
+
+
+def _normalize_incident_mode(mode: str) -> str:
+    clean = str(mode or "").strip().lower()
+    return clean if clean in {"active", "history"} else "active"
+
+
+def _incident_timestamp(item: Optional[dict[str, Any]]) -> Optional[datetime]:
+    if not item:
+        return None
+    raw = str(item.get("timestamp") or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def _is_active_incident(item: Optional[dict[str, Any]], *, now: Optional[datetime] = None) -> bool:
+    if not item:
+        return False
+    source = str(item.get("source") or "")
+    if source == "order_action":
+        return True
+    if source != "bot_event":
+        return False
+    timestamp = _incident_timestamp(item)
+    if timestamp is None:
+        return False
+    current = now or datetime.now(timezone.utc)
+    return timestamp >= current - _ACTIVE_INCIDENT_EVENT_LOOKBACK
+
+
+def _visible_incidents(limit: int = 25, mode: str = "history") -> list[dict[str, Any]]:
+    """Return incidents intended for operators, excluding low-signal local noise."""
+    incident_mode = _normalize_incident_mode(mode)
     raw_incidents = get_incidents(limit=max(limit * 4, limit))
     visible: list[dict[str, Any]] = []
     for incident in raw_incidents:
-        if _is_test_artifact_incident(incident):
+        if _is_test_artifact_incident(incident) or _is_localhost_tradingview_rejection_incident(incident):
+            continue
+        if incident_mode == "active" and not _is_active_incident(incident):
             continue
         visible.append(incident)
         if len(visible) >= limit:

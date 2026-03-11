@@ -241,6 +241,8 @@ If work resumes, the next task should be one of:
 
 1. keep the system in bounded-validation mode and stop here
 2. add richer operator reporting around partial dispatch / broker reconciliation history
-3. intentionally move from validation into a held live Engine A batch
+3. implement the narrow hotfix: scope options startup recovery to options-owned action types only
+4. deliver the broader backlog item: partition `order_actions` recovery by explicit action domain / owner so mixed runtimes stop misclassifying foreign rows as recovery failures
+5. intentionally move from validation into a held live Engine A batch
 
 The decision boundary is operational now, not architectural.

@@ -143,3 +143,81 @@ def test_startup_recovery_handles_broker_timeout_and_preserves_failure_audit(mon
     event_titles = [args[1] for args, _ in events if len(args) >= 2]
     assert any("failed to fetch broker positions" in title.lower() for title in event_titles)
     assert any("unresolved actions" in title.lower() for title in event_titles)
+
+
+def test_startup_recovery_ignores_foreign_pending_actions(monkeypatch):
+    pending_actions = [
+        {
+            "id": "action-foreign-1",
+            "action_type": "research_rebalance",
+            "spread_id": "",
+            "attempt": 0,
+            "max_attempts": 3,
+        },
+        {
+            "id": "action-foreign-2",
+            "action_type": "webhook_signal",
+            "spread_id": "",
+            "attempt": 0,
+            "max_attempts": 3,
+        },
+    ]
+    updates: list[dict] = []
+    events: list[tuple] = []
+    controls: list[dict] = []
+
+    monkeypatch.setattr(options_recovery_module, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
+    monkeypatch.setattr(options_recovery_module, "get_open_option_positions", lambda: [])
+    monkeypatch.setattr(options_recovery_module, "update_order_action", lambda **kwargs: updates.append(kwargs))
+    monkeypatch.setattr(options_recovery_module, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(options_recovery_module, "log_control_action", lambda **kwargs: controls.append(kwargs))
+
+    bot = _build_bot(_BrokerStub())
+    bot._startup_recover()
+
+    assert updates == []
+    assert events == []
+    assert controls == []
+
+
+def test_startup_recovery_counts_only_owned_pending_actions(monkeypatch):
+    pending_actions = [
+        {
+            "id": "action-1",
+            "action_type": "open_spread",
+            "spread_id": "SPY:abc123",
+            "attempt": 0,
+            "max_attempts": 3,
+        },
+        {
+            "id": "action-foreign-1",
+            "action_type": "research_rebalance",
+            "spread_id": "",
+            "attempt": 0,
+            "max_attempts": 3,
+        },
+    ]
+    db_positions = [
+        {
+            "spread_id": "SPY:abc123",
+            "short_deal_id": "D-1",
+            "long_deal_id": "D-2",
+        }
+    ]
+    updates: list[dict] = []
+    events: list[tuple] = []
+    controls: list[dict] = []
+
+    monkeypatch.setattr(options_recovery_module, "get_order_actions_by_statuses", lambda statuses, limit=500: pending_actions)
+    monkeypatch.setattr(options_recovery_module, "get_open_option_positions", lambda: db_positions)
+    monkeypatch.setattr(options_recovery_module, "update_order_action", lambda **kwargs: updates.append(kwargs))
+    monkeypatch.setattr(options_recovery_module, "log_event", lambda *args, **kwargs: events.append((args, kwargs)))
+    monkeypatch.setattr(options_recovery_module, "log_control_action", lambda **kwargs: controls.append(kwargs))
+
+    bot = _build_bot(_BrokerStub(deal_ids=["D-1", "D-2"]))
+    bot._startup_recover()
+
+    assert len(updates) == 1
+    assert updates[0]["action_id"] == "action-1"
+    assert controls and controls[-1]["value"] == "pending=1 recovered=1 unresolved=0"
+    assert any(args[0] == "POSITION" and args[2] == "pending=1 recovered=1 unresolved=0" for args, _ in events)

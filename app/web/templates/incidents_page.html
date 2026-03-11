@@ -1,18 +1,29 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="grid grid-cols-1 md:grid-cols-12 gap-4">
+<div class="mb-3 flex items-center justify-between gap-3">
+  <div>
+    <h1 class="text-sm font-semibold text-gray-900 uppercase tracking-wide">Incidents</h1>
+    <p class="text-[11px] text-gray-500">`Active` shows retrying or failed action rows plus recent incident events. `History` shows the full audit trail.</p>
+  </div>
+  <div class="inline-flex rounded-md border border-gray-300 bg-white p-0.5 text-[11px] font-semibold">
+    <a href="/incidents?incident_mode=active" class="rounded px-2.5 py-1 {% if incident_mode == 'active' %}bg-gray-900 text-white{% else %}text-gray-500 hover:text-gray-900{% endif %}">Active</a>
+    <a href="/incidents?incident_mode=history" class="rounded px-2.5 py-1 {% if incident_mode == 'history' %}bg-gray-900 text-white{% else %}text-gray-500 hover:text-gray-900{% endif %}">History</a>
+  </div>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100%-3.5rem)] overflow-hidden auto-rows-[minmax(18rem,1fr)]">
 
   <!-- Incidents + Events — 2 column -->
-  <div class="md:col-span-6" id="incidents-panel" hx-get="/fragments/incidents" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6 min-h-0 overflow-hidden" id="incidents-panel" hx-get="/fragments/incidents?mode={{ incident_mode }}" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6 min-h-0 overflow-hidden" id="events-panel" hx-get="/fragments/events" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
 
   <!-- Jobs + Job Detail — 2 column -->
-  <div class="md:col-span-6" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6 min-h-0 overflow-hidden" id="jobs-panel" hx-get="/fragments/jobs" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6 min-h-0 overflow-hidden" id="job-detail-panel" hx-get="/fragments/job-detail" hx-trigger="load" hx-swap="innerHTML"></div>
 
   <!-- Control Actions + Log Tail — 2 column -->
-  <div class="md:col-span-6" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
-  <div class="md:col-span-6" id="log-panel" hx-get="/fragments/log-tail" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6 min-h-0 overflow-hidden" id="control-actions-panel" hx-get="/fragments/control-actions" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
+  <div class="md:col-span-6 min-h-0 overflow-hidden" id="log-panel" hx-get="/fragments/log-tail" hx-trigger="load, every 6s" hx-swap="innerHTML"></div>
 
 </div>
 {% endblock %}

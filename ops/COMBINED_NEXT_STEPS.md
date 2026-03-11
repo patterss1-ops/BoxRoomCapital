@@ -244,3 +244,114 @@ Items 1-10 complete.
   - full-batch live validation is complete; any further run should be treated as intentional exposure, not infrastructure proving
   - the preferred low-friction live validation command is now `python scripts/execute_engine_a_rebalance.py --mode live --symbols NQ --size-mode min --commit --dispatch --allow-live --smoke-close --sync-ledger`
   - the restart/operator surfaces are now standardized: all tracked research, broker, bootstrap, and detached-job entrypoints expose usable `--help` output
+
+## Post-Completion Hardening Backlog
+
+### 5.1 Partition order-action recovery by domain / owner
+- **Priority:** medium
+- **Reason:** startup recovery for the legacy options bot currently scans the shared `order_actions` table and treats foreign action types like `research_rebalance` or `webhook_signal` as unresolved failures. That inflates incident severity, couples unrelated runtimes, and makes recovery logic depend on incidental `action_type` strings instead of explicit ownership.
+- **Current symptom:** `Startup recovery left unresolved actions` can be raised even when there is no active execution backlog; the "unresolved" actions may only be foreign-domain rows that were later marked `aborted` as `Unsupported action_type=...`.
+
+#### Desired end state
+- Every persisted execution/action row has an explicit recovery owner or action domain.
+- Each runtime only recovers rows it owns.
+- Foreign rows are skipped, not failed.
+- Incident severity reflects true owned-action recovery failures instead of mixed-domain queue noise.
+
+#### Implementation plan
+
+1. **Add explicit domain metadata to persisted actions**
+- Add an `action_domain` field to `order_actions`.
+- Preferred enum values:
+  - `options`
+  - `research`
+  - `webhook`
+  - `broker_sync`
+  - `control`
+  - `unknown`
+- If `order_intents` or related lifecycle tables are acting as the canonical producer, mirror the same domain there too so joins and reconciliation surfaces stay consistent.
+- Add an indexed lookup path on `(action_domain, status, created_at)` so recovery workers can query their own pending rows efficiently.
+
+2. **Backfill legacy rows safely**
+- Write a one-time migration/backfill that infers `action_domain` from existing `action_type`, source metadata, and linked intent records.
+- Initial inference rules:
+  - `open_spread`, `close_spread` -> `options`
+  - `research_rebalance` -> `research`
+  - `webhook_signal` -> `webhook`
+  - broker reconcile / sync helpers -> `broker_sync`
+  - kill / throttle / cooldown control rows -> `control`
+  - everything else -> `unknown`
+- Make the backfill idempotent and non-destructive; it should only fill missing domain values.
+- Emit a one-time report of any rows left as `unknown` so they can be normalized deliberately instead of silently ignored forever.
+
+3. **Stamp new rows at creation time**
+- Update every producer that creates `order_actions` or linked lifecycle rows to set `action_domain` explicitly instead of relying on downstream inference.
+- Producers to touch:
+  - legacy options bot open/close flows
+  - research/manual execution paths
+  - TradingView/webhook intent creation
+  - broker reconciliation / sync flows if they persist actions
+  - any operator-triggered control-plane execution actions that currently share the same table
+- Add a central helper or enum to avoid string drift across producers.
+
+4. **Replace generic startup recovery scans with owned-domain queries**
+- Update `OptionsRecoveryMixin._startup_recover()` so it only fetches pending rows where `action_domain='options'`.
+- Do not let the options bot inspect foreign rows and then decide they are unsupported.
+- If other runtimes need recovery, give each one its own narrow recovery worker:
+  - research execution recovery
+  - webhook intent recovery, if applicable
+  - broker-sync recovery, if applicable
+- If a domain has no automated recovery story yet, leave it unrecovered but visible through a dedicated audit/reporting surface rather than misrouting it through options recovery.
+
+5. **Introduce a recovery registry instead of hard-coded action-type branching**
+- Move from "if action_type == ..." logic inside one mixin toward a small registry:
+  - domain -> recovery handler
+  - handler -> supported action types + resolution rules
+- The options handler can still only know `open_spread` / `close_spread`, but that knowledge should live under the `options` domain, not as an implicit assumption about the whole table.
+- This keeps future additions like research/live rebalance recovery from touching legacy options code.
+
+6. **Tighten incident semantics**
+- Change the recovery summary so it distinguishes:
+  - `owned_pending`
+  - `owned_recovered`
+  - `owned_failed`
+  - `foreign_skipped`
+  - `unknown_skipped`
+- Only raise `ERROR` when owned rows fail recovery.
+- Log skipped foreign rows as debug/info-level audit, or omit them from operator-facing incidents entirely.
+- Keep a visible audit trail for `unknown` rows so schema drift is still detectable.
+
+7. **Expose domain ownership in operator audit surfaces**
+- Add `action_domain` to relevant API/fragment payloads for order actions and intent audit views.
+- This makes it obvious why a row belongs to options vs research when debugging mixed execution history.
+- Consider a filter in the incidents/order-actions page so operators can isolate one execution domain when needed.
+
+8. **Verification and rollout**
+- Add tests for:
+  - backfill inference
+  - producer stamping
+  - options recovery ignoring foreign rows
+  - true owned-options failures still surfacing as incidents
+  - mixed-domain pending rows producing accurate summary counts
+- Run a one-time DB audit after migration:
+  - count by `action_domain`
+  - count of `unknown`
+  - count of non-completed pending rows by domain
+- Only after the backfill is stable should old fallback inference remain as a temporary compatibility path.
+
+#### Acceptance criteria
+- Restarting the options runtime with pending `research_rebalance` rows does not emit `Startup recovery left unresolved actions`.
+- Options recovery only updates options-owned rows.
+- Mixed-domain pending rows are still visible in audit surfaces, but not misclassified as options recovery failures.
+- New `order_actions` rows are stamped with explicit domain metadata at creation time.
+- There is a deterministic path to add future recovery handlers without editing legacy options-specific recovery code.
+
+#### Suggested sequencing
+- **Step A:** add schema + backfill + producer stamping
+- **Step B:** scope options recovery to `action_domain='options'`
+- **Step C:** introduce the recovery registry abstraction
+- **Step D:** clean up incident semantics and operator surfaces
+
+#### Effort / risk
+- **Effort:** 2-4 tranches depending on how much producer coverage and UI audit work is included
+- **Risk:** moderate; touches shared persistence and recovery semantics, so it should be done with migration tests and one-time DB inspection rather than as an inline hotfix

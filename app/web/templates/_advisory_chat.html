@@ -1,0 +1,32 @@
+<!-- Advisory Chat Messages fragment -->
+{% if messages %}
+  {% if session_id %}
+  <script>document.getElementById('advisory-session-label').textContent = 'session: {{ session_id[:8] }}';</script>
+  {% endif %}
+  {% for msg in messages %}
+  <div class="flex {% if msg.role == 'user' %}justify-end{% else %}justify-start{% endif %}">
+    <div class="max-w-[80%] rounded-md px-2 py-1.5 {% if msg.role == 'user' %}bg-blue-50 border border-blue-100{% elif msg.role == 'system' %}bg-gray-100 border border-gray-200{% else %}bg-gray-50 border border-gray-200{% endif %}">
+      {% if msg.role != 'user' %}
+      <div class="flex items-center gap-1 mb-0.5">
+        <span class="text-[9px] font-semibold {% if msg.role == 'system' %}text-gray-400{% else %}text-blue-600{% endif %} uppercase">
+          {% if msg.role == 'system' %}System{% else %}Advisor{% endif %}
+        </span>
+        <span class="text-[8px] text-gray-300 font-mono">{{ msg.created_at }}</span>
+      </div>
+      {% endif %}
+      <div class="text-[11px] text-gray-800 font-mono whitespace-pre-wrap leading-relaxed">{{ msg.content }}</div>
+      {% if msg.role == 'user' %}
+      <div class="text-[8px] text-gray-300 font-mono text-right mt-0.5">{{ msg.created_at }}</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="flex flex-col items-center justify-center h-full text-center py-12">
+    <svg class="w-8 h-8 text-gray-300 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+    </svg>
+    <p class="text-[11px] text-gray-400 font-mono">No messages yet</p>
+    <p class="text-[10px] text-gray-300 mt-1">Ask about ISA/SIPP allocation, market views, or portfolio strategy</p>
+  </div>
+{% endif %}

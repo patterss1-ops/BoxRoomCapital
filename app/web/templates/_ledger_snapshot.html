@@ -48,17 +48,17 @@
     <thead>
       <tr>
         <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Time</th>
-        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Sleeve</th>
-        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">NAV</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Scope</th>
+        <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Net Liq</th>
         <th class="text-gray-400 text-[10px] uppercase font-semibold px-1.5 py-1 border-b border-gray-200">Cash</th>
       </tr>
     </thead>
     <tbody>
     {% for row in ledger.nav_snapshots[:6] %}
       <tr>
-        <td class="text-gray-400 px-1.5 py-1 border-b border-gray-200">{{ row.timestamp }}</td>
-        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ row.sleeve }}</td>
-        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(row.nav or 0) }}</td>
+        <td class="text-gray-400 px-1.5 py-1 border-b border-gray-200">{{ row.timestamp or row.snapshot_date or row.created_at or "-" }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ row.scope_label or row.sleeve or row.level_id or row.level or "-" }}</td>
+        <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format((row.nav or row.net_liquidation) or 0) }}</td>
         <td class="text-gray-700 px-1.5 py-1 border-b border-gray-200">{{ "%.2f"|format(row.cash or 0) }}</td>
       </tr>
     {% endfor %}

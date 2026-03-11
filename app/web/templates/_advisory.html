@@ -1,0 +1,94 @@
+<!-- Advisory Holdings fragment — rendered by /fragments/advisory-holdings -->
+<div class="grid grid-cols-3 gap-1.5">
+  {% for wrapper in wrappers|default([]) %}
+  {% if wrapper.nav or wrapper.top_holdings %}
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <div class="flex items-center justify-between mb-1">
+      <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">{{ wrapper.name }}</h3>
+    </div>
+
+    <!-- NAV -->
+    <p class="text-sm font-bold font-mono text-gray-900">&pound;{{ "%.2f"|format(wrapper.nav or 0) }}</p>
+
+    <!-- P&L -->
+    <div class="flex items-center gap-1.5 mt-0.5">
+      <span class="text-[10px] font-mono {% if (wrapper.pnl or 0) >= 0 %}text-emerald-400{% else %}text-red-500{% endif %}">
+        {{ "+" if (wrapper.pnl or 0) >= 0 }}{{ "%.2f"|format(wrapper.pnl or 0) }}
+      </span>
+      <span class="text-[10px] font-mono {% if (wrapper.pnl_pct or 0) >= 0 %}text-emerald-400{% else %}text-red-500{% endif %}">
+        ({{ "+" if (wrapper.pnl_pct or 0) >= 0 }}{{ "%.1f"|format(wrapper.pnl_pct or 0) }}%)
+      </span>
+    </div>
+
+    <!-- Allowance bar (ISA / SIPP only) -->
+    {% if wrapper.allowance_limit %}
+    <div class="mt-1">
+      <div class="flex justify-between text-[9px] text-gray-400 font-mono mb-0.5">
+        <span>Used &pound;{{ "%.0f"|format(wrapper.allowance_used or 0) }}</span>
+        <span>/ &pound;{{ "%.0f"|format(wrapper.allowance_limit) }}</span>
+      </div>
+      <div class="w-full bg-gray-100 rounded-full h-1">
+        <div class="bg-blue-500 h-1 rounded-full" style="width: {{ "%.1f"|format(((wrapper.allowance_used or 0) / wrapper.allowance_limit * 100) | round(1)) }}%"></div>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Top holdings -->
+    {% if wrapper.top_holdings %}
+    <div class="mt-1 border-t border-gray-100 pt-1">
+      <p class="text-[9px] text-gray-400 uppercase tracking-wide mb-0.5">Holdings</p>
+      {% for h in wrapper.top_holdings[:5] %}
+      <div class="flex justify-between text-[10px] font-mono">
+        <span class="text-gray-700 truncate max-w-[60%]">{{ h.ticker }}</span>
+        <span class="{% if (h.pnl or 0) >= 0 %}text-emerald-400{% else %}text-red-500{% endif %}">{{ "%.1f"|format(h.weight or 0) }}%</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">{{ wrapper.name }}</h3>
+    <p class="text-sm font-bold font-mono text-gray-300">&pound;0.00</p>
+    {% if wrapper.allowance_limit %}
+    <div class="mt-1">
+      <div class="flex justify-between text-[9px] text-gray-400 font-mono mb-0.5">
+        <span>Used &pound;0</span>
+        <span>/ &pound;{{ "%.0f"|format(wrapper.allowance_limit) }}</span>
+      </div>
+      <div class="w-full bg-gray-100 rounded-full h-1">
+        <div class="bg-blue-500 h-1 rounded-full" style="width: 0%"></div>
+      </div>
+    </div>
+    {% endif %}
+    <p class="text-[9px] text-gray-400 mt-1">No holdings. Use /add via Telegram or chat.</p>
+  </div>
+  {% endif %}
+  {% endfor %}
+
+  {% if not wrappers %}
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">ISA</h3>
+    <p class="text-sm font-bold font-mono text-gray-300">&pound;0.00</p>
+    <div class="mt-1">
+      <div class="flex justify-between text-[9px] text-gray-400 font-mono mb-0.5"><span>Used &pound;0</span><span>/ &pound;20,000</span></div>
+      <div class="w-full bg-gray-100 rounded-full h-1"><div class="bg-blue-500 h-1 rounded-full" style="width: 0%"></div></div>
+    </div>
+    <p class="text-[9px] text-gray-400 mt-1">No holdings yet</p>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">SIPP</h3>
+    <p class="text-sm font-bold font-mono text-gray-300">&pound;0.00</p>
+    <div class="mt-1">
+      <div class="flex justify-between text-[9px] text-gray-400 font-mono mb-0.5"><span>Used &pound;0</span><span>/ &pound;60,000</span></div>
+      <div class="w-full bg-gray-100 rounded-full h-1"><div class="bg-blue-500 h-1 rounded-full" style="width: 0%"></div></div>
+    </div>
+    <p class="text-[9px] text-gray-400 mt-1">No holdings yet</p>
+  </div>
+  <div class="bg-white border border-gray-200 rounded-md p-1.5">
+    <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">GIA</h3>
+    <p class="text-sm font-bold font-mono text-gray-300">&pound;0.00</p>
+    <p class="text-[9px] text-gray-400 mt-1">No holdings yet</p>
+  </div>
+  {% endif %}
+</div>
