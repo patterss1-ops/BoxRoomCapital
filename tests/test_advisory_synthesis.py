@@ -17,6 +17,7 @@ from intelligence.advisor import (
     save_advisor_session,
     get_recent_rss_headlines,
 )
+from tests.asgi_client import ASGITestClient
 
 
 @pytest.fixture()
@@ -61,6 +62,19 @@ def _mock_llm_response(text="Here is your weekly review."):
     }
     resp.raise_for_status = MagicMock()
     return resp
+
+
+def _create_test_advisory_app(monkeypatch, db_path: str):
+    import data.trade_db as trade_db
+    from app.api import server as server_module
+
+    monkeypatch.setattr(trade_db, "DB_PATH", db_path)
+    monkeypatch.setattr(server_module, "init_db", lambda: trade_db.init_db(db_path))
+    monkeypatch.setattr(server_module.config, "ORCHESTRATOR_ENABLED", False, raising=False)
+    monkeypatch.setattr(server_module.config, "DISPATCHER_ENABLED", False, raising=False)
+    monkeypatch.setattr(server_module.config, "INTRADAY_ENABLED", False, raising=False)
+    monkeypatch.setattr(server_module.config, "ADVISOR_ENABLED", True, raising=False)
+    return server_module.create_app()
 
 
 # ── 1. Proactive brief generation ────────────────────────────────────────
@@ -278,3 +292,34 @@ def test_api_memories_endpoint(db):
     # Empty search returns empty list
     empty = search_advisor_memories(db, "", limit=20)
     assert empty == []
+
+
+def test_memory_graph_api_and_fragment(monkeypatch, db):
+    session_id = str(uuid.uuid4())
+    message_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id, topic="Graph session")
+    from intelligence.advisor import save_advisor_message
+    save_advisor_message(db, message_id, session_id, "user", "Build a core VWRL.L position")
+    save_advisor_memory(
+        db,
+        id=str(uuid.uuid4()),
+        topic="ISA graph seed",
+        memory_type="decision",
+        summary="Build a core VWRL.L position in ISA",
+        source_message_id=message_id,
+        tags="isa,vwrl",
+    )
+
+    app = _create_test_advisory_app(monkeypatch, db)
+    with ASGITestClient(app) as client:
+        response = client.get("/api/advisory/memory-graph")
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["ok"] is True
+        assert payload["meta"]["node_count"] == 1
+        assert payload["nodes"][0]["topic"] == "ISA graph seed"
+
+        fragment = client.get("/fragments/advisory-memory-graph")
+        assert fragment.status_code == 200
+        assert "data-advisory-memory-graph" in fragment.text
+        assert "/api/advisory/memory-graph" in fragment.text

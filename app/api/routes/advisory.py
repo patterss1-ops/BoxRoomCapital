@@ -99,6 +99,22 @@ def advisory_memories_api(topic: str = "", limit: int = 20):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
+@router.get("/api/advisory/memory-graph")
+def advisory_memory_graph_api(limit: int = 0):
+    """Return advisory memories as a node/edge graph."""
+    try:
+        from intelligence.advisor import build_advisor_memory_graph
+        from data.trade_db import DB_PATH
+
+        graph = build_advisor_memory_graph(
+            DB_PATH,
+            limit=limit if limit > 0 else None,
+        )
+        return {"ok": True, **graph}
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @router.post("/api/advisory/generate")
 def advisory_generate_api():
     """Trigger proactive advisory brief.
@@ -230,6 +246,19 @@ def advisory_memories_fragment(request: Request, topic: str = ""):
     return TEMPLATES.TemplateResponse(
         request, "_advisory_memories.html",
         {"request": request, "memories": memories, "query": topic},
+    )
+
+
+@router.get("/fragments/advisory-memory-graph", response_class=HTMLResponse)
+def advisory_memory_graph_fragment(request: Request):
+    """HTMX fragment: advisory memory graph shell."""
+    return TEMPLATES.TemplateResponse(
+        request,
+        "_advisory_memory_graph.html",
+        {
+            "request": request,
+            "graph_endpoint": "/api/advisory/memory-graph",
+        },
     )
 
 
