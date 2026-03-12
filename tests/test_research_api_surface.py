@@ -84,9 +84,8 @@ def test_research_page_mentions_manual_engine_b_form():
     template = Path("app/web/templates/research_page.html").read_text(encoding="utf-8")
 
     assert "/api/actions/research/engine-b-run" in template
-    assert "Research Operations" in template
-    assert "Research Intake" in template or "Manual Engine B Intake" in template
-    assert "Manual Engine B Intake" in template
+    assert "Submit New Evidence" in template or "Research Operations" in template
+    assert "Submit New Evidence" in template or "Research Intake" in template or "Manual Engine B Intake" in template
     assert 'hx-target="#research-operator-output"' in template
     assert "Legacy Labs" in template
     assert "Diagnostics &amp; Feeds" in template
@@ -102,8 +101,8 @@ def test_research_page_mentions_manual_engine_b_form():
     assert "/fragments/research/focus-ribbon" in template
     assert "research-archive" in template
     assert "/fragments/research/archive" in template
-    assert "What changed on this page" in template
-    assert "Decision Workbench" in template
+    # UX redesign removed "What changed" changelog panel; workbench id still present
+    assert "research-workbench" in template
 
 
 def test_research_page_deep_link_primes_initial_fragment_targets():
@@ -166,12 +165,10 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     assert "selected_queue_lane" in dashboard_template
     assert "selected_chain_id" in dashboard_template
     assert "selected_active_view" in dashboard_template
-    assert "What needs attention now" in summary_template
-    assert "Lane Pressure" in summary_template
-    assert "Review Lane" in summary_template
-    assert "Pilot Lane" in summary_template
-    assert "Rebalance Lane" in summary_template
-    assert "Flow Lane" in summary_template
+    # UX redesign compacted the operating summary; check key structural elements
+    assert "Focus Now" in summary_template
+    assert "focus_tone" in summary_template
+    assert "lane_cards" in summary_template
     assert "setResearchQueueAndActiveView" in summary_template
     assert "data-research-chain-card" in summary_template
     assert "data-selected-chain-badge" in summary_template
@@ -184,7 +181,7 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     assert "Latest Saved Artifact" in operator_template
     assert "Additional Updated Artifacts" in operator_template
     assert "History Lens" in archive_template
-    assert "Next Decision" in alerts_template
+    assert "next_queue_item" in alerts_template
     assert "syncResearchWorkbench" in app_js
     assert "refreshResearchChainViewer" in app_js
     assert "refreshResearchFocusRibbon" in app_js
@@ -254,63 +251,27 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     assert "'#research-alerts'" in app_js or "\"#research-alerts\"" in app_js
     assert "window.refreshResearchAlerts()" in app_js
     assert "data-initial-research-chain" in app_js
+    # UX redesign simplified the active hypotheses board
     assert "Active Chains" in active_template
-    assert "Board Focus" in active_template
-    assert "board_focus" in active_template
-    assert "priority_reason" in active_template
-    assert "board_focus.secondary" in active_template
-    assert "board_focus.secondary.section_label" in active_template
     assert "data-active-view-button" in active_template
-    assert "syncResearchWorkbench('{{ row.chain_id }}', '{{ row_queue_lane }}', '{{ active_view }}')" in active_template
-    assert "syncResearchWorkbench('{{ board_focus.chain_id }}'" in active_template
-    assert "syncResearchWorkbench('{{ operator_focus.chain_id }}'" in active_template
-    assert "syncResearchWorkbench('{{ flow_focus.chain_id }}', 'all', '{{ active_view }}')" in active_template
+    assert "syncResearchWorkbench" in active_template
     assert "data-research-queue-lane" in active_template
     assert "data-active-view-card" in active_template
     assert "data-active-view-section" in active_template
-    assert "data-active-view-detail" in active_template
-    assert "data-active-view-focus" in active_template
-    assert "data-active-view-banner" in active_template
     assert "data-active-view-empty-state" in active_template
-    assert "data-active-view-selection-state" in active_template
-    assert "data-active-view-selection-detail" in active_template
     assert "data-active-view-selection-warning" in active_template
-    assert "data-active-view-selection-warning-title" in active_template
-    assert "data-active-view-selection-warning-detail" in active_template
-    assert "data-active-view-nav-first" in active_template
-    assert "data-active-view-nav-prev" in active_template
-    assert "data-active-view-nav-next" in active_template
     assert "data-active-view-reveal-selected" in active_template
-    assert "Filtered View" in active_template
-    assert "Slice Navigation" in active_template
-    assert "Selected Chain Outside Slice" in active_template
-    assert "Show In Matching Slice" in active_template
-    assert "Open First Visible" in active_template
-    assert "Previous Visible" in active_template
-    assert "Next Visible" in active_template
-    assert "Show All Chains" in active_template
-    assert "No chains match this view yet." in active_template
-    assert "Needs Operator Now" in active_template
-    assert "Still Flowing" in active_template
     assert "operator_rows" in active_template
-    assert "operator_lanes" in active_template
-    assert "operator_focus" in active_template
     assert "flow_rows" in active_template
     assert "flow_lanes" in active_template
-    assert "flow_focus" in active_template
     assert "selected_chain_id" in active_template
-    assert "lane.rows" in active_template
-    assert "Fresh / Stale" in active_template
-    assert "Urgent / Watch" in active_template
-    assert "Operator Focus" in active_template
-    assert "lead_button_label" in active_template
-    assert "Flow Focus" in active_template
-    assert "operator_lane_label" in active_template
-    assert "flow_lane_label" in active_template
     assert "data-research-chain-card" in active_template
+    assert "Needs Action" in active_template
+    assert "In Progress" in active_template
+    assert "setResearchActiveView" in active_template
     assert "data-selected-chain-badge" in active_template
-    assert "Next Move" in active_template
-    assert "Fresh" in active_template
+    assert "next_action" in active_template
+    assert "freshness" in active_template
     assert "/fragments/research/artifact-chain/{{ row.chain_id }}" in active_template
     assert "#research-artifact-chain-viewer" in active_template
     assert "/fragments/research/artifact-chain/{{ row.chain_id }}" in recent_template
@@ -401,21 +362,14 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     assert "/api/actions/research/dismiss-rebalance" in focus_template
     assert "/api/actions/research/synthesize" in focus_template
     assert "/api/actions/research/post-mortem" in focus_template
+    # UX redesign compacted the alerts/decision queue template
     assert "Decision Queue" in alerts_template
-    assert "Queue Focus" in alerts_template
-    assert "All Lanes" in alerts_template
     assert "active_lane" in alerts_template
     assert "selected_chain_id" in alerts_template
     assert "selected_chain_context" in alerts_template
-    assert "Queue Following Selected Chain" in alerts_template
-    assert "Posture" in alerts_template
-    assert "Latest" in alerts_template
-    assert "Next" in alerts_template
-    assert "Open Selected Chain" in alerts_template
-    assert "Suggested Next Moves" in alerts_template
-    assert "Review Lane" in alerts_template
-    assert "Pilot Lane" in alerts_template
-    assert "Rebalance Lane" in alerts_template
+    assert "Review" in alerts_template
+    assert "Pilot" in alerts_template
+    assert "Rebalance" in alerts_template
     assert "Retirements" in alerts_template
     assert "data-queue-lane-section" in alerts_template
     assert "data-queue-lane-button" in alerts_template
