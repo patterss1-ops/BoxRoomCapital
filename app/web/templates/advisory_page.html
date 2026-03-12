@@ -86,9 +86,12 @@
     <div class="flex items-center justify-between px-2 py-1 border-b border-gray-200 bg-gray-50">
       <div class="flex items-center gap-2">
         <h2 class="text-[11px] font-semibold text-gray-700 uppercase tracking-wide">Advisor Chat</h2>
-        <span id="advisory-status" class="text-[9px] font-mono {% if advisor_enabled %}text-emerald-500{% else %}text-red-400{% endif %}">
+        <button id="advisory-toggle"
+                onclick="fetch('/api/advisory/toggle',{method:'POST'}).then(r=>r.json()).then(d=>{const btn=document.getElementById('advisory-toggle');if(d.advisor_enabled){btn.textContent='Online';btn.className='text-[9px] font-mono text-emerald-500 hover:text-emerald-600 cursor-pointer bg-transparent border-none p-0'}else{btn.textContent='Disabled';btn.className='text-[9px] font-mono text-red-400 hover:text-red-500 cursor-pointer bg-transparent border-none p-0'}})"
+                class="text-[9px] font-mono {% if advisor_enabled %}text-emerald-500 hover:text-emerald-600{% else %}text-red-400 hover:text-red-500{% endif %} cursor-pointer bg-transparent border-none p-0"
+                title="Click to toggle advisor on/off">
           {% if advisor_enabled %}Online{% else %}Disabled{% endif %}
-        </span>
+        </button>
         <span id="advisory-spinner" class="htmx-indicator text-[10px] text-blue-500 font-mono">thinking...</span>
       </div>
       <span class="text-[9px] text-gray-400 font-mono" id="advisory-session-label">—</span>
