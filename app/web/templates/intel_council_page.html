@@ -3,6 +3,12 @@
 {% block content %}
 <div class="space-y-3 h-full overflow-y-auto pr-1">
 
+  <!-- Next Action Bar (context-aware guide) -->
+  <div id="intel-next-action"
+       hx-get="/fragments/intel-next-action"
+       hx-trigger="load delay:100ms, every 5s"
+       hx-swap="innerHTML"></div>
+
   <!-- Row 1: Status bar + Submit form -->
   <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
     <!-- Status + Pipeline board -->
