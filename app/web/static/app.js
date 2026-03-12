@@ -936,6 +936,31 @@
     }
   });
 
+  document.body.addEventListener('htmx:configRequest', function (event) {
+    var elt = event && event.detail ? event.detail.elt : null;
+    if (!elt) return;
+    if (elt.id === 'research-active-hypotheses') {
+      var activeView = getRememberedResearchActiveView();
+      if (activeView && activeView !== 'all') {
+        event.detail.parameters['active_view'] = activeView;
+      }
+      var chainId = getRememberedResearchChain();
+      if (chainId) {
+        event.detail.parameters['chain_id'] = chainId;
+      }
+    }
+    if (elt.id === 'research-alerts') {
+      var queueLane = getRememberedResearchQueueLane();
+      if (queueLane && queueLane !== 'all') {
+        event.detail.parameters['queue_lane'] = queueLane;
+      }
+      var chainId2 = getRememberedResearchChain();
+      if (chainId2) {
+        event.detail.parameters['chain_id'] = chainId2;
+      }
+    }
+  });
+
   document.addEventListener('submit', function (event) {
     const form = event.target;
     if (!(form instanceof HTMLFormElement)) return;

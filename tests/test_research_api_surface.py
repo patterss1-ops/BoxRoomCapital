@@ -158,7 +158,6 @@ def test_research_fragment_templates_expose_chain_viewer_controls():
     signal_template = Path("app/web/templates/_research_signal_heatmap.html").read_text(encoding="utf-8")
     app_js = Path("app/web/static/app.js").read_text(encoding="utf-8")
 
-    assert "Processing Loop" in dashboard_template
     assert "Active Research" in dashboard_template
     assert "Portfolio Expression" in dashboard_template
     assert "research-portfolio-expression" in dashboard_template

@@ -32,8 +32,8 @@
         if (!container) return;
         container.querySelectorAll('button[data-tab]').forEach(function(btn) {
           btn.className = btn.getAttribute('data-tab') === tabId
-            ? 'px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900'
-            : 'px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent';
+            ? 'px-3 py-1.5 text-[11px] font-semibold rounded-md bg-gray-900 text-white shadow-sm'
+            : 'px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md';
         });
         container.parentElement.querySelectorAll('[data-tab-content]').forEach(function(panel) {
           var isActive = panel.getAttribute('data-tab-content') === tabId;
