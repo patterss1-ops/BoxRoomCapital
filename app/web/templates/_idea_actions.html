@@ -1,20 +1,3 @@
-<div class="flex items-center gap-1 mt-1 pt-1 border-t border-gray-200">
-  <span class="text-[9px] text-gray-400 uppercase tracking-wide">Pipeline:</span>
-
-  <!-- Stage progress indicators -->
-  {% for s in ['idea', 'review', 'backtest', 'paper', 'live'] %}
-  <span class="px-1 py-0.5 rounded text-[9px] font-semibold uppercase
-    {% if s == stage %}
-      {% if s == 'live' %}bg-emerald-500/20 text-emerald-400 border border-emerald-500/30
-      {% elif s == 'backtest' or s == 'paper' %}bg-amber-500/20 text-amber-400 border border-amber-500/30
-      {% else %}bg-blue-500/20 text-blue-400 border border-blue-500/30{% endif %}
-    {% elif s in ['idea','review','backtest','paper','live'] and ['idea','review','backtest','paper','live'].index(s) < ['idea','review','backtest','paper','live'].index(stage) %}
-      text-emerald-600
-    {% else %}text-gray-400{% endif %}">{{ s }}</span>
-  {% if not loop.last %}<span class="text-gray-400 text-[9px]">&rarr;</span>{% endif %}
-  {% endfor %}
-</div>
-
 <!-- Action buttons (contextual per stage) -->
 <div class="flex flex-wrap gap-1 mt-1.5" id="idea-actions-{{ idea.id }}">
 
@@ -22,7 +5,7 @@
   <button hx-post="/api/ideas/{{ idea.id }}/promote"
           hx-vals='{"target_stage": "review", "reason": "Promoted from idea"}'
           hx-swap="none"
-          hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+          hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'); var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')"
           class="bg-blue-600 hover:bg-blue-500 text-gray-900 font-semibold px-2 py-0.5 rounded text-[10px] border border-blue-500 transition-colors">
     Promote to Review
   </button>
@@ -120,7 +103,7 @@
             hx-vals='{"target_stage": "paper", "reason": "Backtest passed"}'
             hx-headers='{"Content-Type": "application/json"}'
             hx-swap="none"
-            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'); var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')"
             class="bg-amber-600 hover:bg-amber-500 text-gray-900 font-semibold px-2 py-0.5 rounded text-[10px] border border-amber-500 transition-colors">
       Start Paper Trade
     </button>
@@ -166,7 +149,7 @@
             hx-vals='{"target_stage": "live", "reason": "Paper trade validated"}'
             hx-headers='{"Content-Type": "application/json"}'
             hx-swap="none"
-            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'); var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')"
             class="bg-emerald-600 hover:bg-emerald-500 text-gray-900 font-semibold px-2 py-0.5 rounded text-[10px] border border-emerald-500 transition-colors">
       Go Live
     </button>
@@ -198,28 +181,17 @@
             hx-vals='{"target_stage": "idea", "reason": "Resurrected"}'
             hx-headers='{"Content-Type": "application/json"}'
             hx-swap="none"
-            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}')"
+            hx-on::after-request="htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'); var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')"
             class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-2 py-0.5 rounded text-[10px] border border-gray-300 transition-colors">
       Resurrect
     </button>
   {% endif %}
 
-  <!-- Reject button (available from any non-rejected stage) -->
   {% if stage != 'rejected' %}
-  <button onclick="document.getElementById('reject-{{ idea.id }}').classList.toggle('hidden')"
+  <button onclick="fetch('/api/ideas/{{ idea.id }}/reject', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason: ''})}).then(() => { htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'); var board = document.getElementById('idea-pipeline-board'); if (board) htmx.trigger(board, 'refreshBoard'); })"
           class="bg-transparent hover:bg-red-500/10 text-red-400/60 hover:text-red-400 font-semibold px-2 py-0.5 rounded text-[10px] border border-red-500/20 hover:border-red-500/40 transition-colors ml-auto">
     Reject
   </button>
-  <div id="reject-{{ idea.id }}" class="hidden w-full mt-1">
-    <div class="flex gap-1">
-      <input type="text" id="reject-reason-{{ idea.id }}" placeholder="Reason..."
-             class="flex-1 bg-gray-100 border border-gray-300 text-gray-800 rounded px-2 py-0.5 text-[10px] placeholder-gray-400">
-      <button onclick="fetch('/api/ideas/{{ idea.id }}/reject', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({reason: document.getElementById('reject-reason-{{ idea.id }}').value})}).then(() => htmx.ajax('GET', '/fragments/idea-actions/{{ idea.id }}', '#idea-stage-{{ idea.id }}'))"
-              class="bg-red-600 hover:bg-red-500 text-gray-900 font-semibold px-2 py-0.5 rounded text-[10px] border border-red-500">
-        Confirm
-      </button>
-    </div>
-  </div>
   {% endif %}
 
   <!-- Notes toggle -->

@@ -100,7 +100,7 @@
         {% if idea.idea_id is defined and idea.idea_id %}
           {% set istage = idea.pipeline_stage or 'idea' %}
           {% if istage == 'idea' %}
-          <button onclick="event.stopPropagation(); fetch('/api/ideas/{{ idea.idea_id }}/promote', {method:'POST', body: new URLSearchParams({target_stage:'review', reason:'Promoted'})}).then(()=>htmx.ajax('GET','/fragments/intel-council','#intel-council-panel'))"
+          <button onclick="event.stopPropagation(); fetch('/api/ideas/{{ idea.idea_id }}/promote', {method:'POST', body: new URLSearchParams({target_stage:'review', reason:'Promoted'})}).then(()=>{htmx.ajax('GET','/fragments/intel-council','#intel-council-panel'); var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')})"
                   class="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-600 hover:bg-blue-500 text-white border border-blue-500 flex-shrink-0 transition-colors">Review</button>
           {% elif istage == 'review' %}
           <button onclick="event.stopPropagation(); fetch('/api/ideas/{{ idea.idea_id }}/backtest', {method:'POST'}).then(()=>htmx.ajax('GET','/fragments/intel-council','#intel-council-panel'))"
