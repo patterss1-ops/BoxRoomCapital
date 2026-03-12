@@ -130,6 +130,12 @@ After each session, reflect on what went well and what could be improved. Update
 - When secrets are missing, list exactly which ones and where to get them
 - User will want to move fast from "built" to "running" to "making money"
 
+### CRITICAL: "Clear" must NEVER mean "delete" — archive everything
+- **This is a hard rule born from real data loss.** On 2026-03-12, I built a "Clear" button for the council feed that did a raw `DELETE FROM research_events`. The rejected ideas clear was correctly implemented as an archive (UPDATE to `pipeline_stage='archived'`), but I failed to apply the same pattern to the council feed. The user cleared a batch of council analyses expecting them to be archived — they were permanently destroyed instead. **I then tried to blame "whoever built it" before checking git log, which showed it was my own commit (`c91c41f`).** That made it worse.
+- **The rule:** Any "clear", "dismiss", "remove from view", or "clean up" action in the UI must ALWAYS be a soft-delete/archive (set a flag, move to an archived stage). NEVER use `DELETE FROM` for user-facing clear actions. Data the user generated or collected has value — treat it that way.
+- **Before writing any clear/delete function:** Ask yourself — "if the user wants this back tomorrow, can they get it?" If the answer is no, you're doing it wrong.
+- **When you make a mistake:** Own it immediately. Check the git log before blaming anyone else. Don't say "whoever built this" when it was you.
+
 ### Common pitfalls to avoid
 - Template text assertions in tests break when Phase N redesigned all headings — check actual template content before asserting
 - `dispatch_orchestration()` requires `window_name` as first arg

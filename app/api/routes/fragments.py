@@ -67,6 +67,7 @@ from data.trade_db import (
     delete_research_events,
     delete_rejected_trade_ideas,
     get_archived_trade_ideas,
+    get_archived_research_events,
     get_strategy_parameter_sets,
     get_strategy_promotions,
     update_job,
@@ -279,6 +280,17 @@ def archived_rejected_ideas_page(request: Request):
         request,
         "archive_rejected_ideas.html",
         {"request": request, "ideas": ideas, "title": "Archived Rejected Ideas"},
+    )
+
+
+@router.get("/archive/council-feed", response_class=HTMLResponse)
+def archived_council_feed_page(request: Request):
+    """Archive page showing all previously-cleared council feed analyses."""
+    events = get_archived_research_events(event_type="intel_analysis")
+    return TEMPLATES.TemplateResponse(
+        request,
+        "archive_council_feed.html",
+        {"request": request, "events": events, "title": "Archived Council Analyses"},
     )
 
 
