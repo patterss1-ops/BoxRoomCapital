@@ -59,6 +59,7 @@ def broker(mock_session):
         b.cst = "test_cst"
         b.security_token = "test_security"
         b.account_id = "ABC123"
+        b._lock = __import__("threading").RLock()
         b._deal_map = {}
         b._blocked_epics = set()
         b._connected = True

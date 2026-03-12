@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 import config
 from app.api import server
+from app.api import shared as _shared_mod
 from broker.base import AccountInfo
 
 
@@ -51,7 +52,7 @@ def _clear_fragment_caches() -> None:
 def test_broker_snapshot_cache_shared_across_fragments():
     stub = _BrokerStub()
     _clear_fragment_caches()
-    with patch.object(server, "_broker", stub):
+    with patch.object(_shared_mod, "_broker", stub):
         first = server._get_broker_snapshot()
         second = server._get_broker_snapshot()
 
@@ -65,7 +66,7 @@ def test_broker_snapshot_cache_shared_across_fragments():
 def test_market_browser_cache_avoids_repeat_market_fetches():
     stub = _BrokerStub()
     _clear_fragment_caches()
-    with patch.object(server, "_broker", stub):
+    with patch.object(_shared_mod, "_broker", stub):
         first = server._get_market_browser_context()
         second = server._get_market_browser_context()
 

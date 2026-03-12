@@ -335,7 +335,8 @@ class TestEquityCurveEndpoint:
     """The equity-curve endpoint is wired in server.py."""
 
     def test_equity_curve_route_defined(self):
-        path = os.path.join(PROJECT_ROOT, "app", "api", "server.py")
+        # Route moved from server.py to routes/research.py during refactor
+        path = os.path.join(PROJECT_ROOT, "app", "api", "routes", "research.py")
         with open(path) as f:
             src = f.read()
         assert "/api/charts/equity-curve" in src

@@ -41,6 +41,11 @@ def _fetch_technical_snapshot(ticker: str) -> Optional[dict]:
         if data.empty or len(data) < 50:
             return None
 
+        # yfinance >=0.2.31 returns MultiIndex columns for single tickers;
+        # flatten to simple column names so downstream .iloc[-1] yields scalars.
+        if isinstance(data.columns, __import__("pandas").MultiIndex):
+            data.columns = data.columns.get_level_values(0)
+
         close = data["Close"].iloc[-1]
         if hasattr(close, "item"):
             close = close.item()
