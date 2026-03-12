@@ -1,23 +1,6 @@
 {% set report = promotion_gate %}
 {% include "_promotion_gate.html" %}
 
-<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg mb-4">
-  <div class="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3">
-    <div>
-      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-600">Processing Loop</p>
-      <h2 class="text-lg font-semibold text-gray-900">Follow research as a workflow, not a widget wall.</h2>
-      <p class="mt-1 text-sm text-gray-500">
-        This section is ordered around what just came in, what is progressing, and what needs an operator call next.
-      </p>
-    </div>
-    <div class="flex flex-wrap gap-2 text-[11px] font-semibold uppercase tracking-wide">
-      <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-blue-200 bg-blue-50 text-blue-700">Intake Visible</span>
-      <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-amber-200 bg-amber-50 text-amber-700">Chains In Flight</span>
-      <span class="inline-flex items-center px-2.5 py-1 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">Decisions Actionable</span>
-    </div>
-  </div>
-</section>
-
 <section class="grid grid-cols-1 gap-4 mb-4">
   <div id="research-operating-summary"
        hx-get="/fragments/research/operating-summary"
@@ -29,30 +12,16 @@
        hx-swap="innerHTML"></div>
 </section>
 
-<section class="mb-4">
-  <div class="flex justify-between items-end gap-4 mb-3">
-    <div>
-      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-amber-600">Active Research</p>
-      <h2 class="text-lg font-semibold text-gray-900">System activity, chain flow, and decision queue</h2>
-      <p class="text-sm text-gray-500">What the platform is doing now, how far current work has progressed, and what needs attention.</p>
-    </div>
-  </div>
+<section class="grid grid-cols-1 gap-4 mb-4">
+  <div id="research-alerts"
+       hx-get="/fragments/research/alerts{% if selected_queue_lane != 'all' or selected_chain_id %}?{% if selected_queue_lane != 'all' %}queue_lane={{ selected_queue_lane }}{% endif %}{% if selected_chain_id %}{% if selected_queue_lane != 'all' %}&{% endif %}chain_id={{ selected_chain_id }}{% endif %}{% endif %}"
+       hx-trigger="load delay:300ms, every 10s"
+       hx-swap="innerHTML"></div>
+</section>
+
+<details open class="mb-4">
+  <summary class="text-[11px] font-semibold text-gray-700 uppercase tracking-wide cursor-pointer mb-3">Active Research</summary>
   <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
-    <div class="xl:col-span-4"
-         id="research-engine-status"
-         hx-get="/fragments/research/engine-status"
-         hx-trigger="load delay:100ms, every 10s"
-         hx-swap="innerHTML"></div>
-    <div class="xl:col-span-4"
-         id="research-pipeline-funnel"
-         hx-get="/fragments/research/pipeline-funnel"
-         hx-trigger="load delay:200ms, every 30s"
-         hx-swap="innerHTML"></div>
-    <div class="xl:col-span-4"
-         id="research-alerts"
-         hx-get="/fragments/research/alerts{% if selected_queue_lane != 'all' or selected_chain_id %}?{% if selected_queue_lane != 'all' %}queue_lane={{ selected_queue_lane }}{% endif %}{% if selected_chain_id %}{% if selected_queue_lane != 'all' %}&{% endif %}chain_id={{ selected_chain_id }}{% endif %}{% endif %}"
-         hx-trigger="load delay:300ms, every 10s"
-         hx-swap="innerHTML"></div>
     <div class="xl:col-span-8"
          id="research-active-hypotheses"
          hx-get="/fragments/research/active-hypotheses{% if selected_active_view != 'all' or selected_chain_id %}?{% if selected_active_view != 'all' %}active_view={{ selected_active_view }}{% endif %}{% if selected_chain_id %}{% if selected_active_view != 'all' %}&{% endif %}chain_id={{ selected_chain_id }}{% endif %}{% endif %}"
@@ -63,42 +32,48 @@
          hx-get="/fragments/research/recent-decisions"
          hx-trigger="load delay:500ms, every 30s"
          hx-swap="innerHTML"></div>
+    <div class="xl:col-span-4"
+         id="research-engine-status"
+         hx-get="/fragments/research/engine-status"
+         hx-trigger="load delay:100ms, every 10s"
+         hx-swap="innerHTML"></div>
+    <div class="xl:col-span-4"
+         id="research-pipeline-funnel"
+         hx-get="/fragments/research/pipeline-funnel"
+         hx-trigger="load delay:200ms, every 30s"
+         hx-swap="innerHTML"></div>
   </div>
-</section>
+</details>
 
-<section id="research-portfolio-expression">
-  <div class="flex justify-between items-end gap-4 mb-3">
-    <div>
-      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500">Portfolio Expression</p>
-      <h2 class="text-lg font-semibold text-gray-900">Regime, targets, and Engine A follow-through</h2>
-      <p class="text-sm text-gray-500">Once research is accepted, this is where portfolio intent, target changes, and rebalance actions appear.</p>
+<details class="mb-4">
+  <summary class="text-[11px] font-semibold text-gray-700 uppercase tracking-wide cursor-pointer mb-3">Portfolio Expression</summary>
+  <section id="research-portfolio-expression">
+    <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+      <div class="xl:col-span-8"
+           id="research-portfolio-targets"
+           hx-get="/fragments/research/portfolio-targets"
+           hx-trigger="load delay:550ms, every 15s"
+           hx-swap="innerHTML"></div>
+      <div class="xl:col-span-4"
+           id="research-rebalance-panel"
+           hx-get="/fragments/research/rebalance-panel"
+           hx-trigger="load delay:600ms, every 15s"
+           hx-swap="innerHTML"></div>
+      <div class="xl:col-span-4"
+           id="research-regime-panel"
+           hx-get="/fragments/research/regime-panel"
+           hx-trigger="load delay:650ms, every 15s"
+           hx-swap="innerHTML"></div>
+      <div class="xl:col-span-8"
+           id="research-signal-heatmap"
+           hx-get="/fragments/research/signal-heatmap"
+           hx-trigger="load delay:700ms, every 15s"
+           hx-swap="innerHTML"></div>
+      <div class="xl:col-span-12"
+           id="research-regime-journal"
+           hx-get="/fragments/research/regime-journal"
+           hx-trigger="load delay:750ms, every 30s"
+           hx-swap="innerHTML"></div>
     </div>
-  </div>
-  <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
-    <div class="xl:col-span-8"
-         id="research-portfolio-targets"
-         hx-get="/fragments/research/portfolio-targets"
-         hx-trigger="load delay:550ms, every 15s"
-         hx-swap="innerHTML"></div>
-    <div class="xl:col-span-4"
-         id="research-rebalance-panel"
-         hx-get="/fragments/research/rebalance-panel"
-         hx-trigger="load delay:600ms, every 15s"
-         hx-swap="innerHTML"></div>
-    <div class="xl:col-span-4"
-         id="research-regime-panel"
-         hx-get="/fragments/research/regime-panel"
-         hx-trigger="load delay:650ms, every 15s"
-         hx-swap="innerHTML"></div>
-    <div class="xl:col-span-8"
-         id="research-signal-heatmap"
-         hx-get="/fragments/research/signal-heatmap"
-         hx-trigger="load delay:700ms, every 15s"
-         hx-swap="innerHTML"></div>
-    <div class="xl:col-span-12"
-         id="research-regime-journal"
-         hx-get="/fragments/research/regime-journal"
-         hx-trigger="load delay:750ms, every 30s"
-         hx-swap="innerHTML"></div>
-  </div>
-</section>
+  </section>
+</details>

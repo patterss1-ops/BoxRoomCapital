@@ -76,10 +76,10 @@
 
     <!-- Tabbed: Market Browser / Broker / Risk Controls -->
     <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="left-tabs">
-        <button onclick="switchTab('left','tab-markets')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-markets">Markets</button>
-        <button onclick="switchTab('left','tab-broker')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-broker">Broker</button>
-        <button onclick="switchTab('left','tab-risk')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-risk">Risk Ctrl</button>
+      <div class="flex gap-1 bg-gray-100 rounded-lg p-1 mb-1.5 flex-shrink-0" id="left-tabs">
+        <button onclick="switchTab('left','tab-markets')" class="px-3 py-1.5 text-[11px] font-semibold rounded-md bg-gray-900 text-white shadow-sm" data-tab="tab-markets">Markets</button>
+        <button onclick="switchTab('left','tab-broker')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-broker">Broker</button>
+        <button onclick="switchTab('left','tab-risk')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-risk">Risk Ctrl</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-markets" class="active" id="market-browser-panel" hx-get="/fragments/market-browser" hx-trigger="load delay:500ms, every 30s" hx-swap="innerHTML"></div>
@@ -129,11 +129,11 @@
 
     <!-- Tabbed: Positions / Orders / Reconcile -->
     <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="right-tabs">
-        <button onclick="switchTab('right','tab-positions')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-positions">Positions</button>
-        <button onclick="switchTab('right','tab-orders')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-orders">Orders</button>
-        <button onclick="switchTab('right','tab-status')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-status">Status</button>
-        <button onclick="switchTab('right','tab-reconcile')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-reconcile">Recon</button>
+      <div class="flex gap-1 bg-gray-100 rounded-lg p-1 mb-1.5 flex-shrink-0" id="right-tabs">
+        <button onclick="switchTab('right','tab-positions')" class="px-3 py-1.5 text-[11px] font-semibold rounded-md bg-gray-900 text-white shadow-sm" data-tab="tab-positions">Positions</button>
+        <button onclick="switchTab('right','tab-orders')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-orders">Orders</button>
+        <button onclick="switchTab('right','tab-status')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-status">Status</button>
+        <button onclick="switchTab('right','tab-reconcile')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-reconcile">Recon</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-positions" class="active" id="open-positions-panel" hx-get="/fragments/open-positions" hx-trigger="load delay:500ms, every 10s" hx-swap="innerHTML"></div>
@@ -145,13 +145,13 @@
 
     <!-- Tabbed: Control Actions / Broker Health / Intent Audit / Ledger -->
     <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="right2-tabs">
-        <button onclick="switchTab('right2','tab-brief')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-brief">Brief</button>
-        <button onclick="switchTab('right2','tab-ctrl')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-ctrl">Actions</button>
-        <button onclick="switchTab('right2','tab-pipeline')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-pipeline">Pipeline</button>
-        <button onclick="switchTab('right2','tab-health')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-health">Health</button>
-        <button onclick="switchTab('right2','tab-audit')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-audit">Audit</button>
-        <button onclick="switchTab('right2','tab-ledger')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-ledger">Ledger</button>
+      <div class="flex gap-1 bg-gray-100 rounded-lg p-1 mb-1.5 flex-shrink-0" id="right2-tabs">
+        <button onclick="switchTab('right2','tab-brief')" class="px-3 py-1.5 text-[11px] font-semibold rounded-md bg-gray-900 text-white shadow-sm" data-tab="tab-brief">Brief</button>
+        <button onclick="switchTab('right2','tab-ctrl')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-ctrl">Actions</button>
+        <button onclick="switchTab('right2','tab-pipeline')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-pipeline">Pipeline</button>
+        <button onclick="switchTab('right2','tab-health')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-health">Health</button>
+        <button onclick="switchTab('right2','tab-audit')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-audit">Audit</button>
+        <button onclick="switchTab('right2','tab-ledger')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-ledger">Ledger</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-brief" class="active" id="market-brief-panel" hx-get="/fragments/market-brief" hx-trigger="load delay:300ms" hx-swap="innerHTML"></div>

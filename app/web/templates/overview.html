@@ -53,11 +53,11 @@
 
     <!-- Tabbed: Status / Events / Incidents / Jobs -->
     <div class="bg-white border border-gray-200 rounded-md p-1.5 flex-1 overflow-hidden flex flex-col">
-      <div class="flex gap-0 border-b border-gray-200 mb-1.5 flex-shrink-0" id="center-tabs">
-        <button onclick="switchTab('center','tab-status')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-status">Status</button>
-        <button onclick="switchTab('center','tab-events')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-events">Events</button>
-        <button onclick="switchTab('center','tab-incidents')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-incidents">Incidents</button>
-        <button onclick="switchTab('center','tab-jobs')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-jobs">Jobs</button>
+      <div class="flex gap-1 bg-gray-100 rounded-lg p-1 mb-1.5 flex-shrink-0" id="center-tabs">
+        <button onclick="switchTab('center','tab-status')" class="px-3 py-1.5 text-[11px] font-semibold rounded-md bg-gray-900 text-white shadow-sm" data-tab="tab-status">Status</button>
+        <button onclick="switchTab('center','tab-events')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-events">Events</button>
+        <button onclick="switchTab('center','tab-incidents')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-incidents">Incidents</button>
+        <button onclick="switchTab('center','tab-jobs')" class="px-3 py-1.5 text-[11px] text-gray-500 hover:text-gray-800 hover:bg-gray-100 rounded-md" data-tab="tab-jobs">Jobs</button>
       </div>
       <div class="flex-1 overflow-y-auto">
         <div data-tab-content="tab-status" class="active" id="status-panel" hx-get="/fragments/status" hx-trigger="load, every 8s" hx-swap="innerHTML"></div>
