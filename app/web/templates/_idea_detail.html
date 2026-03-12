@@ -1,17 +1,17 @@
 <div class="bg-white border border-gray-200 rounded-md p-2 space-y-1.5 overflow-hidden">
   <!-- Header -->
-  <div class="flex items-center justify-between gap-1 min-w-0">
-    <div class="flex items-center gap-2 min-w-0 flex-1">
+  <div class="space-y-0.5">
+    <div class="flex items-center gap-1.5 flex-wrap">
       <span class="text-[11px] font-mono font-bold text-gray-800">{{ idea.ticker }}</span>
       {% if idea.direction == 'long' %}
-      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">LONG</span>
+      <span class="inline-flex items-center px-1 py-0.5 rounded-sm text-[9px] font-bold uppercase border bg-emerald-500/15 text-emerald-400 border-emerald-500/30">LONG</span>
       {% elif idea.direction == 'short' %}
-      <span class="inline-flex items-center px-1.5 py-0.5 rounded-sm text-[10px] font-bold uppercase border bg-red-500/15 text-red-400 border-red-500/30">SHORT</span>
+      <span class="inline-flex items-center px-1 py-0.5 rounded-sm text-[9px] font-bold uppercase border bg-red-500/15 text-red-400 border-red-500/30">SHORT</span>
       {% endif %}
-      <span class="text-[10px] {% if idea.conviction == 'high' %}text-emerald-400{% elif idea.conviction == 'medium' %}text-amber-400{% else %}text-gray-500{% endif %} font-semibold uppercase">{{ idea.conviction }}</span>
-      <span class="text-[10px] text-gray-400">{{ idea.timeframe or '' }}</span>
+      <span class="text-[9px] {% if idea.conviction == 'high' %}text-emerald-400{% elif idea.conviction == 'medium' %}text-amber-400{% else %}text-gray-500{% endif %} font-semibold uppercase">{{ idea.conviction }}</span>
+      {% if idea.timeframe %}<span class="text-[9px] text-gray-400">{{ idea.timeframe }}</span>{% endif %}
     </div>
-    <span class="text-[10px] text-gray-400 font-mono truncate flex-shrink-0 max-w-[80px]" title="{{ (idea.created_at or '')[:16] }}">{{ (idea.created_at or '')[:10] }}</span>
+    <div class="text-[9px] text-gray-400 font-mono" title="{{ idea.created_at or '' }}">{{ (idea.created_at or '')[:16] }}</div>
   </div>
 
   <!-- Thesis -->
