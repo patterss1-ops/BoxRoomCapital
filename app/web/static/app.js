@@ -558,9 +558,10 @@
     }
 
     if (operatorSection) {
-      const visible = normalized === 'all'
+      const hasOperatorCards = cards.some(function (n) { return (n.getAttribute('data-active-view-card') || '') === 'operator'; });
+      const visible = hasOperatorCards && (normalized === 'all'
         || normalized === 'operator'
-        || ((normalized === 'focus' || normalized === 'stale') && visibleOperatorCards > 0);
+        || ((normalized === 'focus' || normalized === 'stale') && visibleOperatorCards > 0));
       operatorSection.classList.toggle('hidden', !visible);
     }
 
