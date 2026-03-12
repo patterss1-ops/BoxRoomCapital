@@ -354,4 +354,15 @@
 **Key files touched:** CLAUDE.md, .claude/history/SESSION_LOG.md, tests/test_regression_ig_broker.py, tests/test_ui_fragment_caching.py, tests/test_phase_n_ui.py, tests/test_signal_engine_e2e.py, intelligence/jobs/technical_job.py
 
 **Current state:** All 2756 tests green. Git clean. Multi-agent workflow documented.
-**Next steps:** Push, then resume feature work or address remaining vision gaps
+
+**Workflow setup (commit 8795f57 + f826515):**
+- Moved session history from `.claude/history/` (gitignored) to `ops/history/` (tracked in git)
+- Added multi-agent coordination protocol to CLAUDE.md:
+  - Agent roles: Claude Code desktop (deep work), Claude Code mobile (reviews/planning), Codex (autonomous tickets), Replit Agent (UI/ops)
+  - Git discipline: pull first, push last, check log before changes
+  - Conflict prevention: file ownership, high-contention file awareness
+  - Retiring Replit shell sessions for Claude Code — use native apps instead
+- Updated architecture docs for post-refactor route structure
+- User git education: explained commit, push, pull, branch, merge, PR concepts
+
+**Next steps:** Resume feature work or address remaining vision gaps. User transitioning to Claude Code iPhone app as primary mobile interface.
