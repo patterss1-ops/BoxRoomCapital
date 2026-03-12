@@ -206,7 +206,7 @@
 
     <div class="space-y-3">
       <!-- Needs Action section -->
-      <div class="{% if active_view == 'flow' or (active_view == 'focus' and ns.operator_focus_count == 0) or (active_view == 'stale' and ns.operator_stale_count == 0) %} hidden{% endif %}" data-active-view-section="operator">
+      <div class="{% if not operator_rows or active_view == 'flow' or (active_view == 'focus' and ns.operator_focus_count == 0) or (active_view == 'stale' and ns.operator_stale_count == 0) %} hidden{% endif %}" data-active-view-section="operator">
         {% if operator_rows %}
           <h3 class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">Needs Action ({{ operator_count }})</h3>
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
@@ -214,8 +214,6 @@
               {{ render_chain_card(row, "operator", ns.focus_chain_ids, active_view) }}
             {% endfor %}
           </div>
-        {% else %}
-          <p class="text-xs text-gray-400 py-2">No chains need operator action right now.</p>
         {% endif %}
       </div>
 
