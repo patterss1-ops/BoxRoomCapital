@@ -66,6 +66,7 @@ from data.trade_db import (
     get_idea_transitions,
     delete_research_events,
     delete_rejected_trade_ideas,
+    get_archived_trade_ideas,
     get_strategy_parameter_sets,
     get_strategy_promotions,
     update_job,
@@ -267,6 +268,17 @@ def intel_council_page(request: Request):
         request,
         "intel_council_page.html",
         _page_context(request=request, page_key="intel", title="Intel Council | Trading Bot"),
+    )
+
+
+@router.get("/archive/rejected-ideas", response_class=HTMLResponse)
+def archived_rejected_ideas_page(request: Request):
+    """Simple archive page showing all previously-rejected trade ideas."""
+    ideas = get_archived_trade_ideas()
+    return TEMPLATES.TemplateResponse(
+        request,
+        "archive_rejected_ideas.html",
+        {"request": request, "ideas": ideas, "title": "Archived Rejected Ideas"},
     )
 
 
@@ -1028,15 +1040,23 @@ def idea_pipeline_board_fragment(request: Request):
 @router.post("/api/intel/clear-feed", response_class=JSONResponse)
 def clear_intel_council_feed(request: Request):
     """Delete all intel_analysis events from the council feed."""
-    deleted = delete_research_events(event_type="intel_analysis")
-    return JSONResponse({"ok": True, "deleted": deleted})
+    try:
+        deleted = delete_research_events(event_type="intel_analysis")
+        return JSONResponse({"ok": True, "deleted": deleted})
+    except Exception as exc:
+        logger.exception("clear_intel_council_feed failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @router.post("/api/ideas/clear-rejected", response_class=JSONResponse)
 def clear_rejected_ideas(request: Request):
     """Delete all rejected trade ideas."""
-    deleted = delete_rejected_trade_ideas()
-    return JSONResponse({"ok": True, "deleted": deleted})
+    try:
+        deleted = delete_rejected_trade_ideas()
+        return JSONResponse({"ok": True, "deleted": deleted})
+    except Exception as exc:
+        logger.exception("clear_rejected_ideas failed")
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 # ─── SSE stream ──────────────────────────────────────────────────────────────
