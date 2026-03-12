@@ -34,11 +34,14 @@ This project is developed by multiple AI agents and the human operator. **Git is
 
 ### Agent roles and boundaries
 
-| Agent | Best for | Avoid |
-|-------|----------|-------|
-| **Claude Code (desk)** | Architecture, multi-file features, debugging, test fixing, deep work | — |
-| **Codex (portable)** | Scoped tickets with clear file boundaries, code review, small fixes | Large refactors without TASK_QUEUE ticket |
-| **Replit Agent (browser)** | UI/UX work, running the app, quick visual fixes, ops patches | Core module refactors, touching >3 files without coordination |
+| Agent | Environment | Best for | Avoid |
+|-------|-------------|----------|-------|
+| **Claude Code (desktop)** | Mac terminal | Architecture, multi-file features, debugging, test fixing, deep work | — |
+| **Claude Code (mobile)** | iPhone app | Code review, status checks, scoped fixes, planning, context queries | Large multi-file refactors (small screen) |
+| **Codex (portable)** | Mac/iPhone app | Scoped tickets with clear file boundaries, autonomous background tasks | Large refactors without TASK_QUEUE ticket |
+| **Replit Agent (browser)** | Replit web/app | UI/UX work, running the app, quick visual fixes, ops patches | Core module refactors, touching >3 files without coordination |
+
+> **Retiring Replit shell sessions for Claude Code** — use the Claude Code desktop/mobile apps instead. Replit shells are unreliable (periodic shutdowns) and harder to use on mobile.
 
 ### Git discipline (ALL agents)
 
