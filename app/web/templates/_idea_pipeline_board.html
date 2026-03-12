@@ -12,7 +12,7 @@
     <div class="grid grid-cols-5 gap-1.5 p-1.5">
       {% for stage_name in ['idea', 'review', 'backtest', 'paper', 'live'] %}
       {% set stage_data = stats.stages.get(stage_name, {}) %}
-      <div class="bg-white/50 border border-gray-200 rounded-md p-1.5 min-h-[100px]">
+      <div class="bg-white/50 border border-gray-200 rounded-md p-1.5 min-h-[100px] overflow-hidden">
         <!-- Column header -->
         <div class="flex items-center justify-between mb-1.5">
           <span class="text-[10px] font-semibold uppercase tracking-wide
