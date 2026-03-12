@@ -33,6 +33,16 @@ def _get_advisory_engine():
 
 # ── JSON API routes ──────────────────────────────────────────────────────────
 
+
+@router.post("/api/advisory/toggle")
+def toggle_advisor(request: Request):
+    """Toggle ADVISOR_ENABLED on/off at runtime."""
+    config.ADVISOR_ENABLED = not config.ADVISOR_ENABLED
+    state = "on" if config.ADVISOR_ENABLED else "off"
+    logger.info("Advisor toggled %s", state)
+    return JSONResponse({"ok": True, "advisor_enabled": config.ADVISOR_ENABLED})
+
+
 @router.get("/api/advisory/holdings")
 def advisory_holdings_api(wrapper: str = None):
     """Current holdings by wrapper."""
