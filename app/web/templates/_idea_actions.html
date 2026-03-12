@@ -81,7 +81,11 @@
     Start Research
   </button>
   {% elif research_steps|selectattr('status', 'equalto', 'running')|list %}
-  <span class="text-[9px] text-amber-400 animate-pulse flex items-center gap-1">
+  <span class="text-[9px] text-amber-400 animate-pulse flex items-center gap-1"
+        hx-get="/fragments/idea-actions/{{ idea.id }}"
+        hx-target="#idea-stage-{{ idea.id }}"
+        hx-swap="innerHTML"
+        hx-trigger="every 3s">
     <svg class="animate-spin h-2.5 w-2.5" viewBox="0 0 24 24" fill="none">
       <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
       <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
@@ -129,7 +133,11 @@
       Run Backtest
     </button>
     {% if idea.backtest_job_id %}
-    <span class="text-[9px] text-amber-400 animate-pulse flex items-center gap-1">
+    <span class="text-[9px] text-amber-400 animate-pulse flex items-center gap-1"
+          hx-get="/fragments/idea-actions/{{ idea.id }}"
+          hx-target="#idea-stage-{{ idea.id }}"
+          hx-swap="innerHTML"
+          hx-trigger="every 3s">
       <svg class="animate-spin h-2.5 w-2.5" viewBox="0 0 24 24" fill="none">
         <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" class="opacity-25"/>
         <path fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" class="opacity-75"/>
@@ -183,6 +191,9 @@
 
   {% elif stage == 'rejected' %}
     <span class="text-[10px] text-red-400">Rejected{% if idea.rejection_reason %}: {{ idea.rejection_reason }}{% endif %}</span>
+    {% if idea.review_verdict and idea.review_score %}
+    <span class="text-[9px] text-gray-400 ml-1">(verdict: {{ idea.review_verdict }}, score: {{ "%.1f"|format(idea.review_score or 0) }}/10)</span>
+    {% endif %}
     <button hx-post="/api/ideas/{{ idea.id }}/promote"
             hx-vals='{"target_stage": "idea", "reason": "Resurrected"}'
             hx-headers='{"Content-Type": "application/json"}'

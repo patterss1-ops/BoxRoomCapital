@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import logging
@@ -1254,11 +1255,13 @@ async def sa_intel_webhook(request: Request):
 
     Expects JSON with: title, content, url, tickers (optional), author (optional).
     Runs LLM council analysis in background and returns job ID.
+    Sync work (DB writes, job enqueue) runs in threadpool.
     """
     payload = await _decode_json_request(request, max_bytes=256_000)
     if isinstance(payload, JSONResponse):
         return payload
-    return _queue_sa_intel_payload(
+    return await asyncio.to_thread(
+        _queue_sa_intel_payload,
         payload,
         capture_source=str(payload.get("source") or SA_BROWSER_CAPTURE_SOURCE).strip() or SA_BROWSER_CAPTURE_SOURCE,
         log_strategy="sa_intel",
@@ -1799,136 +1802,156 @@ def bookmarklet_install(request: Request):
 
 @router.post("/api/intel/submit", response_class=HTMLResponse)
 async def intel_submit(request: Request):
-    """Submit content directly from the UI for council analysis."""
+    """Submit content directly from the UI for council analysis.
+
+    Blocking work (tweet fetch, DB writes, job enqueue) runs in threadpool
+    to avoid stalling the async event loop.
+    """
     form = await request.form()
     content = form.get("content", "").strip()
     if not content:
         return HTMLResponse('<span class="text-[11px] text-red-400">Please enter some content.</span>')
 
-    # Detect if it's an X link
-    urls = _re.findall(r'https?://\S+', content)
-    url = urls[0] if urls else ""
-    is_x = any(d in content for d in ["twitter.com/", "x.com/", "nitter.", "vxtwitter.com/"])
+    def _do_submit(content_text: str):
+        # Detect if it's an X link
+        urls = _re.findall(r'https?://\S+', content_text)
+        url = urls[0] if urls else ""
+        is_x = any(d in content_text for d in ["twitter.com/", "x.com/", "nitter.", "vxtwitter.com/"])
 
-    # If X link, try to fetch the tweet
-    if is_x and url:
-        tweet_data = _fetch_tweet_from_url(url)
-        if tweet_data:
-            content = tweet_data["text"]
-            if tweet_data.get("author"):
-                content = f"@{tweet_data['author']}: {content}"
-            if tweet_data.get("created_at"):
-                content += f"\n\n[Posted: {tweet_data['created_at']}]"
+        # If X link, try to fetch the tweet
+        if is_x and url:
+            tweet_data = _fetch_tweet_from_url(url)
+            if tweet_data:
+                content_text = tweet_data["text"]
+                if tweet_data.get("author"):
+                    content_text = f"@{tweet_data['author']}: {content_text}"
+                if tweet_data.get("created_at"):
+                    content_text += f"\n\n[Posted: {tweet_data['created_at']}]"
 
-    submission = IntelSubmission(
-        source="x_twitter" if is_x else "manual",
-        content=content,
-        url=url,
-        title="Manual submission" if not is_x else "Forwarded via UI",
-    )
-    engine_b_result = None
+        submission = IntelSubmission(
+            source="x_twitter" if is_x else "manual",
+            content=content_text,
+            url=url,
+            title="Manual submission" if not is_x else "Forwarded via UI",
+        )
 
-    if config.RESEARCH_SYSTEM_ACTIVE:
+        if config.RESEARCH_SYSTEM_ACTIVE:
+            engine_b_result = _queue_engine_b_intake(
+                raw_content=_build_engine_b_submission_content(submission),
+                source_class="social_curated",
+                source_ids=[
+                    submission.url or "",
+                    *submission.tickers,
+                    f"ui:{uuid.uuid4().hex[:8]}",
+                ],
+                detail=f"UI research intake: {content_text[:80]}",
+            )
+            if not engine_b_result.get("ok"):
+                return (
+                    "error",
+                    f'Engine B enqueue failed: '
+                    f'{engine_b_result.get("detail") or engine_b_result.get("error", "unknown")}',
+                )
+            return (
+                "ok",
+                f'Queued for Engine B research '
+                f'(job {str(engine_b_result["job_id"])[:8]}). Results will appear in /research.',
+            )
+
+        job_id = _queue_council_analysis(
+            submission,
+            detail=f"UI intel: {content_text[:80]}",
+        )
         engine_b_result = _queue_engine_b_intake(
             raw_content=_build_engine_b_submission_content(submission),
             source_class="social_curated",
             source_ids=[
                 submission.url or "",
                 *submission.tickers,
-                f"ui:{uuid.uuid4().hex[:8]}",
+                f"ui:{job_id[:8]}",
             ],
-            detail=f"UI research intake: {content[:80]}",
+            detail=f"UI research intake mirror: {content_text[:80]}",
         )
         if not engine_b_result.get("ok"):
-            return HTMLResponse(
-                f'<span class="text-[11px] text-red-400">Engine B enqueue failed: '
-                f'{html.escape(engine_b_result.get("detail") or engine_b_result.get("error", "unknown"))}.</span>'
+            logger.warning(
+                "Engine B mirror enqueue failed for UI intel job %s: %s",
+                job_id,
+                engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
             )
-        return HTMLResponse(
-            f'<span class="text-[11px] text-emerald-400">Queued for Engine B research '
-            f'(job {str(engine_b_result["job_id"])[:8]}). Results will appear in /research.</span>'
+
+        return (
+            "ok",
+            f'Queued for analysis (job {job_id[:8]}). Results will appear in the feed.',
         )
 
-    job_id = _queue_council_analysis(
-        submission,
-        detail=f"UI intel: {content[:80]}",
-    )
-    engine_b_result = _queue_engine_b_intake(
-        raw_content=_build_engine_b_submission_content(submission),
-        source_class="social_curated",
-        source_ids=[
-            submission.url or "",
-            *submission.tickers,
-            f"ui:{job_id[:8]}",
-        ],
-        detail=f"UI research intake mirror: {content[:80]}",
-    )
-    if not engine_b_result.get("ok"):
-        logger.warning(
-            "Engine B mirror enqueue failed for UI intel job %s: %s",
-            job_id,
-            engine_b_result.get("detail") or engine_b_result.get("error", "unknown"),
-        )
-
-    return HTMLResponse(
-        f'<span class="text-[11px] text-emerald-400">Queued for analysis (job {job_id[:8]}). '
-        f'Results will appear in the feed.</span>'
-    )
+    status, msg = await asyncio.to_thread(_do_submit, content)
+    if status == "error":
+        return HTMLResponse(f'<span class="text-[11px] text-red-400">{html.escape(msg)}</span>')
+    return HTMLResponse(f'<span class="text-[11px] text-emerald-400">{html.escape(msg)}</span>')
 
 
 @router.post("/api/intel/challenge", response_class=HTMLResponse)
 async def intel_challenge(request: Request):
-    """User challenges/questions a council analysis -- re-runs through LLM council with context."""
+    """User challenges/questions a council analysis -- re-runs through LLM council with context.
+
+    Event store reads and council job enqueue run in threadpool
+    to avoid blocking the async event loop.
+    """
     form = await request.form()
     analysis_id = form.get("analysis_id", "")
     challenge_text = form.get("challenge_text", "").strip()
     if not challenge_text:
         return HTMLResponse('<span class="text-[11px] text-red-400">Please enter a challenge or question.</span>')
 
-    # Find the original analysis
-    from intelligence.event_store import EventStore
-    es = EventStore()
-    events = es.list_events(limit=50, event_type="intel_analysis")
+    def _do_challenge():
+        from intelligence.event_store import EventStore
+        es = EventStore()
+        events = es.list_events(limit=50, event_type="intel_analysis")
 
-    original = None
-    for ev in events:
-        payload = ev.get("payload", {}) if isinstance(ev, dict) else {}
-        if isinstance(payload, str):
-            try:
-                payload = json.loads(payload)
-            except Exception:
-                continue
-        if payload.get("analysis_id") == analysis_id:
-            original = payload
-            break
+        original = None
+        for ev in events:
+            payload = ev.get("payload", {}) if isinstance(ev, dict) else {}
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except Exception:
+                    continue
+            if payload.get("analysis_id") == analysis_id:
+                original = payload
+                break
 
-    if not original:
+        if not original:
+            return None, None
+
+        challenge_content = (
+            f"ORIGINAL ANALYSIS:\n"
+            f"Source: {original.get('source', '')}\n"
+            f"Title: {original.get('title', '')}\n"
+            f"Summary: {original.get('summary', '')}\n"
+            f"Trade ideas: {json.dumps(original.get('trade_ideas', []))}\n"
+            f"Risk factors: {json.dumps(original.get('risk_factors', []))}\n\n"
+            f"USER CHALLENGE:\n{challenge_text}\n\n"
+            f"Please respond to the user's challenge. Re-evaluate the original analysis considering their point. "
+            f"If they raise valid concerns, adjust your assessment. Be specific about what changes and what doesn't."
+        )
+
+        submission = IntelSubmission(
+            source="challenge",
+            content=challenge_content,
+            url=original.get("url", ""),
+            title=f"Challenge: {original.get('title', '')[:60]}",
+        )
+
+        job_id = _queue_council_analysis(
+            submission,
+            detail=f"Challenge: {challenge_text[:80]}",
+        )
+        return job_id, None
+
+    job_id, _ = await asyncio.to_thread(_do_challenge)
+
+    if job_id is None:
         return HTMLResponse('<span class="text-[11px] text-red-400">Original analysis not found.</span>')
-
-    # Build challenge content with original context
-    challenge_content = (
-        f"ORIGINAL ANALYSIS:\n"
-        f"Source: {original.get('source', '')}\n"
-        f"Title: {original.get('title', '')}\n"
-        f"Summary: {original.get('summary', '')}\n"
-        f"Trade ideas: {json.dumps(original.get('trade_ideas', []))}\n"
-        f"Risk factors: {json.dumps(original.get('risk_factors', []))}\n\n"
-        f"USER CHALLENGE:\n{challenge_text}\n\n"
-        f"Please respond to the user's challenge. Re-evaluate the original analysis considering their point. "
-        f"If they raise valid concerns, adjust your assessment. Be specific about what changes and what doesn't."
-    )
-
-    submission = IntelSubmission(
-        source="challenge",
-        content=challenge_content,
-        url=original.get("url", ""),
-        title=f"Challenge: {original.get('title', '')[:60]}",
-    )
-
-    job_id = _queue_council_analysis(
-        submission,
-        detail=f"Challenge: {challenge_text[:80]}",
-    )
 
     return HTMLResponse(
         f'<span class="text-[11px] text-emerald-400">Challenge sent to council (job {job_id[:8]}). '

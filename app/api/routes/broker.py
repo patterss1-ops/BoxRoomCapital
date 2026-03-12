@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -276,6 +277,10 @@ def api_broker_markets():
 
 @router.post("/api/broker/open-position")
 async def api_broker_open_position(request: Request):
+    """Open a position via broker API.
+
+    Broker API calls run in threadpool to avoid blocking the async event loop.
+    """
     if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return JSONResponse({"error": "Not connected"}, status_code=400)
 
@@ -289,21 +294,23 @@ async def api_broker_open_position(request: Request):
     if direction not in ("BUY", "SELL"):
         return JSONResponse({"error": "direction must be BUY or SELL"}, status_code=400)
 
-    # Resolve ticker from epic (reverse lookup), or use epic as ticker
-    ticker = epic
-    for t, info in config.MARKET_MAP.items():
-        if info["epic"] == epic:
-            ticker = t
-            break
+    def _do_open():
+        # Resolve ticker from epic (reverse lookup), or use epic as ticker
+        ticker = epic
+        for t, info in config.MARKET_MAP.items():
+            if info["epic"] == epic:
+                ticker = t
+                break
 
-    if ticker != epic:
-        # Use place_long/place_short which handle stop distances etc.
-        if direction == "BUY":
-            result = _shared_mod._broker.place_long(ticker, size, "api_manual")
+        if ticker != epic:
+            if direction == "BUY":
+                return _shared_mod._broker.place_long(ticker, size, "api_manual")
+            else:
+                return _shared_mod._broker.place_short(ticker, size, "api_manual")
         else:
-            result = _shared_mod._broker.place_short(ticker, size, "api_manual")
-    else:
-        result = _shared_mod._broker._place_option_leg(epic, direction, size, epic, "api_manual")
+            return _shared_mod._broker._place_option_leg(epic, direction, size, epic, "api_manual")
+
+    result = await asyncio.to_thread(_do_open)
 
     return {
         "ok": result.success,
@@ -316,6 +323,10 @@ async def api_broker_open_position(request: Request):
 
 @router.post("/api/broker/close-position")
 async def api_broker_close_position(request: Request):
+    """Close a position via broker API.
+
+    Broker API calls + time.sleep run in threadpool to avoid blocking the event loop.
+    """
     if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return JSONResponse({"error": "Not connected"}, status_code=400)
 
@@ -325,41 +336,48 @@ async def api_broker_close_position(request: Request):
     if not deal_id:
         return JSONResponse({"error": "deal_id required"}, status_code=400)
 
-    # Find the position to get direction and size
-    positions = _shared_mod._broker.get_positions()
-    target = None
-    for p in positions:
-        if p.deal_id == deal_id:
-            target = p
-            break
+    def _do_close():
+        # Find the position to get direction and size
+        positions = _shared_mod._broker.get_positions()
+        target = None
+        for p in positions:
+            if p.deal_id == deal_id:
+                target = p
+                break
 
-    if not target:
-        return JSONResponse({"error": f"No open position with deal_id={deal_id}"}, status_code=404)
+        if not target:
+            return None, f"No open position with deal_id={deal_id}"
 
-    close_direction = "SELL" if target.direction == "long" else "BUY"
-    close_payload = {
-        "dealId": deal_id,
-        "direction": close_direction,
-        "size": str(target.size),
-        "orderType": "MARKET",
-    }
+        close_direction = "SELL" if target.direction == "long" else "BUY"
+        close_payload = {
+            "dealId": deal_id,
+            "direction": close_direction,
+            "size": str(target.size),
+            "orderType": "MARKET",
+        }
 
-    r = _shared_mod._broker.session.post(
-        f"{_shared_mod._broker.base_url}/positions/otc",
-        json=close_payload,
-        headers={**_shared_mod._broker._headers("1"), "_method": "DELETE"},
-    )
+        r = _shared_mod._broker.session.post(
+            f"{_shared_mod._broker.base_url}/positions/otc",
+            json=close_payload,
+            headers={**_shared_mod._broker._headers("1"), "_method": "DELETE"},
+        )
 
-    if r.status_code != 200:
-        return JSONResponse({"ok": False, "error": f"HTTP {r.status_code}: {r.text[:200]}"}, status_code=502)
+        if r.status_code != 200:
+            return None, f"HTTP {r.status_code}: {r.text[:200]}"
 
-    import time
-    close_ref = r.json().get("dealReference", "")
-    if not close_ref:
-        return JSONResponse({"ok": False, "error": "No deal reference returned"}, status_code=502)
+        close_ref = r.json().get("dealReference", "")
+        if not close_ref:
+            return None, "No deal reference returned"
 
-    time.sleep(1)
-    result = _shared_mod._broker._confirm_deal(close_ref, target.ticker, target.strategy, target.size)
+        time.sleep(1)
+        return _shared_mod._broker._confirm_deal(close_ref, target.ticker, target.strategy, target.size), None
+
+    result, error = await asyncio.to_thread(_do_close)
+
+    if error:
+        status = 404 if "No open position" in error else 502
+        return JSONResponse({"ok": False, "error": error}, status_code=status)
+
     return {
         "ok": result.success,
         "deal_id": result.order_id,

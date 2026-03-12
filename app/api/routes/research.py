@@ -1,6 +1,7 @@
 """Research, strategy, engine control, ideas, and brief routes."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import threading
@@ -1873,10 +1874,11 @@ def get_idea_detail(idea_id: str):
 
 @router.post("/api/ideas/{idea_id}/promote")
 async def promote_idea_endpoint(idea_id: str, request: Request):
-    """Promote an idea to the next pipeline stage."""
+    """Promote an idea to the next pipeline stage.
+
+    DB writes run in threadpool to avoid blocking the async event loop.
+    """
     from intelligence.idea_pipeline import IdeaPipelineManager
-    mgr = IdeaPipelineManager()
-    # Accept both form data (HTMX) and JSON
     ct = request.headers.get("content-type", "")
     if "json" in ct:
         body = await request.json()
@@ -1885,7 +1887,12 @@ async def promote_idea_endpoint(idea_id: str, request: Request):
         body = dict(form)
     target = body.get("target_stage", "")
     reason = body.get("reason", "")
-    result = mgr.promote_idea(idea_id, target, actor="operator", reason=reason)
+
+    def _do():
+        mgr = IdeaPipelineManager()
+        return mgr.promote_idea(idea_id, target, actor="operator", reason=reason)
+
+    result = await asyncio.to_thread(_do)
     if not result.get("success"):
         return JSONResponse(result, status_code=400)
     return result
@@ -1893,9 +1900,10 @@ async def promote_idea_endpoint(idea_id: str, request: Request):
 
 @router.post("/api/ideas/{idea_id}/reject")
 async def reject_idea_endpoint(idea_id: str, request: Request):
-    """Reject an idea."""
-    from intelligence.idea_pipeline import IdeaPipelineManager
-    mgr = IdeaPipelineManager()
+    """Reject an idea.
+
+    DB writes run in threadpool to avoid blocking the async event loop.
+    """
     ct = request.headers.get("content-type", "")
     if "json" in ct:
         body = await request.json()
@@ -1903,7 +1911,13 @@ async def reject_idea_endpoint(idea_id: str, request: Request):
         form = await request.form()
         body = dict(form)
     reason = body.get("reason", "")
-    result = mgr.reject_idea(idea_id, reason=reason, actor="operator")
+
+    def _do():
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        return mgr.reject_idea(idea_id, reason=reason, actor="operator")
+
+    result = await asyncio.to_thread(_do)
     if not result.get("success"):
         return JSONResponse(result, status_code=400)
     return result
@@ -1941,9 +1955,10 @@ def start_idea_paper(idea_id: str):
 
 @router.post("/api/ideas/{idea_id}/paper/close")
 async def close_idea_paper(idea_id: str, request: Request):
-    """Close a paper trade."""
-    from intelligence.idea_pipeline import IdeaPipelineManager
-    mgr = IdeaPipelineManager()
+    """Close a paper trade.
+
+    DB writes run in threadpool to avoid blocking the async event loop.
+    """
     ct = request.headers.get("content-type", "")
     if "json" in ct:
         body = await request.json()
@@ -1951,7 +1966,13 @@ async def close_idea_paper(idea_id: str, request: Request):
         form = await request.form()
         body = dict(form)
     reason = body.get("reason", "")
-    result = mgr.close_paper_trade(idea_id, reason=reason)
+
+    def _do():
+        from intelligence.idea_pipeline import IdeaPipelineManager
+        mgr = IdeaPipelineManager()
+        return mgr.close_paper_trade(idea_id, reason=reason)
+
+    result = await asyncio.to_thread(_do)
     if not result.get("success"):
         return JSONResponse(result, status_code=400)
     return result
@@ -1967,7 +1988,10 @@ def idea_paper_status(idea_id: str):
 
 @router.post("/api/ideas/{idea_id}/notes")
 async def update_idea_notes(idea_id: str, request: Request):
-    """Add user notes to an idea."""
+    """Add user notes to an idea.
+
+    DB writes run in threadpool to avoid blocking the async event loop.
+    """
     from data.trade_db import update_trade_idea
     ct = request.headers.get("content-type", "")
     if "json" in ct:
@@ -1976,12 +2000,19 @@ async def update_idea_notes(idea_id: str, request: Request):
         form = await request.form()
         body = dict(form)
     notes = body.get("notes", "")
-    idea = get_trade_idea(idea_id)
-    if not idea:
+
+    def _do():
+        idea = get_trade_idea(idea_id)
+        if not idea:
+            return None
+        existing = idea.get("user_notes") or ""
+        new_notes = f"{existing}\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {notes}".strip()
+        update_trade_idea(idea_id, user_notes=new_notes)
+        return True
+
+    result = await asyncio.to_thread(_do)
+    if result is None:
         return JSONResponse({"error": "Idea not found"}, status_code=404)
-    existing = idea.get("user_notes") or ""
-    new_notes = f"{existing}\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}] {notes}".strip()
-    update_trade_idea(idea_id, user_notes=new_notes)
     return {"success": True}
 
 
