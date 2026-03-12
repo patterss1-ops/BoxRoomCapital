@@ -29,6 +29,7 @@ from app.api.shared import (
     control,
     _get_cached_value,
     _get_or_create_broker,
+    _invalidate_cached_values,
 )
 from data.trade_db import (
     get_ledger_reconcile_report,
@@ -164,6 +165,7 @@ def api_broker_connect():
     broker, err = _get_or_create_broker()
     if not broker:
         return JSONResponse({"ok": False, "error": err}, status_code=400)
+    _invalidate_cached_values("broker-snapshot", "broker-health")
     info = broker.get_account_info()
     return {
         "ok": True,
