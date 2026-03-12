@@ -80,7 +80,15 @@
   <div class="border border-red-500/20 rounded-lg overflow-hidden">
     <div class="bg-red-500/5 px-2 py-1 border-b border-red-500/20 flex items-center justify-between">
       <span class="text-[10px] font-semibold text-red-400 uppercase tracking-wider">Rejected</span>
-      <span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400">{{ rejected.count or 0 }}</span>
+      <div class="flex items-center gap-2">
+        {% if (rejected.count or 0) > 0 %}
+        <button onclick="if(confirm('Clear all rejected ideas?')) fetch('/api/ideas/clear-rejected',{method:'POST'}).then(()=>{var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')})"
+                class="text-[10px] text-red-400/60 hover:text-red-500 px-1.5 py-0.5 rounded border border-red-300/30 hover:border-red-400/50 transition-colors">
+          Clear
+        </button>
+        {% endif %}
+        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold bg-red-500/20 text-red-400">{{ rejected.count or 0 }}</span>
+      </div>
     </div>
     {% if (rejected.count or 0) > 0 %}
     <div class="p-1.5">

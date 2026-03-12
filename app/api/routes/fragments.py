@@ -64,6 +64,8 @@ from data.trade_db import (
     get_trade_ideas,
     get_trade_ideas_by_analysis,
     get_idea_transitions,
+    delete_research_events,
+    delete_rejected_trade_ideas,
     get_strategy_parameter_sets,
     get_strategy_promotions,
     update_job,
@@ -1018,6 +1020,23 @@ def idea_pipeline_board_fragment(request: Request):
         "_idea_pipeline_board.html",
         {"request": request, "stats": stats, "stages": STAGES},
     )
+
+
+# ─── Clear / archive endpoints ────────────────────────────────────────────────
+
+
+@router.post("/api/intel/clear-feed", response_class=JSONResponse)
+def clear_intel_council_feed(request: Request):
+    """Delete all intel_analysis events from the council feed."""
+    deleted = delete_research_events(event_type="intel_analysis")
+    return JSONResponse({"ok": True, "deleted": deleted})
+
+
+@router.post("/api/ideas/clear-rejected", response_class=JSONResponse)
+def clear_rejected_ideas(request: Request):
+    """Delete all rejected trade ideas."""
+    deleted = delete_rejected_trade_ideas()
+    return JSONResponse({"ok": True, "deleted": deleted})
 
 
 # ─── SSE stream ──────────────────────────────────────────────────────────────

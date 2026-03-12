@@ -7,7 +7,7 @@ import hashlib
 import json
 from typing import Any, Optional
 
-from data.trade_db import DB_PATH, get_research_event, get_research_events, upsert_research_event
+from data.trade_db import DB_PATH, delete_research_events, get_research_event, get_research_events, upsert_research_event
 
 
 def _canonical_json(value: Any) -> str:
@@ -138,6 +138,13 @@ class EventStore:
             except (TypeError, ValueError):
                 pass
         return row
+
+    def clear_events(self, event_type: str = "") -> int:
+        """Delete events, optionally filtered by event_type. Returns count deleted."""
+        return delete_research_events(
+            event_type=event_type.strip().lower() or None,
+            db_path=self.db_path,
+        )
 
     def list_events(
         self,

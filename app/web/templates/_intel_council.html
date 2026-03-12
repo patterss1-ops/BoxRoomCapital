@@ -1,7 +1,15 @@
 <div class="space-y-2">
-  <div class="flex justify-between items-baseline mb-1">
+  <div class="flex justify-between items-center mb-1">
     <h3 class="text-xs font-semibold text-gray-700 uppercase tracking-wide">Council Feed</h3>
-    <span class="text-xs text-gray-400">{{ analyses|length }} analyses</span>
+    <div class="flex items-center gap-2">
+      <span class="text-xs text-gray-400">{{ analyses|length }} analyses</span>
+      {% if analyses %}
+      <button onclick="if(confirm('Clear all council analyses?')) fetch('/api/intel/clear-feed',{method:'POST'}).then(()=>htmx.ajax('GET','/fragments/intel-council','#intel-council-panel'))"
+              class="text-[10px] text-red-400/60 hover:text-red-500 px-1.5 py-0.5 rounded border border-red-300/30 hover:border-red-400/50 transition-colors">
+        Clear
+      </button>
+      {% endif %}
+    </div>
   </div>
 
   <!-- Active jobs banner -->

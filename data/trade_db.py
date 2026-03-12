@@ -1880,6 +1880,32 @@ def get_research_event(
     return dict(row) if row else None
 
 
+def delete_research_events(
+    event_type: Optional[str] = None,
+    db_path: str = DB_PATH,
+) -> int:
+    """Delete research events, optionally filtered by event_type. Returns count deleted."""
+    conn = get_conn(db_path)
+    if event_type:
+        cur = conn.execute("DELETE FROM research_events WHERE event_type=?", (event_type,))
+    else:
+        cur = conn.execute("DELETE FROM research_events")
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return deleted
+
+
+def delete_rejected_trade_ideas(db_path: str = DB_PATH) -> int:
+    """Delete all trade ideas in the 'rejected' pipeline stage. Returns count deleted."""
+    conn = get_conn(db_path)
+    cur = conn.execute("DELETE FROM trade_ideas WHERE pipeline_stage='rejected'")
+    conn.commit()
+    deleted = cur.rowcount
+    conn.close()
+    return deleted
+
+
 # ─── Order action state machine (execution reliability) ──────────────────
 
 def create_order_action(
