@@ -1,123 +1,90 @@
-<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg">
-  <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
-    <div>
-      <p class="text-[11px] font-semibold uppercase tracking-[0.2em] text-blue-600">Operating Summary</p>
-      <h2 class="text-lg font-semibold text-gray-900">What needs attention now</h2>
-      <p class="text-sm text-gray-500">A compressed view of queue pressure, chain freshness, and the latest operator-relevant activity.</p>
-    </div>
-    <p class="text-xs text-gray-400 font-mono">{{ generated_at }}</p>
-  </div>
-
+<section class="bg-white border border-gray-200 rounded-xl p-4">
   {% if error %}
-    <p class="text-sm text-amber-600 mb-3">{{ error }}</p>
+    <p class="text-xs text-amber-600 mb-2">{{ error }}</p>
   {% endif %}
 
-  <div class="grid grid-cols-1 xl:grid-cols-12 gap-4">
-    <div class="xl:col-span-5 border rounded-xl p-4 {% if focus_tone == 'urgent' %}border-red-200 bg-red-50{% elif focus_tone == 'warning' %}border-amber-200 bg-amber-50{% elif focus_tone == 'clear' %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %}">
-      <div class="flex justify-between gap-3 items-start">
+  <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+    <!-- Focus card -->
+    <div class="xl:col-span-5 border rounded-xl p-3 {% if focus_tone == 'urgent' %}border-red-200 bg-red-50{% elif focus_tone == 'warning' %}border-amber-200 bg-amber-50{% elif focus_tone == 'clear' %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %}">
+      <div class="flex items-start justify-between gap-2">
         <div>
-          <p class="text-[11px] uppercase tracking-wide {% if focus_tone == 'urgent' %}text-red-700{% elif focus_tone == 'warning' %}text-amber-700{% elif focus_tone == 'clear' %}text-emerald-700{% else %}text-gray-500{% endif %}">Focus Now</p>
-          <p class="mt-1 text-base font-semibold text-gray-900">{{ focus_title }}</p>
-          <p class="mt-2 text-sm text-gray-600">{{ focus_detail }}</p>
+          <p class="text-[11px] font-semibold uppercase tracking-wide {% if focus_tone == 'urgent' %}text-red-700{% elif focus_tone == 'warning' %}text-amber-700{% elif focus_tone == 'clear' %}text-emerald-700{% else %}text-gray-500{% endif %}">Focus Now</p>
+          <p class="mt-1 text-sm font-semibold text-gray-900">{{ focus_title }}</p>
+          <p class="mt-1 text-xs text-gray-600">{{ focus_detail }}</p>
         </div>
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if focus_tone == 'urgent' %}bg-red-500/15 text-red-500 border-red-500/30{% elif focus_tone == 'warning' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% elif focus_tone == 'clear' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ focus_tone }}</span>
+        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border {% if focus_tone == 'urgent' %}bg-red-100 text-red-600 border-red-200{% elif focus_tone == 'warning' %}bg-amber-100 text-amber-600 border-amber-200{% elif focus_tone == 'clear' %}bg-emerald-100 text-emerald-600 border-emerald-200{% else %}bg-gray-100 text-gray-500 border-gray-200{% endif %}">{{ focus_tone }}</span>
       </div>
-      <div class="mt-4 flex flex-wrap gap-2">
-        <a href="{{ focus_anchor }}" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1.5 rounded-lg border border-gray-300 transition-colors text-xs">Go To Focus Area</a>
-        <a href="#research-intake" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1.5 rounded-lg border border-gray-300 transition-colors text-xs">Open Intake</a>
+      <div class="mt-3 flex gap-2">
+        <a href="{{ focus_anchor }}" class="bg-white hover:bg-gray-50 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-200 transition-colors text-xs">Go To Focus</a>
+        <a href="#research-intake" class="text-xs text-gray-500 hover:text-gray-700 font-semibold px-3 py-1">+ New Intake</a>
       </div>
     </div>
 
-    <div class="xl:col-span-7 grid grid-cols-2 xl:grid-cols-4 gap-3">
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Active Chains</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ active_chain_count }}</p>
-        <p class="mt-1 text-xs text-gray-500">{{ freshness_counts.fresh }} fresh / {{ freshness_counts.aging }} aging / {{ freshness_counts.stale }} stale</p>
+    <!-- KPI cards -->
+    <div class="xl:col-span-7 grid grid-cols-2 xl:grid-cols-4 gap-2">
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-gray-500">Active Chains</p>
+        <p class="text-lg font-bold text-gray-900">{{ active_chain_count }}</p>
+        <p class="text-[10px] text-gray-400">{{ freshness_counts.fresh }}f / {{ freshness_counts.aging }}a / {{ freshness_counts.stale }}s</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Decision Queue</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ pending_review_count }}</p>
-        <p class="mt-1 text-xs text-gray-500">{{ urgent_review_count }} urgent / {{ watch_review_count }} watch</p>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-gray-500">Decision Queue</p>
+        <p class="text-lg font-bold text-gray-900">{{ pending_review_count }}</p>
+        <p class="text-[10px] text-gray-400">{{ urgent_review_count }} urgent</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Pilot Ready</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ pilot_ready_count }}</p>
-        <p class="mt-1 text-xs text-gray-500">{{ review_pending_stage_count }} already in review pending</p>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-gray-500">Pilot Ready</p>
+        <p class="text-lg font-bold text-gray-900">{{ pilot_ready_count }}</p>
+        <p class="text-[10px] text-gray-400">awaiting sign-off</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Latest Decision</p>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-gray-500">Latest Decision</p>
         {% if latest_decision %}
-          <p class="mt-1 text-sm font-semibold text-gray-800">{{ latest_decision.decision }}</p>
-          <p class="mt-1 text-xs text-gray-500">{{ latest_decision.strategy_id }} · {{ latest_decision.decided_label }}</p>
+          <p class="text-sm font-bold text-gray-900">{{ latest_decision.decision }}</p>
+          <p class="text-[10px] text-gray-400">{{ latest_decision.strategy_id }}</p>
         {% else %}
-          <p class="mt-1 text-sm font-semibold text-gray-800">-</p>
-          <p class="mt-1 text-xs text-gray-500">No recent decision</p>
+          <p class="text-sm font-bold text-gray-400">-</p>
         {% endif %}
       </div>
     </div>
   </div>
 
-  <div class="mt-4 grid grid-cols-1 xl:grid-cols-2 gap-4">
-    <div class="border border-gray-200 rounded-lg p-3" {% if recommended_card and recommended_card.chain_id %}data-research-chain-card="{{ recommended_card.chain_id }}"{% endif %}>
-      <div class="flex justify-between gap-3 items-baseline">
-        <h3 class="text-sm font-semibold text-gray-800">{{ recommended_card.card_label if recommended_card else "Latest Chain" }}</h3>
-        {% if recommended_card %}
-          <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if recommended_card.badge_tone in ['fresh', 'clear'] %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif recommended_card.badge_tone in ['aging', 'warning', 'watch'] %}bg-amber-500/15 text-amber-500 border-amber-500/30{% elif recommended_card.badge_tone in ['stale', 'urgent'] %}bg-red-500/15 text-red-500 border-red-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ recommended_card.badge }}</span>
+  <!-- Recommended chain + Lane pressure (compact row) -->
+  <div class="mt-3 grid grid-cols-1 xl:grid-cols-2 gap-3">
+    {% if recommended_card %}
+    <div class="border border-gray-200 rounded-lg p-3" {% if recommended_card.chain_id %}data-research-chain-card="{{ recommended_card.chain_id }}"{% endif %}>
+      <div class="flex items-baseline justify-between gap-2 mb-1">
+        <h3 class="text-xs font-semibold text-gray-700">{{ recommended_card.card_label if recommended_card else "Latest Chain" }}</h3>
+        <span data-selected-chain-badge class="hidden inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-blue-600 text-white">selected</span>
+        {% if recommended_card.badge %}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border {% if recommended_card.badge_tone in ['fresh', 'clear'] %}bg-emerald-50 text-emerald-600 border-emerald-200{% elif recommended_card.badge_tone in ['aging', 'warning', 'watch'] %}bg-amber-50 text-amber-600 border-amber-200{% elif recommended_card.badge_tone in ['stale', 'urgent'] %}bg-red-50 text-red-600 border-red-200{% else %}bg-gray-50 text-gray-500 border-gray-200{% endif %}">{{ recommended_card.badge }}</span>
         {% endif %}
       </div>
-      {% if recommended_card %}
-        <p class="mt-2 text-sm font-semibold text-gray-800">{{ recommended_card.title }} · {{ recommended_card.headline }}</p>
-        <p class="mt-1 text-xs text-gray-500">{{ recommended_card.detail }}{% if recommended_card.meta %} · {{ recommended_card.meta }}{% endif %}</p>
-        {% if recommended_card.submeta %}
-          <p class="mt-1 text-xs text-gray-400">{{ recommended_card.submeta }}</p>
-        {% endif %}
-        <div class="mt-3 flex flex-wrap gap-2">
-          <button
-            class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
-            onclick="window.setResearchQueueAndActiveView('{{ recommended_card.queue_filter or '' }}', '{{ recommended_card.active_view or 'all' }}', false)"
-            hx-get="/fragments/research/artifact-chain/{{ recommended_card.chain_id }}"
-            hx-target="#research-artifact-chain-viewer"
-            hx-swap="innerHTML"
-            hx-on::after-request="window.syncResearchWorkbench('{{ recommended_card.chain_id }}', '{{ recommended_card.queue_filter or '' }}', '{{ recommended_card.active_view or 'all' }}')"
-          >{{ recommended_card.button_label }}</button>
-          <a href="{{ recommended_card.secondary_anchor }}" onclick="window.setResearchQueueAndActiveView('{{ recommended_card.secondary_queue_filter or '' }}', '{{ recommended_card.active_view or 'all' }}')" class="bg-white hover:bg-gray-100 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs">{{ recommended_card.secondary_label }}</a>
-        </div>
-      {% else %}
-        <p class="mt-2 text-sm text-gray-500">No in-flight chain yet.</p>
-      {% endif %}
-    </div>
-
-    <div class="border border-gray-200 rounded-lg p-3">
-      <div class="flex justify-between gap-3 items-baseline">
-        <h3 class="text-sm font-semibold text-gray-800">Queue Interpretation</h3>
-        <span class="text-xs text-gray-400">operator guidance</span>
-      </div>
-      <div class="mt-2 space-y-2 text-sm text-gray-600">
-        <p><span class="font-semibold text-gray-800">Urgent</span>: reject-heavy or stale review items that should be handled first.</p>
-        <p><span class="font-semibold text-gray-800">Watch</span>: revise or park candidates that need judgment but are not critical yet.</p>
-        <p><span class="font-semibold text-gray-800">Fresh flow</span>: new chains still progressing normally through the loop.</p>
+      <p class="text-sm font-semibold text-gray-900">{{ recommended_card.title }} &middot; {{ recommended_card.headline }}</p>
+      <p class="text-xs text-gray-500 mt-1">{{ recommended_card.detail }}</p>
+      <div class="mt-2 flex gap-2">
+        <button
+          class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-200 transition-colors text-xs"
+          onclick="window.setResearchQueueAndActiveView('{{ recommended_card.queue_filter or '' }}', '{{ recommended_card.active_view or 'all' }}', false)"
+          hx-get="/fragments/research/artifact-chain/{{ recommended_card.chain_id }}"
+          hx-target="#research-artifact-chain-viewer"
+          hx-swap="innerHTML"
+          hx-on::after-request="window.syncResearchWorkbench('{{ recommended_card.chain_id }}', '{{ recommended_card.queue_filter or '' }}', '{{ recommended_card.active_view or 'all' }}')"
+        >{{ recommended_card.button_label }}</button>
+        <a href="{{ recommended_card.secondary_anchor }}" onclick="window.setResearchQueueAndActiveView('{{ recommended_card.secondary_queue_filter or '' }}', '{{ recommended_card.active_view or 'all' }}')" class="text-xs text-gray-500 hover:text-gray-700 font-semibold px-3 py-1">{{ recommended_card.secondary_label }}</a>
       </div>
     </div>
-  </div>
+    {% endif %}
 
-  <div class="mt-4 border border-gray-200 rounded-lg p-3">
-    <div class="flex justify-between gap-3 items-baseline">
-      <h3 class="text-sm font-semibold text-gray-800">Lane Pressure</h3>
-      <p class="text-xs text-gray-400">where the operator loop is heating up</p>
-    </div>
-    <p class="mt-2 text-xs text-gray-500">Review Lane, Pilot Lane, Rebalance Lane, and Flow Lane each show where attention is building.</p>
-    <div class="mt-3 grid grid-cols-1 xl:grid-cols-4 gap-3">
+    <!-- Lane pressure (4 mini-cards) -->
+    <div class="grid grid-cols-2 gap-2">
       {% for lane in lane_cards %}
-        <a href="{{ lane.anchor }}" {% if lane.queue_filter is defined %}onclick="window.setResearchQueueAndActiveView('{{ lane.queue_filter }}', '{{ lane.active_view or 'all' }}')"{% endif %} class="block rounded-lg border p-3 {% if lane.tone == 'urgent' %}border-red-200 bg-red-50{% elif lane.tone == 'warning' %}border-amber-200 bg-amber-50{% elif lane.tone == 'clear' %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %}">
-          <div class="flex justify-between gap-3 items-start">
-            <div>
-              <p class="text-[11px] uppercase tracking-wide {% if lane.tone == 'urgent' %}text-red-700{% elif lane.tone == 'warning' %}text-amber-700{% elif lane.tone == 'clear' %}text-emerald-700{% else %}text-gray-500{% endif %}">{{ lane.label }}</p>
-              <p class="mt-1 text-base font-semibold text-gray-900">{{ lane.count }}</p>
-            </div>
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if lane.tone == 'urgent' %}bg-red-500/15 text-red-500 border-red-500/30{% elif lane.tone == 'warning' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% elif lane.tone == 'clear' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ lane.tone }}</span>
+        <a href="{{ lane.anchor }}" {% if lane.queue_filter is defined %}onclick="window.setResearchQueueAndActiveView('{{ lane.queue_filter }}', '{{ lane.active_view or 'all' }}')"{% endif %} class="block rounded-lg border px-3 py-2 {% if lane.tone == 'urgent' %}border-red-200 bg-red-50{% elif lane.tone == 'warning' %}border-amber-200 bg-amber-50{% elif lane.tone == 'clear' %}border-emerald-200 bg-emerald-50{% else %}border-gray-200 bg-gray-50{% endif %} hover:shadow-sm transition-shadow">
+          <div class="flex items-baseline justify-between gap-1">
+            <p class="text-[11px] font-semibold {% if lane.tone == 'urgent' %}text-red-700{% elif lane.tone == 'warning' %}text-amber-700{% elif lane.tone == 'clear' %}text-emerald-700{% else %}text-gray-500{% endif %}">{{ lane.label }}</p>
+            <p class="text-lg font-bold text-gray-900">{{ lane.count }}</p>
           </div>
-          <p class="mt-2 text-xs text-gray-600">{{ lane.detail }}</p>
+          <p class="text-[10px] text-gray-500 mt-0.5">{{ lane.detail }}</p>
         </a>
       {% endfor %}
     </div>

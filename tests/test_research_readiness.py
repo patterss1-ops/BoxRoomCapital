@@ -160,7 +160,10 @@ def test_build_research_readiness_report_suggests_cutover_when_green():
     )
 
     assert report["overall_status"] == "ready"
-    assert report["issues"] == []
+    # When RESEARCH_SYSTEM_ACTIVE is off (default) but all checks green,
+    # the report includes a cutover suggestion as the only issue.
+    assert len(report["issues"]) == 1
+    assert "enable RESEARCH_SYSTEM_ACTIVE" in report["issues"][0]
 
 
 def test_build_research_readiness_report_flags_engine_a_when_signals_exist_but_rebalance_is_flat():

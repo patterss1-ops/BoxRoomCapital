@@ -106,63 +106,40 @@
     {% endif %}
   {% endif %}
   <article
-    class="border rounded-lg p-3 {% if emphasis == 'operator' %}border-amber-300 bg-amber-50/40{% else %}border-gray-200 bg-white{% endif %}{% if active_view == 'focus' and row.chain_id not in focus_chain_ids %} hidden{% elif active_view == 'operator' and emphasis != 'operator' %} hidden{% elif active_view == 'flow' and emphasis != 'flow' %} hidden{% elif active_view == 'stale' and row.freshness != 'stale' %} hidden{% endif %}"
+    class="border rounded-lg p-3 {% if emphasis == 'operator' %}border-amber-200 bg-amber-50/30{% else %}border-gray-200 bg-white{% endif %}{% if active_view == 'focus' and row.chain_id not in focus_chain_ids %} hidden{% elif active_view == 'operator' and emphasis != 'operator' %} hidden{% elif active_view == 'flow' and emphasis != 'flow' %} hidden{% elif active_view == 'stale' and row.freshness != 'stale' %} hidden{% endif %}"
     data-research-chain-card="{{ row.chain_id }}"
     data-research-queue-lane="{{ row_queue_lane }}"
     data-active-view-card="{{ emphasis }}"
     data-active-view-freshness="{{ row.freshness }}"
     data-active-view-focus="{{ 'true' if row.chain_id in focus_chain_ids else 'false' }}"
   >
-    <div class="flex justify-between gap-3 items-start">
-      <div>
-        <div class="flex items-center gap-2 flex-wrap">
-          <p class="text-sm font-semibold text-gray-800 font-mono">{{ row.ticker }}</p>
-          <span data-selected-chain-badge class="hidden inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-600 text-white border-blue-500">selected</span>
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-blue-500/15 text-blue-500 border-blue-500/30">{{ row.stage }}</span>
-          <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-gray-100 text-gray-600 border-gray-300">{{ row.stage_group }}</span>
-          {% if not row.operator_now and row.flow_lane_label %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border bg-slate-500/10 text-slate-600 border-slate-400/25">{{ row.flow_lane_label }}</span>
-          {% endif %}
-          {% if row.operator_lane_label %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if emphasis == 'operator' %}bg-amber-500/15 text-amber-600 border-amber-500/30{% else %}bg-sky-500/10 text-sky-600 border-sky-500/25{% endif %}">{{ row.operator_lane_label }}</span>
-          {% endif %}
-          {% if row.operator_now and row.operator_priority %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if row.operator_priority == 'urgent' %}bg-red-500/15 text-red-500 border-red-500/30{% elif row.operator_priority == 'watch' %}bg-amber-500/15 text-amber-600 border-amber-500/30{% else %}bg-emerald-500/15 text-emerald-600 border-emerald-500/30{% endif %}">{{ row.operator_priority }}</span>
-          {% endif %}
-          {% if row.outcome %}
-            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if row.outcome == 'promote' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif row.outcome == 'park' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ row.outcome }}</span>
-          {% endif %}
-        </div>
-        <p class="mt-1 text-xs text-gray-400 uppercase tracking-wide">{{ row.edge_family }}</p>
-      </div>
-      <div class="text-right">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Score</p>
-        <p class="text-sm font-semibold text-gray-800">{{ "%.1f"|format(row.score) if row.score is not none else "-" }}</p>
-      </div>
-    </div>
-    <div class="mt-3 grid grid-cols-2 gap-2">
-      <div class="bg-gray-100 border border-gray-300 rounded-lg p-2">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Next Move</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ row.next_action }}</p>
-      </div>
-      <div class="bg-gray-100 border border-gray-300 rounded-lg p-2">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Updated</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ row.updated_label }}</p>
-        <p class="mt-1 text-xs font-mono text-gray-600">{{ row.updated_at }}</p>
-      </div>
-    </div>
-    <div class="mt-3 flex items-center justify-between gap-3">
-      <div class="flex items-center gap-2 flex-wrap">
-        <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wide border {% if row.freshness == 'fresh' %}bg-emerald-500/15 text-emerald-500 border-emerald-500/30{% elif row.freshness == 'aging' %}bg-amber-500/15 text-amber-500 border-amber-500/30{% elif row.freshness == 'stale' %}bg-red-500/15 text-red-500 border-red-500/30{% else %}bg-gray-100 text-gray-500 border-gray-300{% endif %}">{{ row.freshness }}</span>
-        {% if row.operator_now %}
-          <span class="text-xs text-amber-700">operator handoff</span>
+    <!-- Row 1: Ticker + key badges + score -->
+    <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2 flex-wrap min-w-0">
+        <p class="text-sm font-bold text-gray-900 font-mono">{{ row.ticker }}</p>
+        <span data-selected-chain-badge class="hidden inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-bold uppercase bg-blue-600 text-white">selected</span>
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border bg-blue-50 text-blue-600 border-blue-200">{{ row.stage }}</span>
+        {% if row.operator_now and row.operator_priority %}
+          <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border {% if row.operator_priority == 'urgent' %}bg-red-50 text-red-600 border-red-200{% elif row.operator_priority == 'watch' %}bg-amber-50 text-amber-600 border-amber-200{% else %}bg-emerald-50 text-emerald-600 border-emerald-200{% endif %}">{{ row.operator_priority }}</span>
         {% endif %}
+        <span class="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold border {% if row.freshness == 'fresh' %}bg-emerald-50 text-emerald-600 border-emerald-200{% elif row.freshness == 'aging' %}bg-amber-50 text-amber-600 border-amber-200{% elif row.freshness == 'stale' %}bg-red-50 text-red-600 border-red-200{% else %}bg-gray-50 text-gray-500 border-gray-200{% endif %}">{{ row.freshness }}</span>
       </div>
-      <p class="text-xs text-gray-500">created {{ row.created_label }}</p>
+      <div class="text-right flex-shrink-0">
+        <p class="text-sm font-bold text-gray-900">{{ "%.1f"|format(row.score) if row.score is not none else "-" }}</p>
+        <p class="text-[10px] text-gray-400">score</p>
+      </div>
     </div>
-    <div class="mt-3 flex justify-end">
+
+    <!-- Row 2: Next move + updated -->
+    <div class="mt-2 flex items-baseline justify-between gap-3">
+      <p class="text-xs text-gray-700"><span class="text-gray-400 font-semibold uppercase text-[10px]">Next:</span> {{ row.next_action }}</p>
+      <p class="text-[10px] text-gray-400 flex-shrink-0">{{ row.updated_label }}</p>
+    </div>
+
+    <!-- Row 3: Open button -->
+    <div class="mt-2 flex justify-end">
       <button
-        class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
+        class="bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold px-3 py-1 rounded-lg border border-gray-200 transition-colors text-xs"
         hx-get="/fragments/research/artifact-chain/{{ row.chain_id }}"
         hx-target="#research-artifact-chain-viewer"
         hx-swap="innerHTML"
@@ -172,335 +149,102 @@
   </article>
 {% endmacro %}
 
-<section class="bg-white border border-gray-200 rounded-xl p-4 shadow-lg h-full">
-  <div class="flex justify-between items-baseline gap-4 mb-3">
+<section class="bg-white border border-gray-200 rounded-xl p-4 h-full">
+  <div class="flex items-baseline justify-between gap-4 mb-3">
     <div>
-      <h2 class="text-lg font-semibold text-gray-800">Active Chains</h2>
-      <p class="text-gray-400 text-sm">Separate operator-ready chains from the rest of the in-flight research flow.</p>
+      <h2 class="text-sm font-semibold text-gray-900">Active Chains</h2>
+      <p class="text-xs text-gray-400">{{ rows|length if rows else 0 }} in flight &middot; {{ operator_count }} need action &middot; {{ freshness_counts.stale }} stale</p>
     </div>
-    <p class="text-gray-400 text-sm">{{ rows|length if rows else 0 }} in flight</p>
   </div>
   {% if error %}
-    <p class="text-sm text-amber-600 mb-3">{{ error }}</p>
+    <p class="text-xs text-amber-600 mb-3">{{ error }}</p>
   {% endif %}
   {% if rows %}
-    <div class="flex flex-wrap gap-2 mb-4">
-      <button type="button" data-active-view-button="all" aria-pressed="{{ 'true' if active_view == 'all' else 'false' }}" class="{% if active_view == 'all' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-700 border-gray-300{% endif %} border font-semibold px-3 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('all')">All <span class="opacity-80">{{ rows|length }}</span></button>
-      <button type="button" data-active-view-button="focus" aria-pressed="{{ 'true' if active_view == 'focus' else 'false' }}" class="{% if active_view == 'focus' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-700 border-gray-300{% endif %} border font-semibold px-3 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('focus')">Board Focus <span class="opacity-80">{{ focus_count }}</span></button>
-      <button type="button" data-active-view-button="operator" aria-pressed="{{ 'true' if active_view == 'operator' else 'false' }}" class="{% if active_view == 'operator' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-700 border-gray-300{% endif %} border font-semibold px-3 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('operator')">Operator <span class="opacity-80">{{ operator_count }}</span></button>
-      <button type="button" data-active-view-button="flow" aria-pressed="{{ 'true' if active_view == 'flow' else 'false' }}" class="{% if active_view == 'flow' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-700 border-gray-300{% endif %} border font-semibold px-3 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('flow')">Flow <span class="opacity-80">{{ flow_count }}</span></button>
-      <button type="button" data-active-view-button="stale" aria-pressed="{{ 'true' if active_view == 'stale' else 'false' }}" class="{% if active_view == 'stale' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-700 border-gray-300{% endif %} border font-semibold px-3 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('stale')">Stale <span class="opacity-80">{{ stale_count }}</span></button>
+    <!-- Simplified filter bar -->
+    <div class="flex flex-wrap gap-1.5 mb-3">
+      <button type="button" data-active-view-button="all" aria-pressed="{{ 'true' if active_view == 'all' else 'false' }}" class="{% if active_view == 'all' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-600 border-gray-200 hover:bg-gray-50{% endif %} border font-semibold px-2.5 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('all')">All <span class="opacity-70">{{ rows|length }}</span></button>
+      {% if focus_count > 0 %}
+      <button type="button" data-active-view-button="focus" aria-pressed="{{ 'true' if active_view == 'focus' else 'false' }}" class="{% if active_view == 'focus' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-600 border-gray-200 hover:bg-gray-50{% endif %} border font-semibold px-2.5 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('focus')">Focus <span class="opacity-70">{{ focus_count }}</span></button>
+      {% endif %}
+      {% if operator_count > 0 %}
+      <button type="button" data-active-view-button="operator" aria-pressed="{{ 'true' if active_view == 'operator' else 'false' }}" class="{% if active_view == 'operator' %}bg-amber-600 text-white border-amber-500{% else %}bg-white text-gray-600 border-gray-200 hover:bg-gray-50{% endif %} border font-semibold px-2.5 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('operator')">Needs Action <span class="opacity-70">{{ operator_count }}</span></button>
+      {% endif %}
+      <button type="button" data-active-view-button="flow" aria-pressed="{{ 'true' if active_view == 'flow' else 'false' }}" class="{% if active_view == 'flow' %}bg-blue-600 text-white border-blue-500{% else %}bg-white text-gray-600 border-gray-200 hover:bg-gray-50{% endif %} border font-semibold px-2.5 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('flow')">In Progress <span class="opacity-70">{{ flow_count }}</span></button>
+      {% if stale_count > 0 %}
+      <button type="button" data-active-view-button="stale" aria-pressed="{{ 'true' if active_view == 'stale' else 'false' }}" class="{% if active_view == 'stale' %}bg-red-600 text-white border-red-500{% else %}bg-white text-gray-600 border-gray-200 hover:bg-gray-50{% endif %} border font-semibold px-2.5 py-1 rounded-lg transition-colors text-xs" onclick="window.setResearchActiveView('stale')">Stale <span class="opacity-70">{{ stale_count }}</span></button>
+      {% endif %}
     </div>
-    <div class="rounded-xl border border-blue-200 bg-blue-50/50 p-3 mb-4{% if active_view == 'all' %} hidden{% endif %}" data-active-view-banner>
-      <div class="flex justify-between gap-3 items-start">
-        <div>
-          <p class="text-[11px] uppercase tracking-wide text-blue-700">Filtered View</p>
-          <p class="mt-1 text-sm font-semibold text-gray-800" data-active-view-banner-title>
-            {% if active_view == 'focus' %}Board Focus{% elif active_view == 'operator' %}Operator{% elif active_view == 'flow' %}Flow{% elif active_view == 'stale' %}Stale{% else %}All{% endif %}
-          </p>
-          <p class="mt-1 text-xs text-gray-600" data-active-view-banner-detail>
-            {% if active_view == 'focus' %}
-              Showing only the primary and secondary board-focus chains.
-            {% elif active_view == 'operator' %}
-              Showing only pilot and review handoff chains.
-            {% elif active_view == 'flow' %}
-              Showing only chains still moving through the research flow.
-            {% elif active_view == 'stale' %}
-              Showing only stale chains across operator and flow sections.
-            {% else %}
-              Showing the full board.
-            {% endif %}
-          </p>
-          <div class="mt-3 rounded-lg border border-dashed border-blue-200 bg-white/70 p-2.5">
-            <p class="text-[11px] uppercase tracking-wide text-gray-400">Slice Navigation</p>
-            <p class="mt-1 text-xs font-semibold text-gray-700" data-active-view-selection-state>
-              {% if ns.visible_count == 0 %}
-                No visible chains are in this slice.
-              {% elif ns.selected_visible and ns.selected_visible_position > 0 %}
-                Selected in slice: {{ ns.selected_ticker or selected_chain_id }} ({{ ns.selected_visible_position }} of {{ ns.visible_count }}).
-              {% else %}
-                Open the first visible chain in this slice.
-              {% endif %}
-            </p>
-            <p class="mt-1 text-xs text-gray-500" data-active-view-selection-detail>
-              {% if ns.visible_count == 0 %}
-                Switch the board view or return to All to see other chains.
-              {% elif ns.selected_visible and ns.selected_visible_position > 0 %}
-                {% if ns.visible_count == 1 %}
-                  This is the only visible chain in the current slice.
-                {% elif ns.selected_visible_position == 1 %}
-                  You are at the first visible chain. Use Next Visible to continue.
-                {% elif ns.selected_visible_position == ns.visible_count %}
-                  You are at the last visible chain. Use Previous Visible to go back.
-                {% else %}
-                  Previous / Next will step through only the visible chains in this slice.
-                {% endif %}
-              {% else %}
-                {% if ns.visible_count == 1 %}
-                  This slice has 1 visible chain.
-                {% else %}
-                  This slice has {{ ns.visible_count }} visible chains.
-                {% endif %}
-              {% endif %}
-            </p>
-          </div>
-          <div class="mt-3 rounded-lg border border-amber-200 bg-amber-50/70 p-2.5{% if not (active_view != 'all' and selected_chain_id and ns.selected_exists and not ns.selected_visible) %} hidden{% endif %}" data-active-view-selection-warning>
-            <p class="text-[11px] uppercase tracking-wide text-amber-700">Selected Chain Outside Slice</p>
-            <p class="mt-1 text-xs font-semibold text-gray-700" data-active-view-selection-warning-title>{% if selected_chain_id and ns.selected_exists and not ns.selected_visible %}{{ ns.selected_ticker or selected_chain_id }} is selected in the workbench but hidden by this slice.{% else %}The current chain is hidden by this filter.{% endif %}</p>
-            <p class="mt-1 text-xs text-gray-500" data-active-view-selection-warning-detail>{% if selected_chain_id and ns.selected_exists and not ns.selected_visible %}Switch this board to {{ ns.selected_target_label }} to reveal the selected chain, or move to the first visible chain in the current slice.{% else %}Reveal the selected chain in its best matching slice or move to the first visible chain in this slice.{% endif %}</p>
-          </div>
-        </div>
-        <div class="flex flex-col gap-2 items-end">
-          <button
-            type="button"
-            class="bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs{% if ns.visible_count == 0 %} opacity-50 cursor-not-allowed{% endif %}"
-            onclick="window.openFirstVisibleResearchActiveCard()"
-            data-active-view-nav-first
-            {% if ns.visible_count == 0 %}disabled{% endif %}
-          >Open First Visible</button>
-          <div class="flex gap-2">
-            <button
-              type="button"
-              class="bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs{% if not (ns.selected_visible and ns.selected_visible_position > 1) %} opacity-50 cursor-not-allowed{% endif %}"
-              onclick="window.stepResearchActiveCard(-1)"
-              data-active-view-nav-prev
-              {% if not (ns.selected_visible and ns.selected_visible_position > 1) %}disabled{% endif %}
-            >Previous Visible</button>
-            <button
-              type="button"
-              class="bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs{% if not (ns.selected_visible and ns.selected_visible_position < ns.visible_count) %} opacity-50 cursor-not-allowed{% endif %}"
-              onclick="window.stepResearchActiveCard(1)"
-              data-active-view-nav-next
-              {% if not (ns.selected_visible and ns.selected_visible_position < ns.visible_count) %}disabled{% endif %}
-            >Next Visible</button>
-          </div>
-          <button
-            type="button"
-            class="bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs{% if not (active_view != 'all' and selected_chain_id and ns.selected_exists and not ns.selected_visible) %} hidden{% endif %}"
-            onclick="window.revealSelectedResearchActiveCard()"
-            data-active-view-reveal-selected
-          >{% if selected_chain_id and ns.selected_exists and not ns.selected_visible %}Show In {{ ns.selected_target_label }}{% else %}Show In Matching Slice{% endif %}</button>
-          <button
-            type="button"
-            class="bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
-            onclick="window.setResearchActiveView('all')"
-          >Show All Chains</button>
-        </div>
-      </div>
+
+    <!-- Selected chain outside current filter warning (compact) -->
+    {% if active_view != 'all' and selected_chain_id and ns.selected_exists and not ns.selected_visible %}
+    <div class="mb-3 flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" data-active-view-selection-warning>
+      <p class="text-xs text-amber-700 flex-1">{{ ns.selected_ticker or selected_chain_id[:8] }} is selected but hidden by this filter.</p>
+      <button type="button" class="text-xs font-semibold text-amber-700 hover:text-amber-900 underline" onclick="window.revealSelectedResearchActiveCard()" data-active-view-reveal-selected>Show in {{ ns.selected_target_label }}</button>
+      <button type="button" class="text-xs font-semibold text-gray-500 hover:text-gray-700" onclick="window.setResearchActiveView('all')">Show All</button>
     </div>
-    {% if board_focus %}
-      <div
-        class="rounded-xl p-3 mb-4 border {% if board_focus.tone == 'operator' %}border-amber-300 bg-amber-50/50{% else %}border-sky-200 bg-sky-50/40{% endif %}{% if not (active_view == 'all' or active_view == 'focus' or (active_view == 'operator' and board_focus.source == 'operator') or (active_view == 'flow' and board_focus.source == 'flow')) %} hidden{% endif %}"
-        data-active-view-section="board-focus"
-        data-board-focus-source="{{ board_focus.source }}"
-      >
-        <div class="flex justify-between gap-3 items-start">
-          <div>
-            <p class="text-[11px] uppercase tracking-wide {% if board_focus.tone == 'operator' %}text-amber-700{% else %}text-sky-700{% endif %}">Board Focus</p>
-            <p class="mt-1 text-sm font-semibold text-gray-800">{{ board_focus.section_label }} · {{ board_focus.title }}</p>
-            <p class="mt-1 text-xs text-gray-600">{{ board_focus.detail }}</p>
-            <p class="mt-1 text-xs {% if board_focus.tone == 'operator' %}text-amber-700{% else %}text-sky-700{% endif %}">{{ board_focus.priority_reason }}</p>
-            <p class="mt-2 text-xs text-gray-500">Lead chain: <span class="font-mono text-gray-700">{{ board_focus.ticker }}</span> · {{ board_focus.meta }}</p>
-            {% if board_focus.secondary %}
-              <div class="mt-3 rounded-lg border border-dashed {% if board_focus.tone == 'operator' %}border-amber-200 bg-white/70{% else %}border-sky-200 bg-white/70{% endif %} p-2.5">
-                <p class="text-[11px] uppercase tracking-wide text-gray-400">{{ board_focus.secondary.section_label }}</p>
-                <p class="mt-1 text-xs font-semibold text-gray-700">{{ board_focus.secondary.title }}</p>
-                <p class="mt-1 text-xs text-gray-500">{{ board_focus.secondary.detail }}</p>
-                <p class="mt-1 text-xs text-gray-500">Lead chain: <span class="font-mono text-gray-700">{{ board_focus.secondary.ticker }}</span> · {{ board_focus.secondary.meta }}</p>
-              </div>
-            {% endif %}
-          </div>
-          <div class="flex flex-col gap-2 items-end">
-            <button
-              class="{% if board_focus.tone == 'operator' %}bg-amber-200 hover:bg-amber-300 text-amber-950 border-amber-300{% else %}bg-sky-100 hover:bg-sky-200 text-sky-900 border-sky-200{% endif %} font-semibold px-3 py-1 rounded-lg border transition-colors text-xs"
-              hx-get="/fragments/research/artifact-chain/{{ board_focus.chain_id }}"
-              hx-target="#research-artifact-chain-viewer"
-              hx-swap="innerHTML"
-              hx-on::after-request="window.syncResearchWorkbench('{{ board_focus.chain_id }}', '{% if board_focus.source == 'operator' and board_focus.title == 'Pilot Lane' %}pilot{% elif board_focus.source == 'operator' %}review{% else %}all{% endif %}', '{{ active_view }}')"
-            >{{ board_focus.button_label }}</button>
-            {% if board_focus.secondary %}
-              <button
-                class="bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
-                hx-get="/fragments/research/artifact-chain/{{ board_focus.secondary.chain_id }}"
-                hx-target="#research-artifact-chain-viewer"
-                hx-swap="innerHTML"
-                hx-on::after-request="window.syncResearchWorkbench('{{ board_focus.secondary.chain_id }}', 'all', '{{ active_view }}')"
-              >{{ board_focus.secondary.button_label }}</button>
-            {% endif %}
-          </div>
-        </div>
-      </div>
     {% endif %}
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4{% if active_view != 'all' %} hidden{% endif %}" data-active-view-detail="top-summary">
-      <div class="bg-amber-50 border border-amber-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-amber-700">Needs Operator</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ operator_count }}</p>
+
+    <!-- Quick summary cards (only in All view) -->
+    <div class="grid grid-cols-4 gap-2 mb-3{% if active_view != 'all' %} hidden{% endif %}" data-active-view-detail="top-summary">
+      <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-amber-700">Needs Action</p>
+        <p class="text-lg font-bold text-gray-900">{{ operator_count }}</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Still Flowing</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ flow_count }}</p>
+      <div class="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-gray-500">In Progress</p>
+        <p class="text-lg font-bold text-gray-900">{{ flow_count }}</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Fresh</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ freshness_counts.fresh }}</p>
+      <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold text-emerald-600">Fresh</p>
+        <p class="text-lg font-bold text-gray-900">{{ freshness_counts.fresh }}</p>
       </div>
-      <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-        <p class="text-[11px] uppercase tracking-wide text-gray-400">Stale</p>
-        <p class="mt-1 text-sm font-semibold text-gray-800">{{ freshness_counts.stale }}</p>
+      <div class="{% if freshness_counts.stale > 0 %}bg-red-50 border-red-200{% else %}bg-gray-50 border-gray-200{% endif %} border rounded-lg px-3 py-2">
+        <p class="text-[11px] font-semibold {% if freshness_counts.stale > 0 %}text-red-600{% else %}text-gray-500{% endif %}">Stale</p>
+        <p class="text-lg font-bold text-gray-900">{{ freshness_counts.stale }}</p>
       </div>
     </div>
 
-    <div class="space-y-4">
-      <div class="border border-amber-200 rounded-xl p-3 bg-amber-50/30{% if active_view == 'flow' or (active_view == 'focus' and ns.operator_focus_count == 0) or (active_view == 'stale' and ns.operator_stale_count == 0) %} hidden{% endif %}" data-active-view-section="operator">
-        <div class="flex justify-between items-baseline gap-3 mb-3">
-          <div>
-            <h3 class="text-sm font-semibold text-gray-800">Needs Operator Now</h3>
-            <p class="text-xs text-amber-700">Pilot sign-off and live review decisions should surface here first.</p>
-          </div>
-          <p class="text-xs text-amber-700 font-semibold uppercase tracking-wide">{{ operator_count }} ready</p>
-        </div>
+    <div class="space-y-3">
+      <!-- Needs Action section -->
+      <div class="{% if active_view == 'flow' or (active_view == 'focus' and ns.operator_focus_count == 0) or (active_view == 'stale' and ns.operator_stale_count == 0) %} hidden{% endif %}" data-active-view-section="operator">
         {% if operator_rows %}
-          {% if operator_focus %}
-            <div class="border border-amber-300 rounded-xl p-3 bg-amber-100/40 mb-4{% if active_view == 'flow' or active_view == 'stale' %} hidden{% elif active_view == 'focus' and ns.operator_focus_count == 0 %} hidden{% endif %}" data-active-view-detail="operator-focus">
-              <div class="flex justify-between gap-3 items-start">
-                <div>
-                  <p class="text-[11px] uppercase tracking-wide text-amber-700">Operator Focus</p>
-                  <p class="mt-1 text-sm font-semibold text-gray-800">{{ operator_focus.lane_label }}</p>
-                  <p class="mt-1 text-xs text-gray-700">{{ operator_focus.detail }}</p>
-                  <p class="mt-2 text-xs text-gray-500">Lead chain: <span class="font-mono text-gray-700">{{ operator_focus.ticker }}</span> · {{ operator_focus.updated_label }} · {{ operator_focus.priority }}</p>
-                </div>
-                <button
-                  class="bg-amber-200 hover:bg-amber-300 text-amber-950 font-semibold px-3 py-1 rounded-lg border border-amber-300 transition-colors text-xs"
-                  hx-get="/fragments/research/artifact-chain/{{ operator_focus.chain_id }}"
-                  hx-target="#research-artifact-chain-viewer"
-                  hx-swap="innerHTML"
-                  hx-on::after-request="window.syncResearchWorkbench('{{ operator_focus.chain_id }}', '{% if operator_focus.lane_label == 'Pilot Lane' %}pilot{% else %}review{% endif %}', '{{ active_view }}')"
-                >{{ operator_focus.button_label }}</button>
-              </div>
-            </div>
-          {% endif %}
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-4{% if active_view not in ['all', 'operator'] %} hidden{% endif %}" data-active-view-detail="operator-summary">
-            {% for lane in operator_lanes %}
-              <div class="bg-white/80 border border-amber-200 rounded-lg p-3">
-                <div class="flex justify-between items-baseline gap-3">
-                  <div>
-                    <p class="text-[11px] uppercase tracking-wide text-amber-700">{{ lane.label }}</p>
-                    <p class="mt-1 text-sm font-semibold text-gray-800">{{ lane.count }}</p>
-                  </div>
-                  <div class="text-right">
-                    <p class="text-[11px] uppercase tracking-wide text-gray-400">Urgent / Watch</p>
-                    <p class="text-xs text-gray-600">{{ lane.urgent_count }} / {{ lane.watch_count }}</p>
-                    <button
-                      class="mt-2 bg-amber-100 hover:bg-amber-200 text-amber-950 font-semibold px-2.5 py-1 rounded-lg border border-amber-200 transition-colors text-[11px]"
-                      hx-get="/fragments/research/artifact-chain/{{ lane.lead_row.chain_id }}"
-                      hx-target="#research-artifact-chain-viewer"
-                      hx-swap="innerHTML"
-                      hx-on::after-request="window.syncResearchWorkbench('{{ lane.lead_row.chain_id }}', '{% if lane.label == 'Pilot Lane' %}pilot{% else %}review{% endif %}', '{{ active_view }}')"
-                    >{{ lane.lead_button_label }}</button>
-                  </div>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <h3 class="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">Needs Action ({{ operator_count }})</h3>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
             {% for row in operator_rows %}
               {{ render_chain_card(row, "operator", ns.focus_chain_ids, active_view) }}
             {% endfor %}
           </div>
         {% else %}
-          <div class="border border-dashed border-amber-200 rounded-lg p-4 text-center bg-white/80">
-            <p class="text-sm text-gray-600">No chains need an operator decision right now.</p>
-            <p class="mt-1 text-xs text-gray-400">Fresh review and pilot-ready chains will break out here automatically.</p>
-          </div>
+          <p class="text-xs text-gray-400 py-2">No chains need operator action right now.</p>
         {% endif %}
       </div>
 
-      <div class="border border-gray-200 rounded-xl p-3{% if active_view == 'operator' or (active_view == 'focus' and ns.flow_focus_count == 0) or (active_view == 'stale' and ns.flow_stale_count == 0) %} hidden{% endif %}" data-active-view-section="flow">
-        <div class="flex justify-between items-baseline gap-3 mb-3">
-          <div>
-            <h3 class="text-sm font-semibold text-gray-800">Still Flowing</h3>
-            <p class="text-xs text-gray-500">Chains still progressing through formation, challenge, scoring, experiment, or follow-up lanes.</p>
-          </div>
-          <p class="text-xs text-gray-500 font-semibold uppercase tracking-wide">{{ flow_count }} active</p>
-        </div>
+      <!-- In Progress section -->
+      <div class="{% if active_view == 'operator' or (active_view == 'focus' and ns.flow_focus_count == 0) or (active_view == 'stale' and ns.flow_stale_count == 0) %} hidden{% endif %}" data-active-view-section="flow">
         {% if flow_rows %}
-          {% if flow_focus %}
-            <div class="border border-sky-200 rounded-xl p-3 bg-sky-50/40 mb-4{% if active_view == 'operator' or active_view == 'stale' %} hidden{% elif active_view == 'focus' and ns.flow_focus_count == 0 %} hidden{% endif %}" data-active-view-detail="flow-focus">
-              <div class="flex justify-between gap-3 items-start">
-                <div>
-                  <p class="text-[11px] uppercase tracking-wide text-sky-700">Flow Focus</p>
-                  <p class="mt-1 text-sm font-semibold text-gray-800">{{ flow_focus.lane_label }}</p>
-                  <p class="mt-1 text-xs text-gray-600">{{ flow_focus.detail }}</p>
-                  <p class="mt-2 text-xs text-gray-500">Lead chain: <span class="font-mono text-gray-700">{{ flow_focus.ticker }}</span> · {{ flow_focus.updated_label }} · {{ flow_focus.freshness }}</p>
-                </div>
-                <button
-                  class="bg-sky-100 hover:bg-sky-200 text-sky-900 font-semibold px-3 py-1 rounded-lg border border-sky-200 transition-colors text-xs"
-                  hx-get="/fragments/research/artifact-chain/{{ flow_focus.chain_id }}"
-                  hx-target="#research-artifact-chain-viewer"
-                  hx-swap="innerHTML"
-                  hx-on::after-request="window.syncResearchWorkbench('{{ flow_focus.chain_id }}', 'all', '{{ active_view }}')"
-                >{{ flow_focus.button_label }}</button>
-              </div>
-            </div>
-          {% endif %}
-          <div class="grid grid-cols-2 xl:grid-cols-5 gap-3 mb-4{% if active_view not in ['all', 'flow'] %} hidden{% endif %}" data-active-view-detail="flow-summary">
+          <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">In Progress ({{ flow_count }})</h3>
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-2">
             {% for lane in flow_lanes %}
-              <div class="bg-gray-50 border border-gray-200 rounded-lg p-3">
-                <p class="text-[11px] uppercase tracking-wide text-gray-400">{{ lane.label }}</p>
-                <p class="mt-1 text-sm font-semibold text-gray-800">{{ lane.count }}</p>
-                <p class="mt-1 text-xs text-gray-500">{{ lane.fresh_count }} fresh{% if lane.stale_count %} · {{ lane.stale_count }} stale{% endif %}</p>
-              </div>
-            {% endfor %}
-          </div>
-          <div class="grid grid-cols-1 xl:grid-cols-2 gap-3">
-            {% for lane in flow_lanes %}
-              <section class="border border-gray-200 rounded-xl p-3 bg-gray-50/40">
-                <div class="flex justify-between items-baseline gap-3 mb-3">
-                  <div>
-                    <h4 class="text-sm font-semibold text-gray-800">{{ lane.label }}</h4>
-                    <p class="text-xs text-gray-500">{{ lane.count }} chain{% if lane.count != 1 %}s{% endif %} moving through this lane.</p>
-                  </div>
-                  <div class="text-right">
-                    <p class="text-[11px] uppercase tracking-wide text-gray-400">Fresh / Stale</p>
-                    <p class="text-xs text-gray-600">{{ lane.fresh_count }} / {{ lane.stale_count }}</p>
-                    <button
-                      class="mt-2 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold px-2.5 py-1 rounded-lg border border-gray-300 transition-colors text-[11px]"
-                      hx-get="/fragments/research/artifact-chain/{{ lane.lead_row.chain_id }}"
-                      hx-target="#research-artifact-chain-viewer"
-                      hx-swap="innerHTML"
-                      hx-on::after-request="window.syncResearchWorkbench('{{ lane.lead_row.chain_id }}', 'all', '{{ active_view }}')"
-                    >{{ lane.lead_button_label }}</button>
-                  </div>
-                </div>
-                <div class="space-y-3">
-                  {% for row in lane.rows %}
-                    {{ render_chain_card(row, "flow", ns.focus_chain_ids, active_view) }}
-                  {% endfor %}
-                </div>
-              </section>
+              {% for row in lane.rows %}
+                {{ render_chain_card(row, "flow", ns.focus_chain_ids, active_view) }}
+              {% endfor %}
             {% endfor %}
           </div>
         {% else %}
-          <div class="border border-dashed border-gray-300 rounded-lg p-4 text-center">
-            <p class="text-sm text-gray-500">No chains are progressing outside the operator lanes.</p>
-            <p class="mt-1 text-xs text-gray-400">Once a new chain leaves intake or a parked chain wakes up, it will appear here.</p>
-          </div>
+          <p class="text-xs text-gray-400 py-2">No chains progressing outside operator lanes.</p>
         {% endif %}
       </div>
     </div>
-    <div class="border border-dashed border-gray-300 rounded-lg p-5 text-center hidden" data-active-view-empty-state>
-      <p class="text-sm text-gray-600" data-active-view-empty-title>No chains match this view yet.</p>
-      <p class="mt-1 text-xs text-gray-400" data-active-view-empty-detail>Switch back to `All` to see the full board.</p>
-      <button
-        type="button"
-        class="mt-3 bg-white hover:bg-gray-100 text-gray-800 font-semibold px-3 py-1 rounded-lg border border-gray-300 transition-colors text-xs"
-        onclick="window.setResearchActiveView('all')"
-      >Show All Chains</button>
+
+    <!-- Empty state for filtered views -->
+    <div class="border border-dashed border-gray-200 rounded-lg p-4 text-center hidden" data-active-view-empty-state>
+      <p class="text-sm text-gray-500" data-active-view-empty-title>No chains match this filter.</p>
+      <button type="button" class="mt-2 text-xs font-semibold text-blue-600 hover:text-blue-800" onclick="window.setResearchActiveView('all')">Show All Chains</button>
     </div>
   {% else %}
-    <div class="border border-dashed border-gray-300 rounded-lg p-6 text-center">
+    <div class="border border-dashed border-gray-200 rounded-lg p-4 text-center">
       <p class="text-sm text-gray-500">No active chains yet.</p>
-      <p class="mt-1 text-xs text-gray-400">New manual intake and mirrored events will show up here once they start progressing.</p>
+      <p class="mt-1 text-xs text-gray-400">Submit evidence above to start a new research chain.</p>
     </div>
   {% endif %}
 </section>
