@@ -774,6 +774,11 @@ def init_db(db_path: str = DB_PATH):
         "strategy_spec_json": "TEXT",
     })
 
+    # ── Migrations: add archived flag to research_events ──────────────────
+    _migrate_add_columns(conn, "research_events", {
+        "archived": "INTEGER DEFAULT 0",
+    })
+
     conn.commit()
     conn.close()
 
@@ -1846,10 +1851,10 @@ def get_research_events(
     source: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> list[dict]:
-    """Get recent research events with optional source/event_type filters."""
+    """Get recent research events with optional source/event_type filters (excludes archived)."""
     conn = get_conn(db_path)
     query = "SELECT * FROM research_events"
-    where: list[str] = []
+    where: list[str] = ["COALESCE(archived, 0) = 0"]
     params: list[Any] = []
     if event_type:
         where.append("event_type=?")
@@ -1857,8 +1862,7 @@ def get_research_events(
     if source:
         where.append("source=?")
         params.append(source)
-    if where:
-        query += " WHERE " + " AND ".join(where)
+    query += " WHERE " + " AND ".join(where)
     query += " ORDER BY retrieved_at DESC, created_at DESC LIMIT ?"
     params.append(limit)
     rows = conn.execute(query, tuple(params)).fetchall()
@@ -1884,15 +1888,37 @@ def delete_research_events(
     event_type: Optional[str] = None,
     db_path: str = DB_PATH,
 ) -> int:
-    """Delete research events, optionally filtered by event_type. Returns count deleted."""
+    """Archive research events (sets archived=1), optionally filtered by event_type. Returns count archived."""
     conn = get_conn(db_path)
     if event_type:
-        cur = conn.execute("DELETE FROM research_events WHERE event_type=?", (event_type,))
+        cur = conn.execute(
+            "UPDATE research_events SET archived=1 WHERE event_type=? AND COALESCE(archived, 0)=0",
+            (event_type,),
+        )
     else:
-        cur = conn.execute("DELETE FROM research_events")
-    deleted = cur.rowcount
+        cur = conn.execute("UPDATE research_events SET archived=1 WHERE COALESCE(archived, 0)=0")
+    archived = cur.rowcount
     conn.commit()
-    return deleted
+    return archived
+
+
+def get_archived_research_events(
+    event_type: Optional[str] = None,
+    limit: int = 200,
+    db_path: str = DB_PATH,
+) -> list[dict]:
+    """Get archived research events, newest first."""
+    conn = get_conn(db_path)
+    query = "SELECT * FROM research_events WHERE COALESCE(archived, 0) = 1"
+    params: list[Any] = []
+    if event_type:
+        query += " AND event_type=?"
+        params.append(event_type)
+    query += " ORDER BY retrieved_at DESC, created_at DESC LIMIT ?"
+    params.append(limit)
+    rows = conn.execute(query, tuple(params)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def delete_rejected_trade_ideas(db_path: str = DB_PATH) -> int:

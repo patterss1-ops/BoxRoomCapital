@@ -33,9 +33,11 @@ def test_delete_research_events_all(tmp_path):
             (f"ev{i}", now, now, "intel_analysis", "test", now, "{}", f"h{i}"),
         )
     conn.commit()
-    deleted = delete_research_events(event_type="intel_analysis", db_path=db)
-    assert deleted == 3
-    assert get_conn(db).execute("SELECT count(*) FROM research_events").fetchone()[0] == 0
+    archived = delete_research_events(event_type="intel_analysis", db_path=db)
+    assert archived == 3
+    # Events still exist in DB but are marked archived
+    assert get_conn(db).execute("SELECT count(*) FROM research_events").fetchone()[0] == 3
+    assert get_conn(db).execute("SELECT count(*) FROM research_events WHERE archived=1").fetchone()[0] == 3
 
 
 def test_delete_research_events_filtered(tmp_path):
@@ -51,9 +53,12 @@ def test_delete_research_events_filtered(tmp_path):
         ("ev2", now, now, "other_type", "test", now, "{}", "h2"),
     )
     conn.commit()
-    deleted = delete_research_events(event_type="intel_analysis", db_path=db)
-    assert deleted == 1
-    assert get_conn(db).execute("SELECT count(*) FROM research_events").fetchone()[0] == 1
+    archived = delete_research_events(event_type="intel_analysis", db_path=db)
+    assert archived == 1
+    # Only intel_analysis is archived; other_type remains unarchived
+    assert get_conn(db).execute("SELECT count(*) FROM research_events").fetchone()[0] == 2
+    assert get_conn(db).execute("SELECT count(*) FROM research_events WHERE archived=1").fetchone()[0] == 1
+    assert get_conn(db).execute("SELECT count(*) FROM research_events WHERE COALESCE(archived,0)=0").fetchone()[0] == 1
 
 
 def test_archive_rejected_trade_ideas(tmp_path):

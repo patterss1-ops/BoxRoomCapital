@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-3 h-full overflow-y-auto pr-1">
+  <div class="flex items-center justify-between">
+    <h1 class="text-sm font-semibold text-gray-800">{{ title }}</h1>
+    <a href="/intel" class="text-xs text-blue-600 hover:text-blue-700">&larr; Back to Intel</a>
+  </div>
+
+  {% if not events %}
+  <div class="text-xs text-gray-400 py-8 text-center border border-dashed border-gray-200 rounded-lg">
+    No archived council analyses.
+  </div>
+  {% else %}
+  <div class="text-xs text-gray-400 mb-1">{{ events|length }} archived analysis(es)</div>
+  <div class="space-y-1.5">
+    {% for e in events %}
+    <div class="bg-white border border-gray-200 rounded-lg px-3 py-2">
+      <div class="flex items-center gap-2">
+        <!-- Source badge -->
+        {% if 'twitter' in (e.source or '') or 'x_' in (e.source or '') %}
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-blue-50 text-blue-500 border border-blue-200 flex-shrink-0">X</span>
+        {% elif 'seeking_alpha' in (e.source or '') %}
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-50 text-amber-500 border border-amber-200 flex-shrink-0">SA</span>
+        {% elif 'telegram' in (e.source or '') %}
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-sky-50 text-sky-500 border border-sky-200 flex-shrink-0">TG</span>
+        {% elif 'manual' in (e.source or '') %}
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-50 text-gray-500 border border-gray-200 flex-shrink-0">UI</span>
+        {% else %}
+        <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-gray-50 text-gray-500 border border-gray-200 flex-shrink-0">{{ (e.source or '?')[:4] }}</span>
+        {% endif %}
+
+        {% if e.symbol %}
+        <span class="text-xs font-mono font-bold text-gray-900">{{ e.symbol }}</span>
+        {% endif %}
+
+        <span class="text-xs text-gray-600 truncate flex-1 min-w-0">{{ e.headline or 'Untitled' }}</span>
+
+        {% if e.confidence %}
+        <span class="text-[10px] font-mono font-semibold {% if e.confidence >= 0.6 %}text-emerald-600{% elif e.confidence >= 0.3 %}text-amber-500{% else %}text-red-500{% endif %} flex-shrink-0">{{ "%.0f"|format(e.confidence * 100) }}%</span>
+        {% endif %}
+
+        <span class="text-[10px] text-gray-300 ml-auto font-mono flex-shrink-0">{{ (e.retrieved_at or e.created_at or '')[:16] }}</span>
+      </div>
+      {% if e.detail %}
+      <div class="text-xs text-gray-500 mt-1 line-clamp-2">{{ e.detail[:200] }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
