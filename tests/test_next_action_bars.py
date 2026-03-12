@@ -163,7 +163,7 @@ def test_research_next_action_renders_from_operating_summary():
 
     assert "Pilot sign-off waiting" in body
     assert "Review" in body
-    assert "#research-alerts" in body
+    assert "switchTab" in body
 
 
 def test_research_next_action_urgent_state():
@@ -246,4 +246,4 @@ def test_research_next_action_template_has_state_classes():
     template = Path("app/web/templates/_research_next_action.html").read_text(encoding="utf-8")
     assert "state ==" in template
     assert "title" in template
-    assert "anchor" in template
+    assert "switchTab" in template

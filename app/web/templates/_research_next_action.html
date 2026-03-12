@@ -18,21 +18,24 @@
     {{ title }}{% if detail %} &mdash; {{ detail }}{% endif %}
   </p>
 
-  <!-- Single action -->
+  <!-- Single action — switches to the right workflow tab -->
   {% if state == 'idle' %}
-  <button onclick="document.querySelector('textarea[name=raw_content]')?.focus()"
+  <button onclick="switchTab('research-workflow','submit'); document.querySelector('textarea[name=raw_content]')?.focus()"
           class="text-xs font-semibold px-3 py-1.5 rounded-lg border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 transition-colors whitespace-nowrap">
     Start Here
   </button>
-  {% else %}
-  <a href="{{ anchor }}"
+  {% elif state == 'urgent' or state == 'warning' %}
+  <button onclick="switchTab('research-workflow','decisions')"
      class="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap
        {% if state == 'urgent' %}bg-red-50 text-red-700 border-red-200 hover:bg-red-100
-       {% elif state == 'warning' %}bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100
-       {% else %}bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100{% endif %}">
-    {% if state == 'urgent' %}Open Queue
-    {% elif state == 'warning' %}Review
-    {% else %}View Chains{% endif %}
-  </a>
+       {% else %}bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100{% endif %}">
+    {% if state == 'urgent' %}Open Queue{% else %}Review{% endif %}
+  </button>
+  {% else %}
+  <button onclick="switchTab('research-workflow','chains')"
+     class="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap
+       bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100">
+    View Chains
+  </button>
   {% endif %}
 </div>
