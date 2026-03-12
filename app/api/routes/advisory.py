@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import html
 import logging
 from datetime import datetime, timezone
@@ -89,8 +90,12 @@ def advisory_memories_api(topic: str = "", limit: int = 20):
 
 
 @router.post("/api/advisory/generate")
-async def advisory_generate_api():
-    """Trigger proactive advisory brief."""
+def advisory_generate_api():
+    """Trigger proactive advisory brief.
+
+    Uses def (not async def) so FastAPI runs it in a threadpool — the LLM call
+    and Telegram HTTP request would otherwise block the async event loop.
+    """
     if not config.ADVISOR_ENABLED:
         return {"ok": False, "error": "Advisory module disabled"}
     try:
@@ -220,7 +225,11 @@ def advisory_memories_fragment(request: Request, topic: str = ""):
 
 @router.post("/api/advisory/chat")
 async def advisory_chat_api(request: Request):
-    """Web chat endpoint — processes message and returns updated chat HTML fragment."""
+    """Web chat endpoint — processes message and returns updated chat HTML fragment.
+
+    Keeps async for request.form() parsing, but runs the blocking LLM call and
+    DB queries in a threadpool via asyncio.to_thread() to avoid stalling the event loop.
+    """
     if not config.ADVISOR_ENABLED:
         return HTMLResponse(
             '<div class="text-[10px] text-red-500 py-2 text-center">'
@@ -232,27 +241,30 @@ async def advisory_chat_api(request: Request):
         if not message:
             return HTMLResponse("")
 
-        from intelligence.advisor import get_active_session, get_advisor_messages
-        from data.trade_db import DB_PATH
+        def _do_chat(msg: str):
+            from intelligence.advisor import get_active_session, get_advisor_messages
+            from data.trade_db import DB_PATH
 
-        engine = _get_advisory_engine()
-        chat_id = int(config.NOTIFICATIONS.get("telegram_chat_id", "0") or "0")
-        _response = engine.process_message(chat_id, message)
+            engine = _get_advisory_engine()
+            chat_id = int(config.NOTIFICATIONS.get("telegram_chat_id", "0") or "0")
+            engine.process_message(chat_id, msg)
 
-        # Return full updated chat
-        timeout = getattr(config, "ADVISOR_SESSION_TIMEOUT_HOURS", 4)
-        session = get_active_session(DB_PATH, timeout_hours=timeout)
-        messages = []
-        session_id = ""
-        if session:
-            session_id = session["id"]
-            raw_msgs = get_advisor_messages(DB_PATH, session_id, limit=50)
-            for m in raw_msgs:
-                messages.append({
-                    "role": m.get("role", "user"),
-                    "content": m.get("content", ""),
-                    "created_at": (m.get("created_at", ""))[:16],
-                })
+            timeout = getattr(config, "ADVISOR_SESSION_TIMEOUT_HOURS", 4)
+            session = get_active_session(DB_PATH, timeout_hours=timeout)
+            messages = []
+            session_id = ""
+            if session:
+                session_id = session["id"]
+                raw_msgs = get_advisor_messages(DB_PATH, session_id, limit=50)
+                for m in raw_msgs:
+                    messages.append({
+                        "role": m.get("role", "user"),
+                        "content": m.get("content", ""),
+                        "created_at": (m.get("created_at", ""))[:16],
+                    })
+            return messages, session_id
+
+        messages, session_id = await asyncio.to_thread(_do_chat, message)
         return TEMPLATES.TemplateResponse(
             request, "_advisory_chat.html",
             {"request": request, "messages": messages, "session_id": session_id},
@@ -267,7 +279,10 @@ async def advisory_chat_api(request: Request):
 # ── Advisory: transaction recording ────────────────────────────────────
 @router.post("/api/advisory/transaction")
 async def advisory_transaction_api(request: Request):
-    """Record a transaction (buy/sell/deposit/withdrawal/dividend)."""
+    """Record a transaction (buy/sell/deposit/withdrawal/dividend).
+
+    DB writes run in threadpool via asyncio.to_thread() to avoid blocking the event loop.
+    """
     try:
         form = await request.form()
         tx_type = str(form.get("tx_type", "")).strip().lower()
