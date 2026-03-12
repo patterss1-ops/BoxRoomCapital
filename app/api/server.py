@@ -130,6 +130,7 @@ from intelligence.market_brief import MarketBrief, generate_brief, get_email_dra
 from intelligence.sa_factor_grades import store_factor_grades
 from app.api import research_artifact_views as _research_artifact_views
 from app.api import app_factory as _app_factory
+import app.api.shared as _shared_mod
 from app.api import broker_helpers as _broker_helpers
 from app.api import fragment_context_helpers as _fragment_context_helpers
 from app.api import job_helpers as _job_helpers
@@ -149,7 +150,6 @@ from app.api.shared import (
     control,
     research,
     research_dashboard,
-    _broker,
     _broker_lock,
     _get_or_create_broker,
     _get_cached_value,
@@ -451,12 +451,12 @@ def _build_engine_a_regime_journal_context(
 
 def _get_broker_snapshot() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
-        connected = _broker is not None and _broker.is_connected()
+        connected = _shared_mod._broker is not None and _shared_mod._broker.is_connected()
         info = None
         positions = []
-        if connected and _broker is not None:
-            info = _broker.get_account_info(timeout=_UI_BROKER_TIMEOUT_SECONDS)
-            positions = _broker.get_positions(timeout=_UI_BROKER_TIMEOUT_SECONDS)
+        if connected and _shared_mod._broker is not None:
+            info = _shared_mod._broker.get_account_info(timeout=_UI_BROKER_TIMEOUT_SECONDS)
+            positions = _shared_mod._broker.get_positions(timeout=_UI_BROKER_TIMEOUT_SECONDS)
         return {
             "connected": connected,
             "info": info,
@@ -473,7 +473,7 @@ def _get_broker_snapshot() -> dict[str, Any]:
 
 def _get_market_browser_context() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
-        connected = _broker is not None and _broker.is_connected()
+        connected = _shared_mod._broker is not None and _shared_mod._broker.is_connected()
         markets = []
         for ticker, info in config.MARKET_MAP.items():
             entry = {
@@ -484,8 +484,8 @@ def _get_market_browser_context() -> dict[str, Any]:
                 "bid": None,
                 "offer": None,
             }
-            if connected and _broker is not None:
-                mkt = _broker.get_market_info(
+            if connected and _shared_mod._broker is not None:
+                mkt = _shared_mod._broker.get_market_info(
                     info["epic"],
                     timeout=_UI_BROKER_MARKET_TIMEOUT_SECONDS,
                 )
@@ -785,7 +785,7 @@ def get_order_intent_detail(intent_id: str) -> Optional[dict[str, Any]]:
 def build_broker_health_payload() -> dict[str, Any]:
     return _broker_helpers.build_broker_health_payload(
         control_obj=control,
-        shared_broker=_broker,
+        shared_broker=_shared_mod._broker,
         asdict_fn=asdict,
         is_dataclass_fn=is_dataclass,
     )

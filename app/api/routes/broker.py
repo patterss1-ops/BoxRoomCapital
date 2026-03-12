@@ -15,9 +15,9 @@ from fastapi.responses import HTMLResponse, JSONResponse
 import config
 from app.api import broker_helpers as _broker_helpers
 from app.api import fragment_context_helpers as _fragment_context_helpers
+import app.api.shared as _shared_mod
 from app.api.shared import (
     TEMPLATES,
-    _broker,
     _broker_lock,
     _BROKER_HEALTH_CACHE_TTL_SECONDS,
     _BROKER_SNAPSHOT_CACHE_TTL_SECONDS,
@@ -78,7 +78,7 @@ def get_order_intent_detail(intent_id: str) -> Optional[dict[str, Any]]:
 def build_broker_health_payload() -> dict[str, Any]:
     return _broker_helpers.build_broker_health_payload(
         control_obj=control,
-        shared_broker=_broker,
+        shared_broker=_shared_mod._broker,
         asdict_fn=asdict,
         is_dataclass_fn=is_dataclass,
     )
@@ -86,12 +86,12 @@ def build_broker_health_payload() -> dict[str, Any]:
 
 def _get_broker_snapshot() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
-        connected = _broker is not None and _broker.is_connected()
+        connected = _shared_mod._broker is not None and _shared_mod._broker.is_connected()
         info = None
         positions = []
-        if connected and _broker is not None:
-            info = _broker.get_account_info(timeout=_UI_BROKER_TIMEOUT_SECONDS)
-            positions = _broker.get_positions(timeout=_UI_BROKER_TIMEOUT_SECONDS)
+        if connected and _shared_mod._broker is not None:
+            info = _shared_mod._broker.get_account_info(timeout=_UI_BROKER_TIMEOUT_SECONDS)
+            positions = _shared_mod._broker.get_positions(timeout=_UI_BROKER_TIMEOUT_SECONDS)
         return {
             "connected": connected,
             "info": info,
@@ -108,7 +108,7 @@ def _get_broker_snapshot() -> dict[str, Any]:
 
 def _get_market_browser_context() -> dict[str, Any]:
     def _load() -> dict[str, Any]:
-        connected = _broker is not None and _broker.is_connected()
+        connected = _shared_mod._broker is not None and _shared_mod._broker.is_connected()
         markets = []
         for ticker, info in config.MARKET_MAP.items():
             entry = {
@@ -119,8 +119,8 @@ def _get_market_browser_context() -> dict[str, Any]:
                 "bid": None,
                 "offer": None,
             }
-            if connected and _broker is not None:
-                mkt = _broker.get_market_info(
+            if connected and _shared_mod._broker is not None:
+                mkt = _shared_mod._broker.get_market_info(
                     info["epic"],
                     timeout=_UI_BROKER_MARKET_TIMEOUT_SECONDS,
                 )
@@ -159,9 +159,6 @@ def api_broker_health():
 
 @router.post("/api/broker/connect")
 def api_broker_connect():
-    from app.api.shared import _broker as _shared_broker
-    import app.api.shared as _shared_mod
-    # Force reconnect
     with _broker_lock:
         _shared_mod._broker = None
     broker, err = _get_or_create_broker()
@@ -181,14 +178,14 @@ def api_broker_connect():
 
 @router.get("/api/broker/status")
 def api_broker_status():
-    if not _broker or not _broker.is_connected():
+    if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return {"connected": False, "message": "Not connected. POST /api/broker/connect first."}
-    info = _broker.get_account_info()
-    positions = _broker.get_positions()
+    info = _shared_mod._broker.get_account_info()
+    positions = _shared_mod._broker.get_positions()
     return {
         "connected": True,
-        "account": config.ig_account_number(_broker.is_demo),
-        "mode": "DEMO" if _broker.is_demo else "LIVE",
+        "account": config.ig_account_number(_shared_mod._broker.is_demo),
+        "mode": "DEMO" if _shared_mod._broker.is_demo else "LIVE",
         "balance": info.balance,
         "equity": info.equity,
         "unrealised_pnl": info.unrealised_pnl,
@@ -199,9 +196,9 @@ def api_broker_status():
 
 @router.get("/api/broker/positions")
 def api_broker_positions():
-    if not _broker or not _broker.is_connected():
+    if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return JSONResponse({"error": "Not connected"}, status_code=400)
-    positions = _broker.get_positions()
+    positions = _shared_mod._broker.get_positions()
     return {
         "count": len(positions),
         "positions": [
@@ -221,9 +218,9 @@ def api_broker_positions():
 
 @router.get("/api/broker/market/{epic:path}")
 def api_broker_market(epic: str):
-    if not _broker or not _broker.is_connected():
+    if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return JSONResponse({"error": "Not connected"}, status_code=400)
-    info = _broker.get_market_info(epic)
+    info = _shared_mod._broker.get_market_info(epic)
     if not info:
         return JSONResponse({"error": f"Market {epic} not found or blocked"}, status_code=404)
     snap = info.get("snapshot", {})
@@ -245,7 +242,7 @@ def api_broker_market(epic: str):
 
 @router.get("/api/broker/markets")
 def api_broker_markets():
-    connected = _broker is not None and _broker.is_connected()
+    connected = _shared_mod._broker is not None and _shared_mod._broker.is_connected()
     markets = []
     for ticker, info in config.MARKET_MAP.items():
         entry = {
@@ -256,7 +253,7 @@ def api_broker_markets():
             "verified": info.get("verified", False),
         }
         if connected:
-            mkt = _broker.get_market_info(info["epic"])
+            mkt = _shared_mod._broker.get_market_info(info["epic"])
             if mkt:
                 snap = mkt.get("snapshot", {})
                 entry["status"] = snap.get("marketStatus")
@@ -271,7 +268,7 @@ def api_broker_markets():
 
 @router.post("/api/broker/open-position")
 async def api_broker_open_position(request: Request):
-    if not _broker or not _broker.is_connected():
+    if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return JSONResponse({"error": "Not connected"}, status_code=400)
 
     body = await request.json()
@@ -294,12 +291,11 @@ async def api_broker_open_position(request: Request):
     if ticker != epic:
         # Use place_long/place_short which handle stop distances etc.
         if direction == "BUY":
-            result = _broker.place_long(ticker, size, "api_manual")
+            result = _shared_mod._broker.place_long(ticker, size, "api_manual")
         else:
-            result = _broker.place_short(ticker, size, "api_manual")
+            result = _shared_mod._broker.place_short(ticker, size, "api_manual")
     else:
-        # Direct epic — use _place_option_leg for raw epic placement
-        result = _broker._place_option_leg(epic, direction, size, epic, "api_manual")
+        result = _shared_mod._broker._place_option_leg(epic, direction, size, epic, "api_manual")
 
     return {
         "ok": result.success,
@@ -312,7 +308,7 @@ async def api_broker_open_position(request: Request):
 
 @router.post("/api/broker/close-position")
 async def api_broker_close_position(request: Request):
-    if not _broker or not _broker.is_connected():
+    if not _shared_mod._broker or not _shared_mod._broker.is_connected():
         return JSONResponse({"error": "Not connected"}, status_code=400)
 
     body = await request.json()
@@ -322,7 +318,7 @@ async def api_broker_close_position(request: Request):
         return JSONResponse({"error": "deal_id required"}, status_code=400)
 
     # Find the position to get direction and size
-    positions = _broker.get_positions()
+    positions = _shared_mod._broker.get_positions()
     target = None
     for p in positions:
         if p.deal_id == deal_id:
@@ -340,10 +336,10 @@ async def api_broker_close_position(request: Request):
         "orderType": "MARKET",
     }
 
-    r = _broker.session.post(
-        f"{_broker.base_url}/positions/otc",
+    r = _shared_mod._broker.session.post(
+        f"{_shared_mod._broker.base_url}/positions/otc",
         json=close_payload,
-        headers={**_broker._headers("1"), "_method": "DELETE"},
+        headers={**_shared_mod._broker._headers("1"), "_method": "DELETE"},
     )
 
     if r.status_code != 200:
@@ -355,7 +351,7 @@ async def api_broker_close_position(request: Request):
         return JSONResponse({"ok": False, "error": "No deal reference returned"}, status_code=502)
 
     time.sleep(1)
-    result = _broker._confirm_deal(close_ref, target.ticker, target.strategy, target.size)
+    result = _shared_mod._broker._confirm_deal(close_ref, target.ticker, target.strategy, target.size)
     return {
         "ok": result.success,
         "deal_id": result.order_id,
@@ -588,8 +584,8 @@ def broker_panel_fragment(request: Request):
     if connected:
         info = snapshot.get("info")
         positions = snapshot.get("positions", [])
-        ctx["account"] = config.ig_account_number(_broker.is_demo)
-        ctx["mode"] = "DEMO" if _broker.is_demo else "LIVE"
+        ctx["account"] = config.ig_account_number(_shared_mod._broker.is_demo)
+        ctx["mode"] = "DEMO" if _shared_mod._broker.is_demo else "LIVE"
         ctx["balance"] = info.balance
         ctx["equity"] = info.equity
         ctx["unrealised_pnl"] = info.unrealised_pnl
