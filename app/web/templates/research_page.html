@@ -8,104 +8,136 @@
        hx-trigger="load delay:100ms, every 8s"
        hx-swap="innerHTML"></div>
 
-  <!-- Row 1: Operating Summary (HTMX fragment) + Quick Intake -->
-  <div class="grid grid-cols-1 xl:grid-cols-12 gap-3">
-    <div class="xl:col-span-8"
-         id="research-operating-summary"
-         hx-get="/fragments/research/operating-summary"
-         hx-trigger="load delay:200ms, every 15s"
-         hx-swap="innerHTML">
-      <div class="bg-white border border-gray-200 rounded-xl p-4 animate-pulse h-32"></div>
-    </div>
-
-    <div class="xl:col-span-4" id="research-intake">
-      <section class="bg-white border border-gray-200 rounded-xl p-4 h-full">
-        <h2 class="text-sm font-semibold text-gray-900 mb-1">Submit New Evidence</h2>
-        <p class="text-xs text-gray-500 mb-3">Feed a filing, news item, or note into the research pipeline.</p>
-        <form hx-post="/api/actions/research/engine-b-run" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" class="space-y-2">
-          <div class="grid grid-cols-2 gap-2">
-            <div>
-              <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Source</label>
-              <select name="source_class" class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500">
-                <option value="news_wire" selected>News</option>
-                <option value="filing">Filing</option>
-                <option value="transcript">Transcript</option>
-                <option value="analyst_revision">Analyst</option>
-                <option value="sa_quant">SA Quant</option>
-                <option value="social_curated">Social (curated)</option>
-                <option value="social_general">Social (general)</option>
-              </select>
-            </div>
-            <div>
-              <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Credibility</label>
-              <input type="number" name="source_credibility" value="0.7" min="0" max="1" step="0.1" class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500" />
-            </div>
-          </div>
-          <div>
-            <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Source IDs</label>
-            <input type="text" name="source_ids" placeholder="filing:10q-2026-03-09, news:benzinga-123" class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500" />
-          </div>
-          <div>
-            <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Content</label>
-            <textarea name="raw_content" rows="4" placeholder="Paste filing excerpt, news item, or note..." class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
-          </div>
-          <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-blue-500 transition-colors text-xs w-full">Run Engine B</button>
-        </form>
-      </section>
-    </div>
-  </div>
-
-  <!-- Row 2: Active Research panel (chains + engine status) -->
-  <div id="research-panel"
-       hx-get="/fragments/research{% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}{% endif %}"
-       hx-trigger="load delay:300ms"
+  <!-- Compact KPI + Operating Summary row -->
+  <div id="research-operating-summary"
+       hx-get="/fragments/research/operating-summary"
+       hx-trigger="load delay:200ms, every 15s"
        hx-swap="innerHTML">
-    <div class="bg-white border border-gray-200 rounded-xl p-4 animate-pulse h-24"></div>
+    <div class="bg-white border border-gray-200 rounded-xl p-4 animate-pulse h-20"></div>
   </div>
 
-  <!-- Row 3: Decision Workbench -->
-  <div class="grid grid-cols-1 xl:grid-cols-12 gap-3" id="research-workbench">
-    <div class="xl:col-span-12"
-         id="research-focus-ribbon"
-         {% if research_selected_chain_id %}
-         data-initial-research-chain="{{ research_selected_chain_id }}"
-         hx-get="/fragments/research/focus-ribbon?chain_id={{ research_selected_chain_id }}{% if research_selected_queue_lane != 'all' %}&queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_active_view != 'all' %}&active_view={{ research_selected_active_view }}{% endif %}"
-         {% else %}
-         hx-get="/fragments/research/focus-ribbon{% if research_selected_queue_lane != 'all' or research_selected_active_view != 'all' %}?{% endif %}{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_queue_lane != 'all' and research_selected_active_view != 'all' %}&{% endif %}{% if research_selected_active_view != 'all' %}active_view={{ research_selected_active_view }}{% endif %}"
-         {% endif %}
-         hx-trigger="load delay:325ms"
-         hx-swap="innerHTML"></div>
+  <!-- Workflow Tabs ─────────────────────────────────────── -->
+  <!-- The tabs ARE the workflow: Submit → Decisions → Chains → Workbench -->
+  <div>
+    <div id="research-workflow-tabs" class="flex gap-1 border-b border-gray-200 mb-3">
+      <button data-tab="submit" onclick="switchTab('research-workflow','submit')"
+              class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent">
+        1. Submit
+      </button>
+      <button data-tab="decisions" onclick="switchTab('research-workflow','decisions')"
+              class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900">
+        2. Decisions
+      </button>
+      <button data-tab="chains" onclick="switchTab('research-workflow','chains')"
+              class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent">
+        3. Chains
+      </button>
+      <button data-tab="workbench" onclick="switchTab('research-workflow','workbench')"
+              class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent">
+        4. Workbench
+      </button>
+    </div>
 
-    <div class="xl:col-span-8"
-         id="research-artifact-chain-viewer"
-         {% if research_selected_chain_id %}
-         data-initial-research-chain="{{ research_selected_chain_id }}"
-         hx-get="/fragments/research/artifact-chain/{{ research_selected_chain_id }}"
-         {% else %}
-         hx-get="/fragments/research/artifact-chain"
-         {% endif %}
-         hx-trigger="load delay:350ms"
-         hx-swap="innerHTML"></div>
+    <!-- Tab 1: Submit Evidence ──────────────────────────── -->
+    <div data-tab-content="submit" class="space-y-3">
+      <div id="research-intake">
+        <section class="bg-white border border-gray-200 rounded-xl p-4">
+          <h2 class="text-sm font-semibold text-gray-900 mb-1">Submit New Evidence</h2>
+          <p class="text-xs text-gray-500 mb-3">Feed a filing, news item, or note into the research pipeline. Engine B will form a hypothesis and start a research chain.</p>
+          <form hx-post="/api/actions/research/engine-b-run" hx-vals='js:window.getResearchActionVals()' hx-target="#research-operator-output" hx-swap="innerHTML" class="space-y-2">
+            <div class="grid grid-cols-2 gap-2">
+              <div>
+                <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Source</label>
+                <select name="source_class" class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500">
+                  <option value="news_wire" selected>News</option>
+                  <option value="filing">Filing</option>
+                  <option value="transcript">Transcript</option>
+                  <option value="analyst_revision">Analyst</option>
+                  <option value="sa_quant">SA Quant</option>
+                  <option value="social_curated">Social (curated)</option>
+                  <option value="social_general">Social (general)</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Credibility</label>
+                <input type="number" name="source_credibility" value="0.7" min="0" max="1" step="0.1" class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500" />
+              </div>
+            </div>
+            <div>
+              <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Source IDs</label>
+              <input type="text" name="source_ids" placeholder="filing:10q-2026-03-09, news:benzinga-123" class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500" />
+            </div>
+            <div>
+              <label class="text-gray-500 text-[11px] font-semibold uppercase tracking-wide">Content</label>
+              <textarea name="raw_content" rows="4" placeholder="Paste filing excerpt, news item, or note..." class="mt-0.5 w-full bg-gray-50 border border-gray-200 text-gray-800 rounded-lg px-2 py-1.5 text-xs placeholder-gray-400 focus:ring-1 focus:ring-blue-500/50 focus:border-blue-500"></textarea>
+            </div>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-3 py-1.5 rounded-lg border border-blue-500 transition-colors text-xs w-full">Run Engine B</button>
+          </form>
+        </section>
+      </div>
+    </div>
 
-    <div class="xl:col-span-4"
-         id="research-operator-output"
-         {% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}
-         {% if research_selected_chain_id %}data-initial-research-chain="{{ research_selected_chain_id }}"{% endif %}
-         hx-get="/fragments/research/operator-output?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}"
-         {% else %}
-         hx-get="/fragments/research/operator-output"
-         {% endif %}
-         hx-trigger="load delay:400ms"
-         hx-swap="innerHTML"></div>
+    <!-- Tab 2: Decisions (default active) ──────────────── -->
+    <div data-tab-content="decisions" class="active space-y-3">
+      <div id="research-panel"
+           hx-get="/fragments/research{% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}{% endif %}"
+           hx-trigger="load delay:300ms"
+           hx-swap="innerHTML">
+        <div class="bg-white border border-gray-200 rounded-xl p-4 animate-pulse h-24"></div>
+      </div>
+    </div>
+
+    <!-- Tab 3: Chains (active hypotheses + monitoring) ─── -->
+    <div data-tab-content="chains" class="space-y-3">
+      <div id="research-workbench" class="grid grid-cols-1 xl:grid-cols-12 gap-3">
+        <div class="xl:col-span-12"
+             id="research-focus-ribbon"
+             {% if research_selected_chain_id %}
+             data-initial-research-chain="{{ research_selected_chain_id }}"
+             hx-get="/fragments/research/focus-ribbon?chain_id={{ research_selected_chain_id }}{% if research_selected_queue_lane != 'all' %}&queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_active_view != 'all' %}&active_view={{ research_selected_active_view }}{% endif %}"
+             {% else %}
+             hx-get="/fragments/research/focus-ribbon{% if research_selected_queue_lane != 'all' or research_selected_active_view != 'all' %}?{% endif %}{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_queue_lane != 'all' and research_selected_active_view != 'all' %}&{% endif %}{% if research_selected_active_view != 'all' %}active_view={{ research_selected_active_view }}{% endif %}"
+             {% endif %}
+             hx-trigger="load delay:325ms"
+             hx-swap="innerHTML"></div>
+
+        <div class="xl:col-span-8"
+             id="research-artifact-chain-viewer"
+             {% if research_selected_chain_id %}
+             data-initial-research-chain="{{ research_selected_chain_id }}"
+             hx-get="/fragments/research/artifact-chain/{{ research_selected_chain_id }}"
+             {% else %}
+             hx-get="/fragments/research/artifact-chain"
+             {% endif %}
+             hx-trigger="load delay:350ms"
+             hx-swap="innerHTML"></div>
+
+        <div class="xl:col-span-4"
+             id="research-chain-sidebar"
+             {% if research_selected_queue_lane != 'all' or research_selected_chain_id or research_selected_active_view != 'all' %}
+             {% if research_selected_chain_id %}data-initial-research-chain="{{ research_selected_chain_id }}"{% endif %}
+             hx-get="/fragments/research/operator-output?{% if research_selected_queue_lane != 'all' %}queue_lane={{ research_selected_queue_lane }}{% endif %}{% if research_selected_chain_id %}{% if research_selected_queue_lane != 'all' %}&{% endif %}chain_id={{ research_selected_chain_id }}{% endif %}{% if research_selected_active_view != 'all' %}{% if research_selected_queue_lane != 'all' or research_selected_chain_id %}&{% endif %}active_view={{ research_selected_active_view }}{% endif %}"
+             {% else %}
+             hx-get="/fragments/research/operator-output"
+             {% endif %}
+             hx-trigger="load delay:400ms"
+             hx-swap="innerHTML"></div>
+      </div>
+    </div>
+
+    <!-- Tab 4: Workbench (deep-dive into a single chain) ─ -->
+    <div data-tab-content="workbench" class="space-y-3">
+      <div id="research-archive"
+           hx-get="/fragments/research/archive"
+           hx-trigger="load delay:450ms, every 30s"
+           hx-swap="innerHTML"></div>
+    </div>
   </div>
 
-  <!-- Row 4: Archive -->
-  <div id="research-archive"
-       hx-get="/fragments/research/archive"
-       hx-trigger="load delay:450ms, every 30s"
-       hx-swap="innerHTML"></div>
+  <!-- Action result area (targeted by forms across all tabs) -->
+  <div id="research-operator-output"></div>
 
-  <!-- Row 5: Legacy Labs (collapsed) -->
+  <!-- Collapsed sections ─────────────────────────────────── -->
   <details class="bg-white border border-gray-200 rounded-xl p-4">
     <summary class="cursor-pointer text-sm font-semibold text-gray-500 hover:text-gray-700">Legacy Labs &mdash; option discovery, calibration, strategy parameters</summary>
     <div class="mt-4 grid grid-cols-1 xl:grid-cols-12 gap-4">
