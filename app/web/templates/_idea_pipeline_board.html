@@ -82,7 +82,8 @@
       <span class="text-[10px] font-semibold text-red-400 uppercase tracking-wider">Rejected</span>
       <div class="flex items-center gap-2">
         {% if (rejected.count or 0) > 0 %}
-        <button onclick="if(confirm('Clear all rejected ideas?')) fetch('/api/ideas/clear-rejected',{method:'POST'}).then(()=>{var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')})"
+        <a href="/archive/rejected-ideas" class="text-[10px] text-gray-400 hover:text-gray-600 px-1 transition-colors" title="View archive">Archive</a>
+        <button onclick="if(confirm('Clear all rejected ideas?')) fetch('/api/ideas/clear-rejected',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>{console.log('Cleared',d.deleted,'rejected'); var b=document.getElementById('idea-pipeline-board'); if(b) htmx.trigger(b,'refreshBoard')}).catch(e=>console.error('Clear failed',e))"
                 class="text-[10px] text-red-400/60 hover:text-red-500 px-1.5 py-0.5 rounded border border-red-300/30 hover:border-red-400/50 transition-colors">
           Clear
         </button>

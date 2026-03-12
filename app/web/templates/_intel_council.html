@@ -4,7 +4,7 @@
     <div class="flex items-center gap-2">
       <span class="text-xs text-gray-400">{{ analyses|length }} analyses</span>
       {% if analyses %}
-      <button onclick="if(confirm('Clear all council analyses?')) fetch('/api/intel/clear-feed',{method:'POST'}).then(()=>htmx.ajax('GET','/fragments/intel-council','#intel-council-panel'))"
+      <button onclick="if(confirm('Clear all council analyses?')) fetch('/api/intel/clear-feed',{method:'POST',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).then(d=>{console.log('Cleared',d.deleted,'analyses'); htmx.ajax('GET','/fragments/intel-council','#intel-council-panel')}).catch(e=>console.error('Clear failed',e))"
               class="text-[10px] text-red-400/60 hover:text-red-500 px-1.5 py-0.5 rounded border border-red-300/30 hover:border-red-400/50 transition-colors">
         Clear
       </button>

@@ -1890,20 +1890,31 @@ def delete_research_events(
         cur = conn.execute("DELETE FROM research_events WHERE event_type=?", (event_type,))
     else:
         cur = conn.execute("DELETE FROM research_events")
-    conn.commit()
     deleted = cur.rowcount
-    conn.close()
+    conn.commit()
     return deleted
 
 
 def delete_rejected_trade_ideas(db_path: str = DB_PATH) -> int:
-    """Delete all trade ideas in the 'rejected' pipeline stage. Returns count deleted."""
+    """Archive all rejected trade ideas (moves to 'archived' stage). Returns count archived."""
+    now = datetime.now(timezone.utc).isoformat()
     conn = get_conn(db_path)
-    cur = conn.execute("DELETE FROM trade_ideas WHERE pipeline_stage='rejected'")
+    cur = conn.execute(
+        "UPDATE trade_ideas SET pipeline_stage='archived', updated_at=? WHERE pipeline_stage='rejected'",
+        (now,),
+    )
+    archived = cur.rowcount
     conn.commit()
-    deleted = cur.rowcount
-    conn.close()
-    return deleted
+    return archived
+
+
+def get_archived_trade_ideas(db_path: str = DB_PATH) -> list[dict]:
+    """List all archived trade ideas, newest first."""
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        "SELECT * FROM trade_ideas WHERE pipeline_stage='archived' ORDER BY updated_at DESC",
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ─── Order action state machine (execution reliability) ──────────────────
