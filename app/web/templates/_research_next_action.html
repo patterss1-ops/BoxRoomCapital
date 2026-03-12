@@ -1,0 +1,38 @@
+<!-- Research "What to do next" action bar — loaded via HTMX, auto-refreshes -->
+<div class="flex items-center gap-3 border rounded-xl px-4 py-2.5
+  {% if state == 'urgent' %}bg-red-50/50 border-red-200
+  {% elif state == 'warning' %}bg-amber-50/50 border-amber-200
+  {% elif state == 'clear' %}bg-emerald-50/50 border-emerald-200
+  {% else %}bg-gray-50/50 border-gray-200{% endif %}">
+
+  <!-- State dot -->
+  <span class="w-2 h-2 rounded-full flex-shrink-0
+    {% if state == 'urgent' %}bg-red-500 animate-pulse
+    {% elif state == 'warning' %}bg-amber-500
+    {% elif state == 'clear' %}bg-emerald-500
+    {% else %}bg-gray-300{% endif %}"></span>
+
+  <!-- Message -->
+  <p class="text-sm text-gray-800 flex-1">
+    {% if state == 'urgent' %}<span class="font-semibold text-red-700">Urgent:</span> {% endif %}
+    {{ title }}{% if detail %} &mdash; {{ detail }}{% endif %}
+  </p>
+
+  <!-- Single action -->
+  {% if state == 'idle' %}
+  <button onclick="document.querySelector('textarea[name=raw_content]')?.focus()"
+          class="text-xs font-semibold px-3 py-1.5 rounded-lg border bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100 transition-colors whitespace-nowrap">
+    Start Here
+  </button>
+  {% else %}
+  <a href="{{ anchor }}"
+     class="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors whitespace-nowrap
+       {% if state == 'urgent' %}bg-red-50 text-red-700 border-red-200 hover:bg-red-100
+       {% elif state == 'warning' %}bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100
+       {% else %}bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100{% endif %}">
+    {% if state == 'urgent' %}Open Queue
+    {% elif state == 'warning' %}Review
+    {% else %}View Chains{% endif %}
+  </a>
+  {% endif %}
+</div>

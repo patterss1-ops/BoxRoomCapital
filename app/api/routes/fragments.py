@@ -500,6 +500,88 @@ def sa_symbol_captures_fragment(request: Request, limit: int = 5):
     )
 
 
+@router.get("/fragments/intel-next-action", response_class=HTMLResponse)
+def intel_next_action_fragment(request: Request):
+    """Render the Intel 'what to do next' action bar."""
+    # Check for active council jobs
+    active_jobs: list[dict] = []
+    try:
+        conn = get_conn(DB_PATH)
+        running = conn.execute(
+            """SELECT id FROM jobs
+               WHERE job_type = 'intel_analysis' AND status IN ('queued', 'running')
+               ORDER BY created_at DESC LIMIT 5"""
+        ).fetchall()
+        conn.close()
+        active_jobs = [{"id": r[0]} for r in running]
+    except Exception:
+        pass
+
+    # Get pipeline stage counts
+    all_ideas = get_trade_ideas(limit=500)
+    stage_counts: dict[str, int] = {}
+    for idea in all_ideas:
+        stage = idea.get("pipeline_stage", "idea")
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+
+    idea_count = stage_counts.get("idea", 0)
+    advancing = sum(stage_counts.get(s, 0) for s in ("review", "backtest", "paper"))
+
+    # Check for recent analyses
+    recent_count = 0
+    try:
+        es = EventStore()
+        recent_count = len(es.list_events(limit=5, event_type="intel_analysis"))
+    except Exception:
+        pass
+
+    # Determine state in priority order
+    if active_jobs:
+        n = len(active_jobs)
+        state = "running"
+        message = f"Analysis in progress \u2014 {n} job{'s' if n != 1 else ''} active"
+        action_label = "View Progress"
+        action_target = "#intel-council-panel"
+        action_type = "scroll"
+    elif idea_count > 0:
+        state = "review"
+        message = f"{idea_count} idea{'s' if idea_count != 1 else ''} ready for review"
+        action_label = "Review Ideas"
+        action_target = "#idea-pipeline-board"
+        action_type = "scroll"
+    elif recent_count > 0 and not all_ideas:
+        state = "complete"
+        message = "Latest analysis complete \u2014 review results below"
+        action_label = "See Results"
+        action_target = "#intel-council-panel"
+        action_type = "scroll"
+    elif advancing > 0:
+        state = "advancing"
+        message = f"{advancing} idea{'s' if advancing != 1 else ''} advancing through pipeline"
+        action_label = "View Pipeline"
+        action_target = "#idea-pipeline-board"
+        action_type = "scroll"
+    else:
+        state = "idle"
+        message = "Nothing queued. Paste text or a link above to start."
+        action_label = "Start Here"
+        action_target = "textarea[name=content]"
+        action_type = "focus"
+
+    return TEMPLATES.TemplateResponse(
+        request,
+        "_intel_next_action.html",
+        {
+            "request": request,
+            "state": state,
+            "message": message,
+            "action_label": action_label,
+            "action_target": action_target,
+            "action_type": action_type,
+        },
+    )
+
+
 @router.get("/fragments/intel-council", response_class=HTMLResponse)
 def intel_council_fragment(request: Request):
     """Render the LLM council analysis feed."""
@@ -1186,6 +1268,29 @@ def research_operating_summary_fragment(request: Request):
         request,
         "_research_operating_summary.html",
         {"request": request, **_get_research_operating_summary_context()},
+    )
+
+
+@router.get("/fragments/research-next-action", response_class=HTMLResponse)
+def research_next_action_fragment(request: Request):
+    """Render the Research 'what to do next' action bar."""
+    ctx = _get_research_operating_summary_context()
+
+    state = ctx.get("focus_tone", "idle")
+    title = ctx.get("focus_title", "No active research")
+    detail = ctx.get("focus_detail", "")
+    anchor = ctx.get("focus_anchor", "#research-intake")
+
+    return TEMPLATES.TemplateResponse(
+        request,
+        "_research_next_action.html",
+        {
+            "request": request,
+            "state": state,
+            "title": title,
+            "detail": detail,
+            "anchor": anchor,
+        },
     )
 
 
