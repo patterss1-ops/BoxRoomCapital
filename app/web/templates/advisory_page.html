@@ -63,19 +63,31 @@
 
     <!-- Advisor Memory -->
     <div class="bg-white border border-gray-200 rounded-md p-1.5">
-      <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-1">Advisor Memory</h3>
-      <form class="flex items-center gap-1"
-            hx-get="/fragments/advisory-memories"
-            hx-target="#advisory-memory-results"
-            hx-swap="innerHTML">
-        <input type="text" name="topic" id="memory-search-input"
-               placeholder="Search... (bonds, allocation, risk)"
-               class="flex-1 px-1.5 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded focus:outline-none focus:border-blue-400 text-gray-700" />
-        <button type="submit" class="px-2 py-1 text-[10px] font-semibold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Go</button>
-      </form>
-      <div id="advisory-memory-results"
-           hx-get="/fragments/advisory-memories?topic="
-           hx-trigger="load"
+      <div class="flex items-center justify-between mb-1">
+        <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-wide">Advisor Memory</h3>
+        <span class="text-[9px] text-gray-300 font-mono">list / graph</span>
+      </div>
+      <div class="flex gap-0 border-b border-gray-200 mb-1" id="advisory-memory-tabs">
+        <button onclick="switchTab('advisory-memory','tab-memory-list')" class="px-2.5 py-1 text-[11px] font-semibold border-b-2 border-blue-500 text-gray-900" data-tab="tab-memory-list">List</button>
+        <button onclick="switchTab('advisory-memory','tab-memory-graph')" class="px-2.5 py-1 text-[11px] text-gray-400 hover:text-gray-700 border-b-2 border-transparent" data-tab="tab-memory-graph">Graph</button>
+      </div>
+      <div data-tab-content="tab-memory-list" class="active space-y-1">
+        <form class="flex items-center gap-1"
+              hx-get="/fragments/advisory-memories"
+              hx-target="#advisory-memory-results"
+              hx-swap="innerHTML">
+          <input type="text" name="topic" id="memory-search-input"
+                 placeholder="Search... (bonds, allocation, risk)"
+                 class="flex-1 px-1.5 py-1 text-[10px] font-mono bg-gray-50 border border-gray-200 rounded focus:outline-none focus:border-blue-400 text-gray-700" />
+          <button type="submit" class="px-2 py-1 text-[10px] font-semibold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">Go</button>
+        </form>
+        <div id="advisory-memory-results"
+             hx-get="/fragments/advisory-memories?topic="
+             hx-trigger="load"
+             hx-swap="innerHTML"></div>
+      </div>
+      <div data-tab-content="tab-memory-graph" id="advisory-memory-graph-tab"
+           hx-get="/fragments/advisory-memory-graph"
            hx-swap="innerHTML"></div>
     </div>
   </div>
@@ -169,6 +181,8 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/d3@7/dist/d3.min.js"></script>
+<script src="/static/advisory_memory_graph.js"></script>
 <script>
 function scrollChatToBottom() {
   const el = document.getElementById('advisory-chat-messages');

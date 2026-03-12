@@ -1,0 +1,27 @@
+<div data-advisory-memory-graph
+     data-graph-url="{{ graph_endpoint }}"
+     class="space-y-1.5">
+  <div class="flex items-center justify-between">
+    <div class="flex items-center gap-2 min-w-0">
+      <span class="text-[9px] font-mono text-gray-400 truncate" data-graph-status>Loading memory graph...</span>
+      <span class="text-[9px] font-mono text-gray-300 truncate" data-graph-meta></span>
+    </div>
+    <button type="button"
+            data-graph-refresh
+            class="px-2 py-1 text-[9px] font-semibold bg-gray-200 text-gray-700 rounded hover:bg-gray-300">
+      Refresh
+    </button>
+  </div>
+
+  <div class="border border-gray-200 rounded-md overflow-hidden bg-gray-50">
+    <div data-graph-canvas class="w-full h-[320px]"></div>
+  </div>
+
+  <div data-graph-error class="hidden text-[10px] font-mono text-red-500"></div>
+
+  <div data-graph-detail class="border border-gray-200 rounded-md bg-gray-50 px-2 py-1.5">
+    <div class="text-[10px] font-mono text-gray-400">
+      Select a node to inspect its topic, summary, confidence, tags, and related memories.
+    </div>
+  </div>
+</div>

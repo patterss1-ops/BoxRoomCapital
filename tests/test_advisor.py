@@ -14,6 +14,7 @@ from data.trade_db import get_conn
 from intelligence.advisor import (
     AdvisoryEngine,
     _ensure_schema,
+    build_advisor_memory_graph,
     get_active_session,
     get_advisor_messages,
     save_advisor_memory,
@@ -21,6 +22,7 @@ from intelligence.advisor import (
     save_advisor_session,
     search_advisor_memories,
     get_recent_rss_headlines,
+    list_advisor_memories,
 )
 
 
@@ -43,6 +45,41 @@ def engine(db):
 
 
 # ── 1. Session creation ────────────────────────────────────────────────────
+
+def test_ensure_schema_adds_missing_memory_columns(tmp_path):
+    db_path = str(tmp_path / "legacy_advisor.db")
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """CREATE TABLE advisor_memory (
+            id TEXT PRIMARY KEY,
+            topic TEXT NOT NULL DEFAULT 'general',
+            memory_type TEXT NOT NULL DEFAULT 'observation',
+            summary TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            metadata TEXT DEFAULT '{}'
+        )"""
+    )
+    conn.commit()
+    conn.close()
+
+    from intelligence.advisor import _schema_initialised
+    _schema_initialised.discard(db_path)
+    _ensure_schema(db_path)
+
+    conn = get_conn(db_path)
+    columns = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(advisor_memory)").fetchall()
+    }
+    assert {
+        "updated_at",
+        "detail",
+        "source_message_id",
+        "confidence",
+        "expires_at",
+        "superseded_by",
+        "tags",
+    }.issubset(columns)
 
 def test_session_creation(db):
     session_id = str(uuid.uuid4())
@@ -118,11 +155,126 @@ def test_memory_save_and_search(db):
     assert "VWRL" in results[0]["summary"]
 
 
+def test_list_advisor_memories_filters_expired_and_recovers_session(db):
+    session_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id, topic="Memory graph session")
+
+    message_id = str(uuid.uuid4())
+    save_advisor_message(db, message_id, session_id, "user", "Buy VWRL.L in ISA")
+    save_advisor_memory(
+        db,
+        id=str(uuid.uuid4()),
+        topic="ISA allocation",
+        memory_type="decision",
+        summary="Buy VWRL.L in ISA",
+        source_message_id=message_id,
+        tags="isa,vwrl",
+    )
+
+    expired_at = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    conn = get_conn(db)
+    conn.execute(
+        """INSERT INTO advisor_memory
+               (id, created_at, updated_at, topic, memory_type, summary, detail,
+                source_message_id, confidence, expires_at, superseded_by, tags)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            str(uuid.uuid4()),
+            datetime.now(timezone.utc).isoformat(),
+            datetime.now(timezone.utc).isoformat(),
+            "Expired note",
+            "observation",
+            "Should not appear",
+            None,
+            None,
+            0.5,
+            expired_at,
+            None,
+            "old",
+        ),
+    )
+    conn.commit()
+
+    memories = list_advisor_memories(db)
+    assert len(memories) == 1
+    assert memories[0]["session_id"] == session_id
+    assert memories[0]["topic"] == "ISA allocation"
+
+
 # ── 6. Memory search with no results ─────────────────────────────────────
 
 def test_memory_search_no_results(db):
     results = search_advisor_memories(db, "nonexistent_topic_xyz")
     assert results == []
+
+
+def test_build_advisor_memory_graph_aggregates_relationships(db):
+    session_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id, topic="Portfolio review")
+
+    first_message_id = str(uuid.uuid4())
+    second_message_id = str(uuid.uuid4())
+    save_advisor_message(db, first_message_id, session_id, "user", "Buy VWRL.L in ISA")
+    save_advisor_message(db, second_message_id, session_id, "assistant", "Keep VWRL.L as a core ETF")
+
+    first_memory_id = str(uuid.uuid4())
+    second_memory_id = str(uuid.uuid4())
+    third_memory_id = str(uuid.uuid4())
+
+    save_advisor_memory(
+        db,
+        id=first_memory_id,
+        topic="ISA allocation",
+        memory_type="decision",
+        summary="Buy VWRL.L in ISA",
+        source_message_id=first_message_id,
+        tags="isa,vwrl",
+        confidence=0.9,
+    )
+    save_advisor_memory(
+        db,
+        id=second_memory_id,
+        topic="Core ETF position",
+        memory_type="preference",
+        summary="Keep VWRL.L as a core ETF",
+        source_message_id=second_message_id,
+        tags="core,vwrl",
+        confidence=0.8,
+    )
+    save_advisor_memory(
+        db,
+        id=third_memory_id,
+        topic="Global equity switch",
+        memory_type="observation",
+        summary="Switch core exposure to SWDA.L",
+        tags="core,swda",
+        confidence=0.7,
+    )
+
+    conn = get_conn(db)
+    conn.execute(
+        "UPDATE advisor_memory SET superseded_by = ? WHERE id = ?",
+        (third_memory_id, first_memory_id),
+    )
+    conn.commit()
+
+    graph = build_advisor_memory_graph(db)
+    assert graph["meta"]["node_count"] == 3
+
+    first_second = next(
+        edge
+        for edge in graph["edges"]
+        if {edge["source"], edge["target"]} == {first_memory_id, second_memory_id}
+    )
+    first_second_types = {reason["type"] for reason in first_second["reasons"]}
+    assert {"same_session", "shared_tag", "shared_ticker"}.issubset(first_second_types)
+
+    first_third = next(
+        edge
+        for edge in graph["edges"]
+        if {edge["source"], edge["target"]} == {first_memory_id, third_memory_id}
+    )
+    assert any(reason["type"] == "superseded_by" for reason in first_third["reasons"])
 
 
 # ── 7. Prompt building includes memories and holdings ─────────────────────
