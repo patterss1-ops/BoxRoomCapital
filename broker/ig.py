@@ -637,13 +637,15 @@ class IGBroker(BaseBroker):
                 logger.error(f"Option search failed: {r.status_code}")
                 return []
 
+            raw_markets = r.json().get("markets", [])
+            logger.info(f"Option search '{search_term}': IG returned {len(raw_markets)} markets")
+
             results = []
-            for mkt in r.json().get("markets", []):
+            for mkt in raw_markets:
                 epic = mkt.get("epic", "")
                 if not epic or epic in self._blocked_epics:
                     continue
 
-                # Extract strike from instrument name (e.g. "US 500 5400 Put 07-MAR-26")
                 name = mkt.get("instrumentName", "")
                 bid = float(mkt.get("bid", 0) or 0)
                 offer = float(mkt.get("offer", 0) or 0)
@@ -652,27 +654,12 @@ class IGBroker(BaseBroker):
                 # Determine option type from name or EPIC
                 opt_type = "PUT" if "put" in name.lower() or ".P." in epic.upper() else "CALL"
 
-                # Parse strike from EPIC first (most reliable), fall back to name.
-                # EPIC format: OP.D.SPX.5400P.IP → strike=5400
-                strike = 0.0
-                epic_parts = epic.split(".")
-                for ep in epic_parts:
-                    # Match digits optionally followed by P or C (e.g. "5400P", "23760C")
-                    m = re.match(r"^(\d+)[PC]$", ep)
-                    if m:
-                        strike = float(m.group(1))
-                        break
-                # Fallback: parse from instrument name
+                strike = self._parse_option_strike(epic, name)
+
                 if strike == 0:
-                    parts = name.split()
-                    # Find the number immediately before "Put"/"Call" keyword
-                    for i, part in enumerate(parts):
-                        if part.lower() in ("put", "call") and i > 0:
-                            try:
-                                strike = float(parts[i - 1].replace(",", ""))
-                            except ValueError:
-                                pass
-                            break
+                    logger.debug(f"  Could not parse strike: epic={epic} name='{name}'")
+                    # Still include it — better to have it with strike=0 and log
+                    # than silently drop it
 
                 spread_pct = ((offer - bid) / mid * 100) if mid > 0 else 999
 
@@ -693,6 +680,69 @@ class IGBroker(BaseBroker):
         except Exception as e:
             logger.error(f"Option search error: {e}")
             return []
+
+    @staticmethod
+    def _parse_option_strike(epic: str, name: str) -> float:
+        """Extract strike price from an IG option EPIC or instrument name.
+
+        Handles formats:
+          EPIC: OP.D.SPX.5400P.IP, OP.D.GOLD.2950P.IP, OP.D.USTECH.21000C.IP
+          Name: "US 500 5400 Put 07-MAR-26", "Gold 2950 Put Mar-26"
+        """
+        strike = 0.0
+
+        # 1. Parse from EPIC parts — most reliable
+        for ep in epic.split("."):
+            # Integer strike with P/C suffix: "5400P", "21000C"
+            m = re.match(r"^(\d+)[PC]$", ep)
+            if m:
+                strike = float(m.group(1))
+                break
+            # Decimal strike with P/C suffix: "2950.5P" (unlikely but safe)
+            m = re.match(r"^(\d+(?:\.\d+)?)[PC]$", ep)
+            if m:
+                strike = float(m.group(1))
+                break
+
+        if strike > 0:
+            return strike
+
+        # 2. Fallback: parse from instrument name
+        parts = name.split()
+        # Strategy A: number immediately before "Put"/"Call"
+        for i, part in enumerate(parts):
+            if part.lower() in ("put", "call") and i > 0:
+                try:
+                    strike = float(parts[i - 1].replace(",", ""))
+                except ValueError:
+                    pass
+                break
+
+        if strike > 0:
+            return strike
+
+        # Strategy B: number immediately after "Put"/"Call"
+        for i, part in enumerate(parts):
+            if part.lower() in ("put", "call") and i < len(parts) - 1:
+                try:
+                    strike = float(parts[i + 1].replace(",", ""))
+                except ValueError:
+                    pass
+                break
+
+        if strike > 0:
+            return strike
+
+        # Strategy C: largest number in name that looks like a strike (>50)
+        for part in parts:
+            try:
+                val = float(part.replace(",", ""))
+                if val > 50 and val > strike:
+                    strike = val
+            except ValueError:
+                continue
+
+        return strike
 
     def get_option_price(self, epic: str) -> Optional[OptionMarket]:
         """Get current price for a specific option EPIC."""

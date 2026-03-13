@@ -208,10 +208,22 @@ class OptionsSpreadsMixin:
                         last_error = f"No options found on IG for '{search_term}'"
                         last_code, recoverable = self._classify_order_error(last_error, "OPTIONS_NOT_FOUND")
                     else:
+                        logger.info(
+                            f"    {ticker}: IG returned {len(options)} options for '{search_term}', "
+                            f"looking for {option_type} near short={sig.short_strike} long={sig.long_strike}"
+                        )
                         short_option = self._find_closest_option(options, sig.short_strike, option_type)
                         long_option = self._find_closest_option(options, sig.long_strike, option_type)
                         if not short_option or not long_option:
-                            last_error = "Couldn't find matching options"
+                            available = sorted(set(
+                                o.strike for o in options
+                                if o.option_type == option_type and o.strike > 0
+                            ))
+                            last_error = (
+                                f"Couldn't find matching {option_type} options "
+                                f"(short_target={sig.short_strike}, long_target={sig.long_strike}, "
+                                f"available_strikes={available[:10]})"
+                            )
                             last_code, recoverable = self._classify_order_error(last_error, "OPTION_MATCH_FAILED")
                         elif short_option.epic == long_option.epic:
                             last_error = (
@@ -571,6 +583,20 @@ class OptionsSpreadsMixin:
         from broker.base import OptionMarket
         matching = [o for o in options if o.option_type == option_type and o.strike > 0]
         if not matching:
+            # Diagnostic: log what we got vs what we need
+            type_counts = {}
+            zero_strike = 0
+            for o in options:
+                type_counts[o.option_type] = type_counts.get(o.option_type, 0) + 1
+                if o.strike == 0:
+                    zero_strike += 1
+            logger.warning(
+                f"No matching options for {option_type} strike={target_strike}: "
+                f"total={len(options)}, by_type={type_counts}, zero_strike={zero_strike}"
+            )
+            if zero_strike > 0:
+                samples = [f"{o.epic} '{o.instrument_name}'" for o in options if o.strike == 0][:3]
+                logger.warning(f"  Unparsed samples: {samples}")
             return None
         best = min(matching, key=lambda o: abs(o.strike - target_strike))
         # Reject if matched strike is too far from target
