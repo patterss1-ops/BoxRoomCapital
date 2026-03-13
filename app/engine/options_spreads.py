@@ -185,6 +185,13 @@ class OptionsSpreadsMixin:
                         if not short_option or not long_option:
                             last_error = "Couldn't find matching options"
                             last_code, recoverable = self._classify_order_error(last_error, "OPTION_MATCH_FAILED")
+                        elif short_option.epic == long_option.epic:
+                            last_error = (
+                                f"Both legs matched same epic {short_option.epic} "
+                                f"(short_target={sig.short_strike}, long_target={sig.long_strike}, "
+                                f"matched_strike={short_option.strike}) — IG may lack sufficient strikes"
+                            )
+                            last_code, recoverable = self._classify_order_error(last_error, "SAME_EPIC_BOTH_LEGS")
                         else:
                             logger.info(f"    Short leg: {short_option.epic} (strike={short_option.strike})")
                             logger.info(f"    Long leg: {long_option.epic} (strike={long_option.strike})")

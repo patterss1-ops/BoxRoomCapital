@@ -610,16 +610,28 @@ class IGBroker(BaseBroker):
                 # Determine option type from name or EPIC
                 opt_type = "PUT" if "put" in name.lower() or ".P." in epic.upper() else "CALL"
 
-                # Parse strike from name — IG names are like "US 500 5400 Put 07-MAR-26"
+                # Parse strike from EPIC first (most reliable), fall back to name.
+                # EPIC format: OP.D.SPX.5400P.IP → strike=5400
                 strike = 0.0
-                parts = name.split()
-                for part in parts:
-                    try:
-                        val = float(part.replace(",", ""))
-                        if val > 100:  # Likely a strike price, not a market number
-                            strike = val
-                    except ValueError:
-                        continue
+                epic_parts = epic.split(".")
+                for ep in epic_parts:
+                    # Match digits optionally followed by P or C (e.g. "5400P", "23760C")
+                    import re
+                    m = re.match(r"^(\d+)[PC]$", ep)
+                    if m:
+                        strike = float(m.group(1))
+                        break
+                # Fallback: parse from instrument name
+                if strike == 0:
+                    parts = name.split()
+                    # Find the number immediately before "Put"/"Call" keyword
+                    for i, part in enumerate(parts):
+                        if part.lower() in ("put", "call") and i > 0:
+                            try:
+                                strike = float(parts[i - 1].replace(",", ""))
+                            except ValueError:
+                                pass
+                            break
 
                 spread_pct = ((offer - bid) / mid * 100) if mid > 0 else 999
 
