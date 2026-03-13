@@ -537,15 +537,15 @@ LIVE_TRADING_TICKERS = [
 # Used by the bot to find option markets dynamically
 OPTION_EPIC_PATTERNS = {
     # Strike scale is computed DYNAMICALLY at runtime in options_spreads.py
-    # by comparing IG available strikes (median) to signal target strikes.
-    # No hardcoded scale factors needed — adapts automatically to price movements.
-    "SPY": {"search": "US 500", "index": "SPX", "epic_prefix": "OP.D.SPX."},
-    "QQQ": {"search": "US Tech 100", "index": "USTECH", "epic_prefix": "OP.D.USTECH."},
-    "DIA": {"search": "Wall Street", "index": "WALL", "epic_prefix": "OP.D.WALL."},
-    "EWG": {"search": "Germany 40", "index": "DAX", "epic_prefix": "OP.D.DAX."},
-    "EWU": {"search": "FTSE 100", "index": "FTSE", "epic_prefix": "OP.D.FTSE."},
-    "EWJ": {"search": "Japan 225", "index": "JP225", "epic_prefix": "OP.D.JP225."},
-    "GLD": {"search": "Gold", "index": "GOLD", "epic_prefix": "OP.D.GOLD."},
+    # using the broker's live mid-price for the underlying IG instrument.
+    # underlying_epic: the IG epic for the underlying instrument (used for live price → scale)
+    "SPY": {"search": "US 500", "index": "SPX", "epic_prefix": "OP.D.SPX.", "underlying_epic": "IX.D.SPTRD.DAILY.IP"},
+    "QQQ": {"search": "US Tech 100", "index": "USTECH", "epic_prefix": "OP.D.USTECH.", "underlying_epic": "IX.D.NASDAQ.CASH.IP"},
+    "DIA": {"search": "Wall Street", "index": "WALL", "epic_prefix": "OP.D.WALL.", "underlying_epic": "IX.D.DOW.DAILY.IP"},
+    "EWG": {"search": "Germany 40", "index": "DAX", "epic_prefix": "OP.D.DAX.", "underlying_epic": "IX.D.DAX.DAILY.IP"},
+    "EWU": {"search": "FTSE 100", "index": "FTSE", "epic_prefix": "OP.D.FTSE.", "underlying_epic": "IX.D.FTSE.DAILY.IP"},
+    "EWJ": {"search": "Japan 225", "index": "JP225", "epic_prefix": "OP.D.JP225.", "underlying_epic": "IX.D.NIKKEI.DAILY.IP"},
+    "GLD": {"search": "Gold", "index": "GOLD", "epic_prefix": "OP.D.GOLD.", "underlying_epic": "CS.D.USCGC.TODAY.IP"},
 }
 
 # Safety limits for options trading
