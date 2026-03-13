@@ -815,6 +815,17 @@ class IGBroker(BaseBroker):
                 "message": f"{epic} marketStatus={status}",
             }
 
+        # Check live bid/offer — search results may have stale cached prices
+        # but get_market_info returns current snapshot
+        bid = float(snapshot.get("bid", 0) or 0)
+        offer = float(snapshot.get("offer", 0) or 0)
+        if bid <= 0 or offer <= 0:
+            return {
+                "ok": False,
+                "code": "NO_PRICE_AVAILABLE",
+                "message": f"{epic} has no live price (bid={bid}, offer={offer}) — illiquid or expired contract",
+            }
+
         rules = info.get("dealingRules", {})
         min_size = 0.0
         min_size_obj = rules.get("minDealSize", {})
@@ -834,7 +845,7 @@ class IGBroker(BaseBroker):
         return {
             "ok": True,
             "code": "OK",
-            "message": f"{epic} tradeable",
+            "message": f"{epic} tradeable (bid={bid}, offer={offer})",
             "market_status": status,
             "min_size": min_size,
         }

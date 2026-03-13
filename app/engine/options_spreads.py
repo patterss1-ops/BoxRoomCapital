@@ -231,14 +231,34 @@ class OptionsSpreadsMixin:
                             f"(raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale:.2f}x, "
                             f"ig_atm_approx={valid_strikes[len(valid_strikes)//2] if valid_strikes else 'N/A'})"
                         )
-                        short_option = self._find_closest_option(options, scaled_short, option_type)
-                        long_option = self._find_closest_option(options, scaled_long, option_type)
+                        # Find tradeable options (validates bid/offer + market status)
+                        short_option, short_result = self._find_tradeable_option(
+                            options, scaled_short, option_type, float(num_contracts))
+                        long_option, long_result = self._find_tradeable_option(
+                            options, scaled_long, option_type, float(num_contracts))
                         if not short_option or not long_option:
+                            # short_result/long_result holds the best-but-failed candidate for diagnostics
+                            fail_detail = []
+                            if not short_option:
+                                if isinstance(short_result, dict):
+                                    fail_detail.append(f"short: {short_result.get('message', 'no match')}")
+                                elif short_result:
+                                    fail_detail.append(f"short: all candidates untradeable near {scaled_short}")
+                                else:
+                                    fail_detail.append(f"short: no candidates near {scaled_short}")
+                            if not long_option:
+                                if isinstance(long_result, dict):
+                                    fail_detail.append(f"long: {long_result.get('message', 'no match')}")
+                                elif long_result:
+                                    fail_detail.append(f"long: all candidates untradeable near {scaled_long}")
+                                else:
+                                    fail_detail.append(f"long: no candidates near {scaled_long}")
                             last_error = (
-                                f"Couldn't find matching {option_type} options "
+                                f"Couldn't find tradeable {option_type} options "
                                 f"(scaled_short={scaled_short}, scaled_long={scaled_long}, "
-                                f"raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale:.2f}x, "
-                                f"available_strikes={valid_strikes[:10]})"
+                                f"scale={strike_scale:.2f}x, "
+                                f"available_strikes={valid_strikes[:10]}, "
+                                f"detail: {'; '.join(fail_detail)})"
                             )
                             last_code, recoverable = self._classify_order_error(last_error, "OPTION_MATCH_FAILED")
                         elif short_option.epic == long_option.epic:
@@ -252,45 +272,34 @@ class OptionsSpreadsMixin:
                             logger.info(f"    Short leg: {short_option.epic} (strike={short_option.strike})")
                             logger.info(f"    Long leg: {long_option.epic} (strike={long_option.strike})")
 
-                            short_check = self.broker.validate_option_leg(short_option.epic, float(num_contracts))
-                            if not short_check.get("ok"):
-                                hint = str(short_check.get("code", "LEG_VALIDATION_FAILED"))
-                                last_error = str(short_check.get("message", "Short leg failed validation"))
-                                last_code, recoverable = self._classify_order_error(last_error, hint)
-                            else:
-                                long_check = self.broker.validate_option_leg(long_option.epic, float(num_contracts))
-                                if not long_check.get("ok"):
-                                    hint = str(long_check.get("code", "LEG_VALIDATION_FAILED"))
-                                    last_error = str(long_check.get("message", "Long leg failed validation"))
-                                    last_code, recoverable = self._classify_order_error(last_error, hint)
-                                else:
-                                    result = self.broker.place_option_spread(
-                                        short_epic=short_option.epic,
-                                        long_epic=long_option.epic,
-                                        size=float(num_contracts),
-                                        ticker=ticker,
-                                        strategy="IBS Credit Spreads",
-                                        correlation_id=attempt_correlation,
-                                    )
-                                    if result.success:
-                                        update_order_action(
-                                            action_id=action_id,
-                                            status="completed",
-                                            attempt=attempt,
-                                            recoverable=False,
-                                            error_code="",
-                                            error_message="",
-                                            result_payload=json.dumps({
-                                                "short_deal_id": result.short_deal_id,
-                                                "long_deal_id": result.long_deal_id,
-                                                "short_fill_price": result.short_fill_price,
-                                                "long_fill_price": result.long_fill_price,
-                                                "net_premium": result.net_premium,
-                                            }),
-                                        )
-                                        break
-                                    last_error = result.message or "Spread order failed"
-                                    last_code, recoverable = self._classify_order_error(last_error)
+                            # Both legs already validated by _find_tradeable_option
+                            result = self.broker.place_option_spread(
+                                short_epic=short_option.epic,
+                                long_epic=long_option.epic,
+                                size=float(num_contracts),
+                                ticker=ticker,
+                                strategy="IBS Credit Spreads",
+                                correlation_id=attempt_correlation,
+                            )
+                            if result.success:
+                                update_order_action(
+                                    action_id=action_id,
+                                    status="completed",
+                                    attempt=attempt,
+                                    recoverable=False,
+                                    error_code="",
+                                    error_message="",
+                                    result_payload=json.dumps({
+                                        "short_deal_id": result.short_deal_id,
+                                        "long_deal_id": result.long_deal_id,
+                                        "short_fill_price": result.short_fill_price,
+                                        "long_fill_price": result.long_fill_price,
+                                        "net_premium": result.net_premium,
+                                    }),
+                                )
+                                break
+                            last_error = result.message or "Spread order failed"
+                            last_code, recoverable = self._classify_order_error(last_error)
             except Exception as exc:
                 last_error = str(exc)
                 last_code, recoverable = self._classify_order_error(last_error)
@@ -593,18 +602,23 @@ class OptionsSpreadsMixin:
 
     # Maximum allowed deviation between target strike and matched strike (5%)
     MAX_STRIKE_DEVIATION_PCT = 5.0
+    # Max candidates to validate before giving up (each costs an API call)
+    MAX_VALIDATION_CANDIDATES = 3
 
     def _find_closest_option(self, options: list, target_strike: float,
                              option_type: str):
-        from broker.base import OptionMarket
+        """Find the closest option by strike, ignoring tradability.
+        Used only for strike-matching; see _find_tradeable_option for
+        the version that validates via broker."""
+        candidates = self._ranked_candidates(options, target_strike, option_type)
+        return candidates[0] if candidates else None
+
+    def _ranked_candidates(self, options: list, target_strike: float,
+                           option_type: str) -> list:
+        """Return options ranked by distance to target_strike, within deviation limit."""
         matching = [o for o in options
-                    if o.option_type == option_type and o.strike > 0
-                    and getattr(o, 'bid', 0) > 0 and getattr(o, 'offer', 0) > 0]
+                    if o.option_type == option_type and o.strike > 0]
         if not matching:
-            # Fall back: try without bid/offer filter for diagnostics
-            type_only = [o for o in options if o.option_type == option_type and o.strike > 0]
-            no_price = len(type_only) - len(matching)
-            # Diagnostic: log what we got vs what we need
             type_counts = {}
             zero_strike = 0
             for o in options:
@@ -612,25 +626,48 @@ class OptionsSpreadsMixin:
                 if o.strike == 0:
                     zero_strike += 1
             logger.warning(
-                f"No tradeable options for {option_type} strike={target_strike}: "
-                f"total={len(options)}, by_type={type_counts}, zero_strike={zero_strike}, "
-                f"no_price={no_price}"
+                f"No matching options for {option_type} strike={target_strike}: "
+                f"total={len(options)}, by_type={type_counts}, zero_strike={zero_strike}"
             )
-            if zero_strike > 0:
-                samples = [f"{o.epic} '{o.instrument_name}'" for o in options if o.strike == 0][:3]
-                logger.warning(f"  Unparsed samples: {samples}")
-            return None
-        best = min(matching, key=lambda o: abs(o.strike - target_strike))
-        # Reject if matched strike is too far from target
-        if target_strike > 0:
-            deviation_pct = abs(best.strike - target_strike) / target_strike * 100
-            if deviation_pct > self.MAX_STRIKE_DEVIATION_PCT:
-                logger.warning(
-                    f"Closest strike {best.strike} is {deviation_pct:.1f}% from "
-                    f"target {target_strike} (max {self.MAX_STRIKE_DEVIATION_PCT}%) — rejecting"
-                )
-                return None
-        return best
+            return []
+        # Sort by distance to target
+        ranked = sorted(matching, key=lambda o: abs(o.strike - target_strike))
+        # Filter by deviation limit
+        result = []
+        for o in ranked:
+            if target_strike > 0:
+                dev = abs(o.strike - target_strike) / target_strike * 100
+                if dev > self.MAX_STRIKE_DEVIATION_PCT:
+                    break  # All remaining are further away
+            result.append(o)
+        if not result:
+            closest = ranked[0]
+            dev = abs(closest.strike - target_strike) / target_strike * 100 if target_strike > 0 else 0
+            logger.warning(
+                f"Closest strike {closest.strike} is {dev:.1f}% from "
+                f"target {target_strike} (max {self.MAX_STRIKE_DEVIATION_PCT}%) — rejecting"
+            )
+        return result
+
+    def _find_tradeable_option(self, options: list, target_strike: float,
+                               option_type: str, size: float):
+        """Find closest option that is actually tradeable (has live price).
+        Validates up to MAX_VALIDATION_CANDIDATES candidates via broker API."""
+        candidates = self._ranked_candidates(options, target_strike, option_type)
+        for i, candidate in enumerate(candidates[:self.MAX_VALIDATION_CANDIDATES]):
+            check = self.broker.validate_option_leg(candidate.epic, size)
+            if check.get("ok"):
+                if i > 0:
+                    logger.info(
+                        f"  Skipped {i} illiquid candidate(s), using {candidate.epic} "
+                        f"(strike={candidate.strike})"
+                    )
+                return candidate, check
+            logger.info(
+                f"  Candidate {candidate.epic} (strike={candidate.strike}) failed validation: "
+                f"{check.get('code')} — {check.get('message')}"
+            )
+        return None, (candidates[0] if candidates else None)
 
     def _check_drawdown_gate(self):
         """Check fund-level drawdown breaker. Returns DrawdownDecision or None."""
