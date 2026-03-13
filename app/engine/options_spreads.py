@@ -301,7 +301,27 @@ class OptionsSpreadsMixin:
                             logger.info(f"    Short leg: {short_option.epic} (strike={short_option.strike})")
                             logger.info(f"    Long leg: {long_option.epic} (strike={long_option.strike})")
 
-                            # Both legs already validated by _find_tradeable_option
+                            # Pre-trade credit check: use short bid vs long offer
+                            short_bid = short_result.get("bid", 0) if isinstance(short_result, dict) else 0
+                            long_offer = long_result.get("offer", 0) if isinstance(long_result, dict) else 0
+                            if short_bid > 0 and long_offer > 0:
+                                expected_net_credit = short_bid - long_offer
+                                logger.info(
+                                    f"    Pre-trade credit check: short bid={short_bid:.2f}, "
+                                    f"long offer={long_offer:.2f}, expected net={expected_net_credit:.2f}"
+                                )
+                                if expected_net_credit <= 0:
+                                    last_error = (
+                                        f"Negative net credit: short bid={short_bid:.2f} - "
+                                        f"long offer={long_offer:.2f} = {expected_net_credit:.2f}. "
+                                        f"Spread is inverted at current bid/ask — skipping."
+                                    )
+                                    last_code, recoverable = self._classify_order_error(
+                                        last_error, "NEGATIVE_NET_CREDIT"
+                                    )
+                                    continue
+
+                            # Both legs validated and credit check passed
                             result = self.broker.place_option_spread(
                                 short_epic=short_option.epic,
                                 long_epic=long_option.epic,

@@ -848,6 +848,8 @@ class IGBroker(BaseBroker):
             "message": f"{epic} tradeable (bid={bid}, offer={offer})",
             "market_status": status,
             "min_size": min_size,
+            "bid": bid,
+            "offer": offer,
         }
 
     def place_option_spread(
