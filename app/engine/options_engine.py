@@ -66,15 +66,6 @@ class OptionsEngine:
                 logger.warning("OptionsBot constructor failed: %s", exc)
                 return {"ok": False, "message": f"Bot failed to initialise: {exc}"}
 
-            # Auto-reconcile on startup to catch positions closed externally
-            try:
-                recon = self._bot.reconcile_now()
-                auto_closed = recon.get("auto_closed", [])
-                if auto_closed:
-                    logger.info(f"Startup reconcile: auto-closed {len(auto_closed)} stale spread(s)")
-            except Exception as exc:
-                logger.warning(f"Startup reconcile failed (non-fatal): {exc}")
-
             self._thread = threading.Thread(
                 target=self._run_bot_thread,
                 name="options-engine",

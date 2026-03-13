@@ -131,6 +131,14 @@ class OptionsBot(
         self._load_control_state()
         self._startup_recover()
 
+        try:
+            recon = self.reconcile_now()
+            auto_closed = recon.get("auto_closed", [])
+            if auto_closed:
+                logger.info(f"Startup reconcile: auto-closed {len(auto_closed)} stale spread(s)")
+        except Exception as exc:
+            logger.warning(f"Startup reconcile failed (non-fatal): {exc}")
+
         if install_signal_handlers and threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGINT, self._shutdown)
             signal.signal(signal.SIGTERM, self._shutdown)
