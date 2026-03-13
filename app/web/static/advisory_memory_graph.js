@@ -1,7 +1,7 @@
 // Advisory memory graph renderer for the Advisory page.
 
 (function () {
-  const GRAPH_HEIGHT = 320;
+  const GRAPH_HEIGHT = 360;
   const TYPE_COLORS = {
     theme: '#0f172a',
     decision: '#2563eb',
@@ -101,6 +101,44 @@
     return adjacency;
   }
 
+  function normalizeGraphPayload(payload) {
+    return {
+      nodes: Array.isArray(payload && payload.nodes) ? payload.nodes.map(function (node) {
+        return Object.assign({}, node);
+      }) : [],
+      edges: Array.isArray(payload && payload.edges) ? payload.edges.map(function (edge) {
+        return Object.assign({}, edge, {
+          source: getNodeId(edge.source),
+          target: getNodeId(edge.target),
+          reasons: Array.isArray(edge.reasons) ? edge.reasons.map(function (reason) {
+            return Object.assign({}, reason);
+          }) : []
+        });
+      }) : [],
+      meta: payload && payload.meta ? Object.assign({}, payload.meta) : {}
+    };
+  }
+
+  function buildVisibleGraph(fullGraph, viewMode) {
+    if (viewMode === 'expanded') {
+      return fullGraph;
+    }
+    const visibleIds = new Set(
+      (fullGraph.nodes || [])
+        .filter(function (node) { return node.node_kind === 'theme'; })
+        .map(function (node) { return node.id; })
+    );
+    return {
+      nodes: (fullGraph.nodes || []).filter(function (node) {
+        return visibleIds.has(node.id);
+      }),
+      edges: (fullGraph.edges || []).filter(function (edge) {
+        return visibleIds.has(getNodeId(edge.source)) && visibleIds.has(getNodeId(edge.target));
+      }),
+      meta: Object.assign({}, fullGraph.meta || {})
+    };
+  }
+
   function getGraphShells(root) {
     if (!root) return [];
     const shells = [];
@@ -120,6 +158,15 @@
     const meta = shell.querySelector('[data-graph-meta]');
     if (status) status.textContent = text || '';
     if (meta) meta.textContent = metaText || '';
+  }
+
+  function updateViewButtons(shell, viewMode) {
+    shell.querySelectorAll('[data-graph-view-mode]').forEach(function (button) {
+      const active = button.getAttribute('data-graph-view-mode') === viewMode;
+      button.className = active
+        ? 'px-2 py-1 text-[9px] font-semibold rounded bg-gray-900 text-white'
+        : 'px-2 py-1 text-[9px] font-semibold rounded text-gray-500 hover:text-gray-700';
+    });
   }
 
   function setError(shell, text) {
@@ -253,22 +300,34 @@
 
     controller.nodeSelection.select('text')
       .attr('opacity', function (node) {
-        if (!selectedId) return 0.9;
-        return connectedIds.has(node.id) ? 1 : 0.35;
+        if (node.node_kind === 'theme') {
+          if (!selectedId) return 1;
+          return connectedIds.has(node.id) ? 1 : 0.55;
+        }
+        if (controller.viewMode !== 'expanded') return 0;
+        if (!selectedId) return 0;
+        return connectedIds.has(node.id) ? 1 : 0;
       })
       .attr('font-weight', function (node) {
-        return node.id === selectedId ? '700' : '500';
+        return node.id === selectedId ? '700' : (node.node_kind === 'theme' ? '700' : '500');
       });
   }
 
   function selectNode(shell, nodeId) {
     const controller = shell.__advisoryMemoryGraph;
     if (!controller) return;
+    const targetNode = (controller.fullGraph.nodes || []).find(function (node) {
+      return node.id === nodeId;
+    }) || null;
+    if (targetNode && controller.viewMode !== 'expanded' && targetNode.node_kind !== 'theme') {
+      setGraphViewMode(shell, 'expanded', nodeId);
+      return;
+    }
     controller.selectedNodeId = nodeId || '';
-    const selectedNode = (controller.graph.nodes || []).find(function (node) {
+    const selectedNode = (controller.fullGraph.nodes || []).find(function (node) {
       return node.id === controller.selectedNodeId;
     }) || null;
-    renderDetailPanel(shell, selectedNode, controller.graph, controller.adjacency);
+    renderDetailPanel(shell, selectedNode, controller.fullGraph, controller.adjacency);
     applySelection(controller);
   }
 
@@ -289,26 +348,28 @@
     delete shell.__advisoryMemoryGraph;
   }
 
-  function renderGraph(shell, payload) {
+  function renderGraph(shell, payload, preferredSelectedId) {
     if (typeof d3 === 'undefined') {
       setStatus(shell, 'D3 failed to load', '');
       setError(shell, 'Graph renderer unavailable because D3.js did not load.');
       return;
     }
-    destroyGraph(shell);
+    const state = shell.__advisoryMemoryGraphState || { viewMode: 'overview' };
+    state.payload = payload;
+    state.viewMode = state.viewMode || 'overview';
+    shell.__advisoryMemoryGraphState = state;
+    updateViewButtons(shell, state.viewMode);
 
-    const graph = {
-      nodes: Array.isArray(payload && payload.nodes) ? payload.nodes.slice() : [],
-      edges: Array.isArray(payload && payload.edges) ? payload.edges.slice() : [],
-      meta: payload && payload.meta ? payload.meta : {}
-    };
+    const fullGraph = normalizeGraphPayload(payload);
+    const graph = buildVisibleGraph(fullGraph, state.viewMode);
+    destroyGraph(shell);
     const canvas = shell.querySelector('[data-graph-canvas]');
     if (!canvas) return;
 
     if (!graph.nodes.length) {
       setStatus(shell, 'No memories available', '');
       setError(shell, '');
-      renderDetailPanel(shell, null, graph, {});
+      renderDetailPanel(shell, null, fullGraph, {});
       buildCanvasEmptyState(canvas, 'No active memories to graph yet.');
       return;
     }
@@ -419,12 +480,15 @@
     });
 
     const adjacency = buildAdjacency(graph);
+    const fullAdjacency = buildAdjacency(fullGraph);
     shell.__advisoryMemoryGraph = {
       graph: graph,
-      adjacency: adjacency,
+      fullGraph: fullGraph,
+      adjacency: fullAdjacency,
       simulation: simulation,
       nodeSelection: nodeSelection,
       linkSelection: linkSelection,
+      viewMode: state.viewMode,
       selectedNodeId: '',
       selectNode: function (nodeId) {
         selectNode(shell, nodeId);
@@ -434,14 +498,34 @@
     const meta = graph.meta || {};
     setStatus(
       shell,
-      'Graph ready',
+      state.viewMode === 'overview' ? 'Overview ready' : 'Expanded view ready',
       String(meta.theme_count || 0) + ' themes / ' + String(meta.promoted_memory_count || 0) + ' promoted memories'
     );
     setError(shell, '');
-    if (graph.nodes.length) {
-      selectNode(shell, graph.nodes[0].id);
+    const visibleIds = new Set((graph.nodes || []).map(function (node) { return node.id; }));
+    const initialSelectedId = preferredSelectedId && visibleIds.has(preferredSelectedId)
+      ? preferredSelectedId
+      : (graph.nodes.length ? graph.nodes[0].id : '');
+    if (initialSelectedId) {
+      selectNode(shell, initialSelectedId);
     } else {
-      renderDetailPanel(shell, null, graph, adjacency);
+      renderDetailPanel(shell, null, fullGraph, adjacency);
+    }
+  }
+
+  function setGraphViewMode(shell, viewMode, preferredSelectedId) {
+    const state = shell.__advisoryMemoryGraphState || {};
+    if (state.viewMode === viewMode && state.payload) {
+      if (preferredSelectedId) {
+        selectNode(shell, preferredSelectedId);
+      }
+      return;
+    }
+    state.viewMode = viewMode;
+    shell.__advisoryMemoryGraphState = state;
+    updateViewButtons(shell, viewMode);
+    if (state.payload) {
+      renderGraph(shell, state.payload, preferredSelectedId);
     }
   }
 
@@ -502,6 +586,13 @@
         loadGraph(shell);
       });
     }
+
+    shell.querySelectorAll('[data-graph-view-mode]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        const nextMode = button.getAttribute('data-graph-view-mode') || 'overview';
+        setGraphViewMode(shell, nextMode);
+      });
+    });
 
     shell.addEventListener('click', function (event) {
       const relatedButton = event.target.closest('[data-related-node-id]');
