@@ -127,7 +127,7 @@ class OptionsSpreadsMixin:
             return
 
         logger.info(f"  {ticker}: PLACING LIVE ORDER — {num_contracts} contracts")
-        spread_id = f"{ticker}:{uuid.uuid4().hex[:8]}"
+        spread_id = f"{ticker}-{uuid.uuid4().hex[:8]}"
         action_id = uuid.uuid4().hex
         correlation_id = self._new_correlation_id("open_spread", ticker)
         max_attempts = max(1, int(config.OPTIONS_SAFETY.get("order_max_attempts", ORDER_ACTION_MAX_ATTEMPTS)))
@@ -166,7 +166,7 @@ class OptionsSpreadsMixin:
                 error_code="",
                 error_message="",
             )
-            attempt_correlation = f"{correlation_id}:a{attempt}"
+            attempt_correlation = f"{correlation_id}-a{attempt}"
             try:
                 option_cfg = config.OPTION_EPIC_PATTERNS.get(ticker)
                 if not option_cfg:
@@ -379,7 +379,7 @@ class OptionsSpreadsMixin:
                 error_code="",
                 error_message="",
             )
-            attempt_correlation = f"{correlation_id}:a{attempt}"
+            attempt_correlation = f"{correlation_id}-a{attempt}"
 
             try:
                 result = self.broker.close_option_spread(
