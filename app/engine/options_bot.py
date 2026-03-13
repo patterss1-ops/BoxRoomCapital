@@ -219,10 +219,9 @@ class OptionsBot(
                 self._last_snapshot = today
 
     def _new_correlation_id(self, action: str, ticker: str) -> str:
-        stamp = datetime.now(UK).strftime("%Y%m%d%H%M%S")
-        short_action = action[0].upper()
-        uid = uuid.uuid4().hex[:6]
-        return f"{short_action}-{ticker}-{stamp}-{uid}"
+        stamp = datetime.now(UK).strftime("%m%d%H%M%S")
+        uid = uuid.uuid4().hex[:4]
+        return f"{ticker}-{stamp}-{uid}"
 
     def _classify_order_error(self, message: str, code_hint: str = "") -> tuple[str, bool]:
         code = (code_hint or "").strip().upper()

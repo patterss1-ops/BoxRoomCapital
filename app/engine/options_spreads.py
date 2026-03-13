@@ -166,7 +166,7 @@ class OptionsSpreadsMixin:
                 error_code="",
                 error_message="",
             )
-            attempt_correlation = f"{correlation_id}:a{attempt}"
+            attempt_correlation = f"{correlation_id}-a{attempt}"
             try:
                 option_cfg = config.OPTION_EPIC_PATTERNS.get(ticker)
                 if not option_cfg:
@@ -379,7 +379,7 @@ class OptionsSpreadsMixin:
                 error_code="",
                 error_message="",
             )
-            attempt_correlation = f"{correlation_id}:a{attempt}"
+            attempt_correlation = f"{correlation_id}-a{attempt}"
 
             try:
                 result = self.broker.close_option_spread(
