@@ -257,8 +257,10 @@ class BotControlService:
 
         self._scheduler = DailyWorkflowScheduler(
             dispatch_fn=lambda window_name, **kw: dispatch_orchestration(
+                window_name=window_name,
                 dry_run=config.ORCHESTRATOR_DRY_RUN,
                 ai_panel_enabled=config.AI_PANEL_ENABLED,
+                **kw,
             ),
             schedule=schedule,
             window_handlers=window_handlers,
