@@ -17,12 +17,14 @@ from intelligence.advisor import (
     build_advisor_memory_graph,
     get_active_session,
     get_advisor_messages,
+    get_advisor_session,
     save_advisor_memory,
     save_advisor_message,
     save_advisor_session,
     search_advisor_memories,
     get_recent_rss_headlines,
     list_advisor_memories,
+    list_advisor_sessions,
 )
 
 
@@ -201,6 +203,24 @@ def test_list_advisor_memories_filters_expired_and_recovers_session(db):
     assert memories[0]["topic"] == "ISA allocation"
 
 
+def test_list_advisor_sessions_derives_topic_from_first_user_message(db):
+    session_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id)
+    save_advisor_message(
+        db,
+        str(uuid.uuid4()),
+        session_id,
+        "user",
+        "Should I add more VWRL.L to my ISA before the tax year ends?",
+    )
+
+    sessions = list_advisor_sessions(db)
+
+    assert sessions[0]["id"] == session_id
+    assert sessions[0]["topic"] != "General"
+    assert "VWRL.L" in sessions[0]["topic"]
+
+
 # ── 6. Memory search with no results ─────────────────────────────────────
 
 def test_memory_search_no_results(db):
@@ -275,6 +295,23 @@ def test_build_advisor_memory_graph_aggregates_relationships(db):
         if {edge["source"], edge["target"]} == {first_memory_id, third_memory_id}
     )
     assert any(reason["type"] == "superseded_by" for reason in first_third["reasons"])
+
+
+def test_save_exchange_updates_session_metadata(engine, db):
+    session_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id)
+
+    engine._save_exchange(
+        session_id,
+        "Can I build a VWRL.L core position in my ISA this month?",
+        "Yes, VWRL.L works well as a diversified ISA core holding.",
+    )
+
+    session = get_advisor_session(db, session_id)
+    assert session is not None
+    assert session["message_count"] == 2
+    assert "VWRL.L" in str(session["topic"] or "")
+    assert "diversified ISA core holding" in str(session["summary"] or "")
 
 
 # ── 7. Prompt building includes memories and holdings ─────────────────────

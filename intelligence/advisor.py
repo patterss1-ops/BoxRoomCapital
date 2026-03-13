@@ -102,6 +102,39 @@ _GRAPH_REASON_WEIGHTS = {
     "shared_ticker": 1.5,
     "shared_tag": 1.0,
 }
+_GENERIC_SESSION_TOPICS = {
+    "",
+    "advisor chat",
+    "chat",
+    "conversation",
+    "general",
+    "general chat",
+    "new chat",
+}
+_LOW_SIGNAL_SESSION_TOPICS = {
+    "hello",
+    "hey",
+    "hi",
+    "ok",
+    "thanks",
+    "thank you",
+}
+_SESSION_TOPIC_PREFIXES = (
+    "can you help me with ",
+    "can you help with ",
+    "help me with ",
+    "help me ",
+    "i'm thinking about ",
+    "im thinking about ",
+    "thinking about ",
+    "what do you think about ",
+    "what about ",
+    "how about ",
+    "should i ",
+    "can i ",
+    "could i ",
+    "please ",
+)
 
 _schema_init_lock = threading.Lock()
 _schema_initialised: set[str] = set()
@@ -176,6 +209,21 @@ def get_active_session(
     params: list[Any] = [cutoff]
     query += " ORDER BY last_active_at DESC LIMIT 1"
     row = conn.execute(query, params).fetchone()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def get_advisor_session(db_path: str, session_id: str) -> dict | None:
+    _ensure_schema(db_path)
+    conn = get_conn(db_path)
+    row = conn.execute(
+        """SELECT id, created_at, last_active_at, topic, summary,
+                  message_count, status
+           FROM advisor_sessions
+           WHERE id = ?""",
+        (session_id,),
+    ).fetchone()
     if row is None:
         return None
     return dict(row)
@@ -278,6 +326,115 @@ def search_advisor_memories(
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def _topic_is_generic(topic: str | None) -> bool:
+    normalized = " ".join(str(topic or "").strip().split()).lower()
+    return (
+        not normalized
+        or normalized in _GENERIC_SESSION_TOPICS
+        or normalized in _LOW_SIGNAL_SESSION_TOPICS
+    )
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    if len(text) <= max_chars:
+        return text
+    truncated = text[: max_chars + 1].rsplit(" ", 1)[0].strip()
+    return truncated or text[:max_chars].strip()
+
+
+def _derive_session_topic(text: str | None, max_chars: int = 72) -> str:
+    cleaned = " ".join(str(text or "").split()).strip(" -:;,.!?")
+    if not cleaned:
+        return "General"
+
+    first_segment = re.split(r"(?:[.!?]+\s+|\n+)", cleaned, maxsplit=1)[0].strip(" -:;,.!?")
+    lowered = first_segment.lower()
+    for prefix in _SESSION_TOPIC_PREFIXES:
+        if lowered.startswith(prefix):
+            first_segment = first_segment[len(prefix):].strip(" -:;,.!?")
+            break
+
+    first_segment = _truncate_text(first_segment.strip(), max_chars)
+    if not first_segment:
+        return "General"
+    return first_segment[0].upper() + first_segment[1:]
+
+
+def _derive_session_summary(
+    user_text: str | None,
+    assistant_text: str | None,
+    max_chars: int = 160,
+) -> str:
+    candidate = " ".join(str(assistant_text or user_text or "").split()).strip(" -:;,.!?")
+    if not candidate:
+        return ""
+    first_segment = re.split(r"(?:[.!?]+\s+|\n+)", candidate, maxsplit=1)[0].strip(" -:;,.!?")
+    return _truncate_text(first_segment, max_chars)
+
+
+def update_advisor_session(
+    db_path: str,
+    session_id: str,
+    *,
+    topic: str | None = None,
+    summary: str | None = None,
+    message_count_increment: int = 0,
+) -> None:
+    _ensure_schema(db_path)
+    conn = get_conn(db_path)
+    conn.execute(
+        """UPDATE advisor_sessions
+           SET last_active_at = ?,
+               topic = COALESCE(?, topic),
+               summary = COALESCE(?, summary),
+               message_count = COALESCE(message_count, 0) + ?
+           WHERE id = ?""",
+        (
+            datetime.now(timezone.utc).isoformat(),
+            topic,
+            summary,
+            message_count_increment,
+            session_id,
+        ),
+    )
+    conn.commit()
+
+
+def list_advisor_sessions(
+    db_path: str,
+    limit: int = 10,
+) -> list[dict]:
+    _ensure_schema(db_path)
+    conn = get_conn(db_path)
+    rows = conn.execute(
+        """SELECT s.id, s.topic, s.summary, s.last_active_at, s.message_count, s.status,
+                  (
+                      SELECT msg.content
+                      FROM advisor_messages AS msg
+                      WHERE msg.session_id = s.id
+                        AND msg.role = 'user'
+                      ORDER BY msg.created_at ASC
+                      LIMIT 1
+                  ) AS first_user_message
+           FROM advisor_sessions AS s
+           ORDER BY s.last_active_at DESC
+           LIMIT ?""",
+        (limit,),
+    ).fetchall()
+    sessions: list[dict] = []
+    for row in rows:
+        session = dict(row)
+        candidate_topic = session.get("topic")
+        if _topic_is_generic(candidate_topic):
+            candidate_topic = _derive_session_topic(
+                session.get("first_user_message") or session.get("summary")
+            )
+        session["topic"] = candidate_topic or "General"
+        session.pop("first_user_message", None)
+        sessions.append(session)
+    return sessions
 
 
 def list_advisor_memories(
@@ -750,10 +907,25 @@ class AdvisoryEngine:
         user_msg_id: str | None = None,
         assistant_msg_id: str | None = None,
     ) -> None:
+        session = get_advisor_session(self.db_path, session_id) or {}
+        topic = None
+        if _topic_is_generic(session.get("topic")):
+            topic = _derive_session_topic(user_text)
+        summary = None
+        if not str(session.get("summary") or "").strip():
+            summary = _derive_session_summary(user_text, assistant_text)
+
         uid = user_msg_id or str(uuid.uuid4())
         aid = assistant_msg_id or str(uuid.uuid4())
         save_advisor_message(self.db_path, uid, session_id, "user", user_text)
         save_advisor_message(self.db_path, aid, session_id, "assistant", assistant_text)
+        update_advisor_session(
+            self.db_path,
+            session_id,
+            topic=topic,
+            summary=summary,
+            message_count_increment=2,
+        )
 
     # -- memory extraction ---------------------------------------------------
 

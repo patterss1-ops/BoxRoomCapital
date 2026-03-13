@@ -907,7 +907,7 @@ NOTIFICATIONS = {
 
 # ─── ADVISORY MODULE ─────────────────────────────────────────────────────────
 
-ADVISOR_ENABLED = _env_bool("ADVISOR_ENABLED", False)
+ADVISOR_ENABLED = _env_bool("ADVISOR_ENABLED", True)
 ADVISOR_MODEL = os.getenv("ADVISOR_MODEL", "claude-opus-4-6")
 ADVISOR_MAX_CONTEXT_MESSAGES = _env_int("ADVISOR_MAX_CONTEXT_MESSAGES", 20, min_value=1, max_value=100)
 ADVISOR_MAX_MEMORY_ITEMS = _env_int("ADVISOR_MAX_MEMORY_ITEMS", 15, min_value=1, max_value=50)
