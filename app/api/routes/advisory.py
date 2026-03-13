@@ -74,14 +74,9 @@ def advisory_performance_api():
 def advisory_conversations_api(limit: int = 10):
     """Recent advisory sessions."""
     try:
-        from intelligence.advisor import get_conn
+        from intelligence.advisor import list_advisor_sessions
         from data.trade_db import DB_PATH
-        conn = get_conn(DB_PATH)
-        rows = conn.execute(
-            "SELECT * FROM advisor_sessions ORDER BY last_active_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
-        sessions = [dict(r) for r in rows]
+        sessions = list_advisor_sessions(DB_PATH, limit=limit)
         return {"ok": True, "sessions": sessions}
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
@@ -181,13 +176,10 @@ def advisory_sessions_fragment(request: Request):
     """HTMX fragment: recent advisory conversations."""
     conversations = []
     try:
-        from data.trade_db import get_conn, DB_PATH
-        conn = get_conn(DB_PATH)
-        rows = conn.execute(
-            "SELECT id, topic, last_active_at, message_count, status "
-            "FROM advisor_sessions ORDER BY last_active_at DESC LIMIT 10"
-        ).fetchall()
-        for r in rows:
+        from data.trade_db import DB_PATH
+        from intelligence.advisor import list_advisor_sessions
+
+        for r in list_advisor_sessions(DB_PATH, limit=10):
             conversations.append({
                 "id": r["id"],
                 "topic": r["topic"] or "General",

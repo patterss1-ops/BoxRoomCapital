@@ -104,6 +104,7 @@ def test_prompt_includes_holdings(engine):
         recent_msgs=[],
         holdings=holdings_text,
         market="",
+        market_data="",
         headlines=[],
         user_msg="Review my portfolio",
     )
@@ -126,6 +127,7 @@ def test_prompt_includes_headlines(engine):
         recent_msgs=[],
         holdings="No holdings tracked.",
         market="",
+        market_data="",
         headlines=headlines,
         user_msg="What's happening?",
     )
@@ -149,6 +151,7 @@ def test_prompt_includes_memories(engine):
         recent_msgs=[],
         holdings="No holdings tracked.",
         market="",
+        market_data="",
         headlines=[],
         user_msg="What should I do?",
     )
@@ -316,8 +319,11 @@ def test_memory_graph_api_and_fragment(monkeypatch, db):
         assert response.status_code == 200
         payload = response.json()
         assert payload["ok"] is True
-        assert payload["meta"]["node_count"] == 1
-        assert payload["nodes"][0]["topic"] == "ISA graph seed"
+        assert payload["meta"]["raw_memory_count"] == 1
+        assert payload["meta"]["theme_count"] == 1
+        assert payload["meta"]["promoted_memory_count"] == 1
+        assert any(node["topic"] == "ISA graph seed" for node in payload["nodes"])
+        assert any(node["node_kind"] == "theme" for node in payload["nodes"])
 
         fragment = client.get("/fragments/advisory-memory-graph")
         assert fragment.status_code == 200

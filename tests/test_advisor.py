@@ -12,17 +12,20 @@ import pytest
 
 from data.trade_db import get_conn
 from intelligence.advisor import (
+    _extract_market_symbols_from_query,
     AdvisoryEngine,
     _ensure_schema,
     build_advisor_memory_graph,
     get_active_session,
     get_advisor_messages,
+    get_advisor_session,
     save_advisor_memory,
     save_advisor_message,
     save_advisor_session,
     search_advisor_memories,
     get_recent_rss_headlines,
     list_advisor_memories,
+    list_advisor_sessions,
 )
 
 
@@ -201,6 +204,24 @@ def test_list_advisor_memories_filters_expired_and_recovers_session(db):
     assert memories[0]["topic"] == "ISA allocation"
 
 
+def test_list_advisor_sessions_derives_topic_from_first_user_message(db):
+    session_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id)
+    save_advisor_message(
+        db,
+        str(uuid.uuid4()),
+        session_id,
+        "user",
+        "Should I add more VWRL.L to my ISA before the tax year ends?",
+    )
+
+    sessions = list_advisor_sessions(db)
+
+    assert sessions[0]["id"] == session_id
+    assert sessions[0]["topic"] != "General"
+    assert "VWRL.L" in sessions[0]["topic"]
+
+
 # ── 6. Memory search with no results ─────────────────────────────────────
 
 def test_memory_search_no_results(db):
@@ -259,7 +280,10 @@ def test_build_advisor_memory_graph_aggregates_relationships(db):
     conn.commit()
 
     graph = build_advisor_memory_graph(db)
-    assert graph["meta"]["node_count"] == 3
+    assert graph["meta"]["raw_memory_count"] == 3
+    assert graph["meta"]["theme_count"] >= 2
+    assert graph["meta"]["promoted_memory_count"] >= 3
+    assert any(node["node_kind"] == "theme" for node in graph["nodes"])
 
     first_second = next(
         edge
@@ -275,6 +299,24 @@ def test_build_advisor_memory_graph_aggregates_relationships(db):
         if {edge["source"], edge["target"]} == {first_memory_id, third_memory_id}
     )
     assert any(reason["type"] == "superseded_by" for reason in first_third["reasons"])
+    assert any(edge["kind"] == "theme_support" for edge in graph["edges"])
+
+
+def test_save_exchange_updates_session_metadata(engine, db):
+    session_id = str(uuid.uuid4())
+    save_advisor_session(db, session_id)
+
+    engine._save_exchange(
+        session_id,
+        "Can I build a VWRL.L core position in my ISA this month?",
+        "Yes, VWRL.L works well as a diversified ISA core holding.",
+    )
+
+    session = get_advisor_session(db, session_id)
+    assert session is not None
+    assert session["message_count"] == 2
+    assert "VWRL.L" in str(session["topic"] or "")
+    assert "diversified ISA core holding" in str(session["summary"] or "")
 
 
 # ── 7. Prompt building includes memories and holdings ─────────────────────
@@ -292,9 +334,10 @@ def test_prompt_building_with_context(engine, db):
     recent_msgs = []
     holdings = "ISA: VWRL 100 units @ 80.00"
     market = "Market snapshot: S&P 500: 5,500.00"
+    market_data = "**Live market data for this question:**\n- VWRL.L (VWRL.L): last 101.20, day +0.40%, 5d +1.20%"
     headlines = [{"title": "FTSE hits record high", "source": "ft_markets"}]
 
-    messages = engine._build_prompt(memories, recent_msgs, holdings, market, headlines, "What should I buy?")
+    messages = engine._build_prompt(memories, recent_msgs, holdings, market, market_data, headlines, "What should I buy?")
 
     # System prompt should be first
     assert messages[0]["role"] == "system"
@@ -304,6 +347,7 @@ def test_prompt_building_with_context(engine, db):
     assert "Relevant past decisions" in system_text
     assert "FTSE hits record high" in system_text
     assert "Market snapshot" in system_text
+    assert "Live market data for this question" in system_text
 
     # User message should be last
     assert messages[-1]["role"] == "user"
@@ -313,13 +357,36 @@ def test_prompt_building_with_context(engine, db):
 # ── 8. Prompt building with empty context ─────────────────────────────────
 
 def test_prompt_building_empty_context(engine):
-    messages = engine._build_prompt([], [], "No holdings tracked.", "", [], "Hello")
+    messages = engine._build_prompt([], [], "No holdings tracked.", "", "", [], "Hello")
 
     system_text = messages[0]["content"]
     # Should not contain holdings or memory sections
     assert "Current portfolio" not in system_text
     assert "Relevant past decisions" not in system_text
     assert messages[-1]["content"] == "Hello"
+
+
+def test_extract_market_symbols_from_query_handles_aliases_and_tickers():
+    symbols = _extract_market_symbols_from_query("Compare VWRL.L against the FTSE 100 and S&P 500")
+    assert symbols[:3] == ["VWRL.L", "^FTSE", "SPY"]
+
+
+def test_query_market_context_includes_live_and_historical_data(engine):
+    with patch("intelligence.advisory_holdings.fetch_live_prices", return_value={"VWRL.L": 101.25, "SPY": 505.0}):
+        with patch.object(
+            engine,
+            "_fetch_symbol_history",
+            side_effect=[
+                [{"date": f"2026-01-{day:02d}", "close": 100.0 + day} for day in range(1, 280)],
+                [{"date": f"2026-01-{day:02d}", "close": 200.0 + day} for day in range(1, 280)],
+            ],
+        ):
+            context = engine._get_query_market_context("Compare VWRL.L vs S&P 500")
+
+    assert "Live market data for this question" in context
+    assert "VWRL.L" in context
+    assert "S&P 500" in context
+    assert "52w range" in context
 
 
 # ── 9. LLM call (mock requests.post) ─────────────────────────────────────
