@@ -21,6 +21,7 @@ from typing import Any
 import requests
 
 import config
+from data.historical_cache import HistoricalCache
 from data.trade_db import DB_PATH, get_conn
 
 log = logging.getLogger(__name__)
@@ -95,6 +96,8 @@ _MEMORY_TICKER_STOPWORDS = {
     "USA",
     "EU",
     "VIX",
+    "VS",
+    "FTSE",
 }
 _GRAPH_REASON_WEIGHTS = {
     "superseded_by": 3.0,
@@ -102,6 +105,56 @@ _GRAPH_REASON_WEIGHTS = {
     "shared_ticker": 1.5,
     "shared_tag": 1.0,
 }
+_MARKET_QUERY_HINTS = {
+    "price",
+    "prices",
+    "quote",
+    "quotes",
+    "history",
+    "historic",
+    "historical",
+    "return",
+    "returns",
+    "performance",
+    "performing",
+    "compare",
+    "comparison",
+    "versus",
+    "vs",
+    "move",
+    "moves",
+    "moved",
+    "chart",
+    "charts",
+    "today",
+    "ytd",
+    "month",
+    "quarter",
+    "year",
+}
+_MARKET_ALIAS_PATTERNS = (
+    (re.compile(r"\b(?:s&p\s*500|sp500|spy)\b", re.IGNORECASE), "SPY"),
+    (re.compile(r"\b(?:ftse(?:\s*100)?|ftse100)\b", re.IGNORECASE), "^FTSE"),
+    (re.compile(r"\b(?:nasdaq(?:\s*100)?|nasdaq100|qqq)\b", re.IGNORECASE), "QQQ"),
+    (re.compile(r"\b(?:dow|dow jones|djia|dia)\b", re.IGNORECASE), "DIA"),
+    (re.compile(r"\b(?:russell\s*2000|iwm)\b", re.IGNORECASE), "IWM"),
+    (re.compile(r"\b(?:vix|volatility index)\b", re.IGNORECASE), "^VIX"),
+)
+_MARKET_SYMBOL_DISPLAY_NAMES = {
+    "SPY": "S&P 500",
+    "^FTSE": "FTSE 100",
+    "QQQ": "Nasdaq 100",
+    "DIA": "Dow Jones",
+    "IWM": "Russell 2000",
+    "^VIX": "VIX",
+}
+_MARKET_RETURN_WINDOWS = (
+    ("5d", 5),
+    ("1m", 21),
+    ("3m", 63),
+    ("1y", 252),
+)
+_MAX_QUERY_MARKET_SYMBOLS = 4
 _GENERIC_SESSION_TOPICS = {
     "",
     "advisor chat",
@@ -342,6 +395,110 @@ def _truncate_text(text: str, max_chars: int) -> str:
         return text
     truncated = text[: max_chars + 1].rsplit(" ", 1)[0].strip()
     return truncated or text[:max_chars].strip()
+
+
+def _query_mentions_market_data(query: str | None) -> bool:
+    lowered = str(query or "").lower()
+    return any(hint in lowered for hint in _MARKET_QUERY_HINTS)
+
+
+def _normalise_symbol_list(symbols: list[str], limit: int = _MAX_QUERY_MARKET_SYMBOLS) -> list[str]:
+    deduped: list[str] = []
+    for symbol in symbols:
+        cleaned = str(symbol or "").strip().upper()
+        if not cleaned or cleaned in deduped:
+            continue
+        deduped.append(cleaned)
+        if len(deduped) >= limit:
+            break
+    return deduped
+
+
+def _extract_market_symbols_from_query(query: str | None) -> list[str]:
+    query_text = str(query or "")
+    matches: list[tuple[int, str]] = []
+    for pattern, symbol in _MARKET_ALIAS_PATTERNS:
+        for match in pattern.finditer(query_text):
+            matches.append((match.start(), symbol))
+
+    for match in _MEMORY_TICKER_PATTERN.finditer(query_text):
+        symbol = match.group(1).upper()
+        if symbol in _MEMORY_TICKER_STOPWORDS:
+            continue
+        if len(symbol) == 1 and "." not in symbol:
+            continue
+        matches.append((match.start(1), symbol))
+
+    matches.sort(key=lambda item: item[0])
+    return _normalise_symbol_list([symbol for _, symbol in matches])
+
+
+def _format_signed_pct(value: float | None) -> str:
+    if value is None:
+        return "n/a"
+    return f"{value:+.2f}%"
+
+
+def _flatten_download_frame(frame: Any) -> Any:
+    try:
+        import pandas as pd
+
+        if frame is not None and hasattr(frame, "columns") and isinstance(frame.columns, pd.MultiIndex):
+            frame = frame.copy()
+            frame.columns = frame.columns.get_level_values(0)
+    except Exception:
+        return frame
+    return frame
+
+
+def _history_frame_to_bars(frame: Any) -> list[dict[str, Any]]:
+    if frame is None or getattr(frame, "empty", True):
+        return []
+    frame = _flatten_download_frame(frame)
+    bars: list[dict[str, Any]] = []
+    for index, row in frame.iterrows():
+        try:
+            close = float(row["Close"])
+        except Exception:
+            continue
+        date_str = index.strftime("%Y-%m-%d") if hasattr(index, "strftime") else str(index)[:10]
+        try:
+            open_price = float(row["Open"])
+        except Exception:
+            open_price = close
+        try:
+            high_price = float(row["High"])
+        except Exception:
+            high_price = close
+        try:
+            low_price = float(row["Low"])
+        except Exception:
+            low_price = close
+        try:
+            volume = float(row.get("Volume", 0.0))
+        except Exception:
+            volume = 0.0
+        bars.append(
+            {
+                "date": date_str,
+                "open": open_price,
+                "high": high_price,
+                "low": low_price,
+                "close": close,
+                "volume": volume,
+            }
+        )
+    return bars
+
+
+def _compute_return_pct(bars: list[dict[str, Any]], lookback_bars: int) -> float | None:
+    if len(bars) <= lookback_bars:
+        return None
+    start_price = float(bars[-(lookback_bars + 1)]["close"] or 0.0)
+    end_price = float(bars[-1]["close"] or 0.0)
+    if start_price <= 0:
+        return None
+    return round((end_price / start_price - 1.0) * 100.0, 2)
 
 
 def _derive_session_topic(text: str | None, max_chars: int = 72) -> str:
@@ -674,12 +831,16 @@ Your role is to provide thoughtful, practical investment advice within the UK ta
 - Flag risks concisely but don't over-hedge every statement.
 - Use GBP as the default currency.
 - Keep responses concise — aim for 2-4 paragraphs unless the question demands more.
+- When fresh market data is provided below, use it instead of guessing price levels or returns.
+- If the user asks for live or historical market data that is missing, say so plainly.
 
 {holdings_section}
 
 {memory_section}
 
 {market_section}
+
+{market_data_section}
 
 {headlines_section}
 """
@@ -693,6 +854,8 @@ class AdvisoryEngine:
         _ensure_schema(self.db_path)
         self._api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         self._session = requests.Session()
+        cache_dir = os.path.join(os.path.dirname(self.db_path) or ".", ".cache")
+        self._history_cache = HistoricalCache(cache_dir=cache_dir)
 
     # -- public interface ----------------------------------------------------
 
@@ -716,9 +879,18 @@ class AdvisoryEngine:
         )
         holdings = self._get_holdings_snapshot()
         market = self._get_market_context()
+        market_data = self._get_query_market_context(text)
         headlines = get_recent_rss_headlines(self.db_path)
 
-        messages = self._build_prompt(memories, recent_msgs, holdings, market, headlines, text)
+        messages = self._build_prompt(
+            memories,
+            recent_msgs,
+            holdings,
+            market,
+            market_data,
+            headlines,
+            text,
+        )
 
         try:
             reply = self._call_llm(messages)
@@ -808,6 +980,91 @@ class AdvisoryEngine:
             pass
         return "Market data unavailable."
 
+    def _get_portfolio_market_symbols(self, limit: int = _MAX_QUERY_MARKET_SYMBOLS) -> list[str]:
+        try:
+            from intelligence.advisory_holdings import get_holdings
+
+            holdings = get_holdings(self.db_path)
+        except Exception:
+            return []
+        tickers = [str(holding.get("ticker") or "").strip().upper() for holding in holdings]
+        return _normalise_symbol_list(tickers, limit=limit)
+
+    def _fetch_symbol_history(self, symbol: str, min_bars: int = 252) -> list[dict[str, Any]]:
+        symbol = str(symbol or "").strip().upper()
+        if not symbol:
+            return []
+
+        cached_bars = self._history_cache.get_bars(symbol)
+        if cached_bars and len(cached_bars) >= min_bars and not self._history_cache.is_stale(symbol):
+            return cached_bars
+
+        try:
+            import yfinance as yf
+
+            frame = yf.download(
+                symbol,
+                period="18mo",
+                auto_adjust=True,
+                progress=False,
+                threads=False,
+            )
+            bars = _history_frame_to_bars(frame)
+            if bars:
+                self._history_cache.store_bars(symbol, bars, source="yfinance")
+                return bars
+        except Exception:
+            log.debug("History fetch failed for %s", symbol, exc_info=True)
+
+        return cached_bars
+
+    def _get_query_market_context(self, query: str) -> str:
+        symbols = _extract_market_symbols_from_query(query)
+        lowered = str(query or "").lower()
+        if not symbols and _query_mentions_market_data(query):
+            if any(token in lowered for token in ("portfolio", "holding", "holdings", "isa", "sipp", "gia")):
+                symbols = self._get_portfolio_market_symbols()
+        if not symbols:
+            return ""
+
+        try:
+            from intelligence.advisory_holdings import fetch_live_prices
+
+            live_prices = fetch_live_prices(symbols, self.db_path)
+        except Exception:
+            live_prices = {}
+
+        lines: list[str] = []
+        for symbol in symbols:
+            bars = self._fetch_symbol_history(symbol)
+            if len(bars) < 2:
+                continue
+            latest_close = live_prices.get(symbol)
+            if latest_close is None:
+                latest_close = float(bars[-1]["close"] or 0.0)
+            previous_close = float(bars[-2]["close"] or 0.0) if len(bars) >= 2 else 0.0
+            day_change = None
+            if latest_close and previous_close > 0:
+                day_change = round((float(latest_close) / previous_close - 1.0) * 100.0, 2)
+            trailing_returns = [
+                f"{label} {_format_signed_pct(_compute_return_pct(bars, lookback))}"
+                for label, lookback in _MARKET_RETURN_WINDOWS
+            ]
+            one_year_window = bars[-252:] if len(bars) >= 252 else bars
+            range_low = min(float(bar["close"] or 0.0) for bar in one_year_window)
+            range_high = max(float(bar["close"] or 0.0) for bar in one_year_window)
+            display_name = _MARKET_SYMBOL_DISPLAY_NAMES.get(symbol, symbol)
+            lines.append(
+                f"- {display_name} ({symbol}): last {float(latest_close):,.2f}, "
+                f"day {_format_signed_pct(day_change)}, "
+                + ", ".join(trailing_returns)
+                + f", 52w range {range_low:,.2f}-{range_high:,.2f}"
+            )
+
+        if not lines:
+            return ""
+        return "**Live market data for this question:**\n" + "\n".join(lines)
+
     # -- prompt construction -------------------------------------------------
 
     def _build_prompt(
@@ -816,6 +1073,7 @@ class AdvisoryEngine:
         recent_msgs: list[dict],
         holdings: str,
         market: str,
+        market_data: str,
         headlines: list[dict],
         user_msg: str,
     ) -> list[dict]:
@@ -835,6 +1093,7 @@ class AdvisoryEngine:
             memory_section = ""
 
         market_section = f"**{market}**" if market else ""
+        market_data_section = market_data or ""
 
         if headlines:
             hl_lines = [f"- {h.get('title', '?')} ({h.get('source', '?')})" for h in headlines[:10]]
@@ -846,6 +1105,7 @@ class AdvisoryEngine:
             holdings_section=holdings_section,
             memory_section=memory_section,
             market_section=market_section,
+            market_data_section=market_data_section,
             headlines_section=headlines_section,
         ).strip()
 

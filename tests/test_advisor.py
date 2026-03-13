@@ -12,6 +12,7 @@ import pytest
 
 from data.trade_db import get_conn
 from intelligence.advisor import (
+    _extract_market_symbols_from_query,
     AdvisoryEngine,
     _ensure_schema,
     build_advisor_memory_graph,
@@ -329,9 +330,10 @@ def test_prompt_building_with_context(engine, db):
     recent_msgs = []
     holdings = "ISA: VWRL 100 units @ 80.00"
     market = "Market snapshot: S&P 500: 5,500.00"
+    market_data = "**Live market data for this question:**\n- VWRL.L (VWRL.L): last 101.20, day +0.40%, 5d +1.20%"
     headlines = [{"title": "FTSE hits record high", "source": "ft_markets"}]
 
-    messages = engine._build_prompt(memories, recent_msgs, holdings, market, headlines, "What should I buy?")
+    messages = engine._build_prompt(memories, recent_msgs, holdings, market, market_data, headlines, "What should I buy?")
 
     # System prompt should be first
     assert messages[0]["role"] == "system"
@@ -341,6 +343,7 @@ def test_prompt_building_with_context(engine, db):
     assert "Relevant past decisions" in system_text
     assert "FTSE hits record high" in system_text
     assert "Market snapshot" in system_text
+    assert "Live market data for this question" in system_text
 
     # User message should be last
     assert messages[-1]["role"] == "user"
@@ -350,13 +353,36 @@ def test_prompt_building_with_context(engine, db):
 # ── 8. Prompt building with empty context ─────────────────────────────────
 
 def test_prompt_building_empty_context(engine):
-    messages = engine._build_prompt([], [], "No holdings tracked.", "", [], "Hello")
+    messages = engine._build_prompt([], [], "No holdings tracked.", "", "", [], "Hello")
 
     system_text = messages[0]["content"]
     # Should not contain holdings or memory sections
     assert "Current portfolio" not in system_text
     assert "Relevant past decisions" not in system_text
     assert messages[-1]["content"] == "Hello"
+
+
+def test_extract_market_symbols_from_query_handles_aliases_and_tickers():
+    symbols = _extract_market_symbols_from_query("Compare VWRL.L against the FTSE 100 and S&P 500")
+    assert symbols[:3] == ["VWRL.L", "^FTSE", "SPY"]
+
+
+def test_query_market_context_includes_live_and_historical_data(engine):
+    with patch("intelligence.advisory_holdings.fetch_live_prices", return_value={"VWRL.L": 101.25, "SPY": 505.0}):
+        with patch.object(
+            engine,
+            "_fetch_symbol_history",
+            side_effect=[
+                [{"date": f"2026-01-{day:02d}", "close": 100.0 + day} for day in range(1, 280)],
+                [{"date": f"2026-01-{day:02d}", "close": 200.0 + day} for day in range(1, 280)],
+            ],
+        ):
+            context = engine._get_query_market_context("Compare VWRL.L vs S&P 500")
+
+    assert "Live market data for this question" in context
+    assert "VWRL.L" in context
+    assert "S&P 500" in context
+    assert "52w range" in context
 
 
 # ── 9. LLM call (mock requests.post) ─────────────────────────────────────

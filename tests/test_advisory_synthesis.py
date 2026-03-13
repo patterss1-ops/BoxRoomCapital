@@ -104,6 +104,7 @@ def test_prompt_includes_holdings(engine):
         recent_msgs=[],
         holdings=holdings_text,
         market="",
+        market_data="",
         headlines=[],
         user_msg="Review my portfolio",
     )
@@ -126,6 +127,7 @@ def test_prompt_includes_headlines(engine):
         recent_msgs=[],
         holdings="No holdings tracked.",
         market="",
+        market_data="",
         headlines=headlines,
         user_msg="What's happening?",
     )
@@ -149,6 +151,7 @@ def test_prompt_includes_memories(engine):
         recent_msgs=[],
         holdings="No holdings tracked.",
         market="",
+        market_data="",
         headlines=[],
         user_msg="What should I do?",
     )
