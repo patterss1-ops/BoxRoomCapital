@@ -96,8 +96,10 @@ class SafetyController:
             return False, f"KILL SWITCH: {self.kill_switch_reason}"
 
         # Gate 2: Max risk per trade
+        # Allow 10% tolerance for minimum-size trades (1 contract) since we can't go below 1
         max_single_risk = self.equity * (self.limits.max_risk_per_trade_pct / 100)
-        if proposed_risk > max_single_risk:
+        tolerance = 1.10 if proposed_size <= 1 else 1.0
+        if proposed_risk > max_single_risk * tolerance:
             return False, (
                 f"Risk £{proposed_risk:.0f} > max single trade "
                 f"£{max_single_risk:.0f} ({self.limits.max_risk_per_trade_pct}%)"
