@@ -263,6 +263,7 @@ class OptionsBot(
             "NETWORK_ERROR",
             "BROKER_5XX",
             "NO_MARKET_INFO",
+            "MARKET_NOT_TRADEABLE",  # Market offline — will retry when it opens
         }
         return code, code in recoverable_codes
 
