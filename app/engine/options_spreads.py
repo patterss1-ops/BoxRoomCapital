@@ -208,27 +208,37 @@ class OptionsSpreadsMixin:
                         last_error = f"No options found on IG for '{search_term}'"
                         last_code, recoverable = self._classify_order_error(last_error, "OPTIONS_NOT_FOUND")
                     else:
-                        # Scale ETF-based strikes to IG index/commodity scale
-                        strike_scale = option_cfg.get("strike_scale", 1.0)
+                        # Compute dynamic scale: ETF strikes → IG index/commodity strikes
+                        # Use median of available IG strikes as proxy for IG ATM price,
+                        # and the signal's short strike (≈99% of ETF price) as yfinance price proxy.
+                        valid_strikes = sorted(set(
+                            o.strike for o in options
+                            if o.option_type == option_type and o.strike > 0
+                        ))
+                        if valid_strikes and sig.short_strike > 0:
+                            ig_atm_approx = valid_strikes[len(valid_strikes) // 2]
+                            strike_scale = ig_atm_approx / sig.short_strike
+                            # Sanity: if scale is near 1.0, IG strikes are already in ETF scale
+                            if strike_scale < 1.5:
+                                strike_scale = 1.0
+                        else:
+                            strike_scale = 1.0
                         scaled_short = round(sig.short_strike * strike_scale)
                         scaled_long = round(sig.long_strike * strike_scale)
                         logger.info(
                             f"    {ticker}: IG returned {len(options)} options for '{search_term}', "
                             f"looking for {option_type} near short={scaled_short} long={scaled_long} "
-                            f"(raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale}x)"
+                            f"(raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale:.2f}x, "
+                            f"ig_atm_approx={valid_strikes[len(valid_strikes)//2] if valid_strikes else 'N/A'})"
                         )
                         short_option = self._find_closest_option(options, scaled_short, option_type)
                         long_option = self._find_closest_option(options, scaled_long, option_type)
                         if not short_option or not long_option:
-                            available = sorted(set(
-                                o.strike for o in options
-                                if o.option_type == option_type and o.strike > 0
-                            ))
                             last_error = (
                                 f"Couldn't find matching {option_type} options "
                                 f"(scaled_short={scaled_short}, scaled_long={scaled_long}, "
-                                f"raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale}x, "
-                                f"available_strikes={available[:10]})"
+                                f"raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale:.2f}x, "
+                                f"available_strikes={valid_strikes[:10]})"
                             )
                             last_code, recoverable = self._classify_order_error(last_error, "OPTION_MATCH_FAILED")
                         elif short_option.epic == long_option.epic:
