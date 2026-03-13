@@ -71,6 +71,38 @@ class OptionsSpreadsMixin:
             logger.warning(f"  {ticker}: invalid spread width {spread_width}")
             return
 
+        # --- Compute ETF→IG strike scale early so sizing uses IG-scale values ---
+        # Without this, spread_width=7 (ETF) instead of ~41 (IG), causing
+        # massive oversizing → INSUFFICIENT_FUNDS on IG.
+        option_cfg = config.OPTION_EPIC_PATTERNS.get(ticker)
+        strike_scale = 1.0
+        if option_cfg and not self.is_shadow:
+            option_type = "PUT" if sig.action == "open_put_spread" else "CALL"
+            option_side_text = "PUT" if option_type == "PUT" else "CALL"
+            search_term = f"{option_cfg['search']} {option_side_text}"
+            prefetch_options = self.broker.search_option_markets(search_term)
+            if prefetch_options and sig.short_strike > 0:
+                valid_strikes = sorted(set(
+                    o.strike for o in prefetch_options
+                    if o.option_type == option_type and o.strike > 0
+                ))
+                if valid_strikes:
+                    ig_atm_ref = max(valid_strikes) if option_type == "PUT" else min(valid_strikes)
+                    strike_scale = ig_atm_ref / sig.short_strike
+                    if strike_scale < 1.5:
+                        strike_scale = 1.0
+
+        # Apply scale to get IG-denominated spread values
+        ig_spread_width = spread_width * strike_scale
+        ig_short = round(sig.short_strike * strike_scale)
+        ig_long = round(sig.long_strike * strike_scale)
+        if strike_scale > 1.0:
+            logger.info(
+                f"  {ticker}: strike scale={strike_scale:.2f}x, "
+                f"IG spread: {ig_short}/{ig_long} (width={ig_spread_width:.0f}), "
+                f"ETF spread: {sig.short_strike}/{sig.long_strike} (width={spread_width})"
+            )
+
         # --- Spread width sanity check: reject absurdly wide spreads ---
         max_spread_width_pct = config.OPTIONS_SAFETY.get("max_spread_width_pct", 10.0)
         if current_price > 0:
@@ -86,13 +118,13 @@ class OptionsSpreadsMixin:
                 notifier.trade_rejected(ticker, reason)
                 return
 
-        estimated_premium = spread_width * 0.30
+        estimated_premium = ig_spread_width * 0.30
 
-        max_loss_per_contract = spread_width - estimated_premium
+        max_loss_per_contract = ig_spread_width - estimated_premium
 
         size_result = calc_option_spread_size(
             equity=self.safety.equity,
-            spread_width=spread_width,
+            spread_width=ig_spread_width,
             premium=estimated_premium,
             max_risk_pct=config.OPTIONS_SAFETY["max_risk_per_trade_pct"],
             kelly_fraction=self.strategy_params.get("kelly_fraction", 0.25),
@@ -197,43 +229,36 @@ class OptionsSpreadsMixin:
             )
             attempt_correlation = f"{correlation_id}-a{attempt}"
             try:
-                option_cfg = config.OPTION_EPIC_PATTERNS.get(ticker)
                 if not option_cfg:
                     last_error = "No option EPIC pattern configured"
                     last_code, recoverable = self._classify_order_error(last_error, "NO_OPTION_CONFIG")
                 else:
+                    # Re-fetch options on each retry attempt (prices/availability change)
                     search_term = f"{option_cfg['search']} {option_side_text}"
                     options = self.broker.search_option_markets(search_term)
                     if not options:
                         last_error = f"No options found on IG for '{search_term}'"
                         last_code, recoverable = self._classify_order_error(last_error, "OPTIONS_NOT_FOUND")
                     else:
-                        # Compute dynamic scale: ETF strikes → IG option strike scale
-                        # Use the available IG option strikes themselves as the reference,
-                        # NOT the underlying instrument price (which may differ in unit/currency).
-                        # For PUTS: max available strike ≈ near-ATM on IG side
-                        # For CALLS: min available strike ≈ near-ATM on IG side
+                        # Use strike_scale computed earlier (before sizing)
+                        # Recompute from fresh options in case strikes changed
                         valid_strikes = sorted(set(
                             o.strike for o in options
                             if o.option_type == option_type and o.strike > 0
                         ))
-                        strike_scale = 1.0
-                        ig_atm_ref = 0.0
                         if valid_strikes and sig.short_strike > 0:
-                            if option_type == "PUT":
-                                ig_atm_ref = max(valid_strikes)
-                            else:
-                                ig_atm_ref = min(valid_strikes)
-                            strike_scale = ig_atm_ref / sig.short_strike
-                            if strike_scale < 1.5:
-                                strike_scale = 1.0
+                            ig_atm_ref = max(valid_strikes) if option_type == "PUT" else min(valid_strikes)
+                            fresh_scale = ig_atm_ref / sig.short_strike
+                            if fresh_scale >= 1.5:
+                                strike_scale = fresh_scale
                         scaled_short = round(sig.short_strike * strike_scale)
                         scaled_long = round(sig.long_strike * strike_scale)
                         logger.info(
                             f"    {ticker}: IG returned {len(options)} options for '{search_term}', "
                             f"looking for {option_type} near short={scaled_short} long={scaled_long} "
                             f"(raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale:.2f}x, "
-                            f"ig_atm_ref={ig_atm_ref}, strikes={valid_strikes[:5]}..{valid_strikes[-3:]})"
+                            f"ig_atm_ref={ig_atm_ref if valid_strikes else 'N/A'}, "
+                            f"strikes={valid_strikes[:5]}..{valid_strikes[-3:]})"
                         )
                         # Find tradeable options (validates bid/offer + market status)
                         short_option, short_result = self._find_tradeable_option(
