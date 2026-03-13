@@ -216,6 +216,12 @@ class OptionsControlsMixin:
             db_positions = get_open_option_positions()
             previous_ids = set(self.open_spreads.keys())
 
+            log_event("DEBUG",
+                      f"Reconcile: DB has {len(db_positions)} open, memory has {len(previous_ids)}",
+                      f"db_ids={[p.get('spread_id','?')[:12] for p in db_positions]} "
+                      f"mem_ids={[k[:12] for k in previous_ids]}",
+                      strategy="IBS Credit Spreads")
+
             self.open_spreads = {p["spread_id"]: p for p in db_positions}
             current_ids = set(self.open_spreads.keys())
 
