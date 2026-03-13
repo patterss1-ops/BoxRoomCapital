@@ -119,17 +119,13 @@
     <!-- Chat input -->
     <div class="border-t border-gray-200 p-1.5 bg-gray-50">
       <form id="advisory-chat-form"
-            hx-post="/api/advisory/chat"
-            hx-target="#advisory-chat-messages"
-            hx-swap="innerHTML"
-            hx-indicator="#advisory-spinner"
-            hx-on::after-request="this.querySelector('textarea').value = ''; scrollChatToBottom();">
+            onsubmit="return submitAdvisoryChat(event);">
         <div class="flex items-end gap-1">
           <textarea name="message" rows="2"
                     placeholder="Ask about allocation, tax wrappers, market views..."
                     class="flex-1 px-2 py-1 text-[11px] font-mono bg-white border border-gray-200 rounded resize-none focus:outline-none focus:border-blue-400 text-gray-800"
-                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();this.closest('form').requestSubmit()}"></textarea>
-          <button type="submit" class="px-3 py-1.5 text-[10px] font-semibold bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">Send</button>
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();this.form.requestSubmit();}"></textarea>
+          <button id="advisory-chat-submit" type="submit" class="px-3 py-1.5 text-[10px] font-semibold bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap">Send</button>
         </div>
       </form>
     </div>
@@ -191,6 +187,127 @@ function scrollChatToBottom() {
   const el = document.getElementById('advisory-chat-messages');
   if (el) setTimeout(() => el.scrollTop = el.scrollHeight, 100);
 }
+
+function advisoryTimestamp() {
+  const now = new Date();
+  return now.toISOString().slice(0, 16).replace('T', ' ');
+}
+
+function escapeAdvisoryHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function appendAdvisoryPendingMessage(role, content, options) {
+  const target = document.getElementById('advisory-chat-messages');
+  if (!target) return null;
+  const safeContent = escapeAdvisoryHtml(content);
+  const safeLabel = escapeAdvisoryHtml(options && options.label ? options.label : 'Advisor');
+  const safeTimestamp = escapeAdvisoryHtml(options && options.timestamp ? options.timestamp : advisoryTimestamp());
+  const pending = document.createElement('div');
+  pending.className = 'flex ' + (role === 'user' ? 'justify-end' : 'justify-start');
+  if (options && options.pendingId) {
+    pending.setAttribute('data-pending-id', options.pendingId);
+  }
+  pending.innerHTML = `
+    <div class="max-w-[80%] rounded-md px-2 py-1.5 ${role === 'user' ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-200'}">
+      ${role === 'user' ? '' : `
+      <div class="flex items-center gap-1 mb-0.5">
+        <span class="text-[9px] font-semibold text-blue-600 uppercase">${safeLabel}</span>
+        <span class="text-[8px] text-gray-300 font-mono">${safeTimestamp}</span>
+      </div>`}
+      <div class="text-[11px] text-gray-800 font-mono whitespace-pre-wrap leading-relaxed">${safeContent}</div>
+      ${role === 'user' ? `<div class="text-[8px] text-gray-300 font-mono text-right mt-0.5">${safeTimestamp}</div>` : ''}
+    </div>`;
+  const emptyState = target.querySelector('.flex.flex-col.items-center.justify-center');
+  if (emptyState) {
+    target.innerHTML = '';
+  }
+  target.appendChild(pending);
+  scrollChatToBottom();
+  return pending;
+}
+
+async function submitAdvisoryChat(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const textarea = form.querySelector('textarea[name="message"]');
+  const submitButton = document.getElementById('advisory-chat-submit');
+  const spinner = document.getElementById('advisory-spinner');
+  const message = textarea ? textarea.value.trim() : '';
+  if (!message || form.dataset.submitting === 'true') {
+    return false;
+  }
+
+  const timestamp = advisoryTimestamp();
+  form.dataset.submitting = 'true';
+  if (textarea) textarea.disabled = true;
+  if (submitButton) submitButton.disabled = true;
+  if (spinner) spinner.style.display = 'inline';
+
+  appendAdvisoryPendingMessage('user', message, { timestamp: timestamp });
+  const pendingAdvisor = appendAdvisoryPendingMessage(
+    'assistant',
+    'Thinking...',
+    { timestamp: timestamp, pendingId: 'advisor-thinking', label: 'Advisor' }
+  );
+
+  if (textarea) {
+    textarea.value = '';
+    textarea.style.height = '';
+  }
+
+  try {
+    const response = await fetch('/api/advisory/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+        'HX-Request': 'true'
+      },
+      body: new URLSearchParams({ message: message }).toString()
+    });
+    const html = await response.text();
+    if (!response.ok) {
+      throw new Error('Chat request failed with status ' + response.status);
+    }
+    const target = document.getElementById('advisory-chat-messages');
+    if (target) {
+      target.innerHTML = html;
+    }
+    const sessionsPanel = document.getElementById('advisory-sessions-panel');
+    if (sessionsPanel && window.htmx) {
+      htmx.ajax('GET', '/fragments/advisory-sessions', {
+        target: '#advisory-sessions-panel',
+        swap: 'innerHTML'
+      });
+    }
+    scrollChatToBottom();
+  } catch (error) {
+    if (pendingAdvisor) {
+      pendingAdvisor.remove();
+    }
+    appendAdvisoryPendingMessage(
+      'assistant',
+      'Sorry, there was a problem sending that. Please try again.',
+      { timestamp: advisoryTimestamp(), label: 'System' }
+    );
+    console.error(error);
+  } finally {
+    delete form.dataset.submitting;
+    if (textarea) {
+      textarea.disabled = false;
+      textarea.focus();
+    }
+    if (submitButton) submitButton.disabled = false;
+    if (spinner) spinner.style.display = '';
+  }
+  return false;
+}
+
 document.addEventListener('htmx:afterSwap', function(evt) {
   if (evt.detail.target && evt.detail.target.id === 'advisory-chat-messages') {
     scrollChatToBottom();
