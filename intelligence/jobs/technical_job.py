@@ -149,7 +149,7 @@ class TechnicalJobRunner:
                 )
 
                 layer_score = score_technical(
-                    ticker=ticker, snapshot=snapshot, as_of=run_at,
+                    ticker=ticker, snapshots=[snapshot], as_of=run_at,
                 )
 
                 self.event_store.write_event(EventRecord(
