@@ -60,8 +60,53 @@
         var trigger = elt.getAttribute('hx-trigger') || '';
         if (document.visibilityState !== 'visible' && /\bevery\b/.test(trigger)) {
           event.preventDefault();
+          return;
+        }
+        if (/\bevery\b/.test(trigger)) {
+          var sel = window.getSelection();
+          if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+            var target = elt;
+            if (elt.id) {
+              target = document.getElementById(elt.id) || elt;
+            }
+            try {
+              if (target.contains(sel.anchorNode) || target.contains(sel.focusNode)) {
+                event.preventDefault();
+                return;
+              }
+            } catch(e) {}
+          }
         }
       });
+      window.copyPanelEvents = function(btn, panelId, count) {
+        var panel = document.getElementById(panelId);
+        if (!panel) return;
+        var rows = panel.querySelectorAll('li, tr:not(:first-child)');
+        var lines = [];
+        var limit = Math.min(count || 10, rows.length);
+        for (var i = 0; i < limit; i++) {
+          lines.push(rows[i].textContent.replace(/\s+/g, ' ').trim());
+        }
+        var text = lines.join('\n');
+        if (!text) { text = panel.textContent.trim().split('\n').slice(0, count || 10).join('\n'); }
+        navigator.clipboard.writeText(text).then(function() {
+          var orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function() { btn.textContent = orig; }, 1500);
+        }).catch(function() {
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          var orig = btn.textContent;
+          btn.textContent = 'Copied!';
+          setTimeout(function() { btn.textContent = orig; }, 1500);
+        });
+      };
       window.createTerminalChart = function(container, overrides) {
         if (!container || typeof LightweightCharts === 'undefined') return null;
         var opts = {

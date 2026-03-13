@@ -11,7 +11,7 @@
   </div>
 </div>
 
-<div class="grid grid-cols-1 md:grid-cols-12 gap-4 h-[calc(100%-3.5rem)] overflow-hidden auto-rows-[minmax(18rem,1fr)]">
+<div class="grid grid-cols-1 md:grid-cols-12 gap-4 overflow-y-auto auto-rows-[minmax(18rem,1fr)]" style="max-height:calc(100% - 3.5rem);-webkit-overflow-scrolling:touch">
 
   <!-- Incidents + Events — 2 column -->
   <div class="md:col-span-6 min-h-0 overflow-hidden" id="incidents-panel" hx-get="/fragments/incidents?mode={{ incident_mode }}" hx-trigger="load, every 4s" hx-swap="innerHTML"></div>
