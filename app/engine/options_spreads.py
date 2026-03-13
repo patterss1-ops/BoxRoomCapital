@@ -68,6 +68,7 @@ class OptionsSpreadsMixin:
             premium=estimated_premium,
             max_risk_pct=config.OPTIONS_SAFETY["max_risk_per_trade_pct"],
             kelly_fraction=self.strategy_params.get("kelly_fraction", 0.25),
+            max_size=float(config.OPTIONS_SAFETY.get("max_contracts_per_trade", 10)),
         )
 
         if size_result.stake_per_point <= 0:
