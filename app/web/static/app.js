@@ -558,9 +558,10 @@
     }
 
     if (operatorSection) {
-      const visible = normalized === 'all'
+      const hasOperatorCards = cards.some(function (n) { return (n.getAttribute('data-active-view-card') || '') === 'operator'; });
+      const visible = hasOperatorCards && (normalized === 'all'
         || normalized === 'operator'
-        || ((normalized === 'focus' || normalized === 'stale') && visibleOperatorCards > 0);
+        || ((normalized === 'focus' || normalized === 'stale') && visibleOperatorCards > 0));
       operatorSection.classList.toggle('hidden', !visible);
     }
 
@@ -625,10 +626,13 @@
         title: 'No chains match this view yet.',
         detail: 'Switch back to All to see the full board.'
       };
-      const showEmpty = normalized !== 'all' && visibleTotalCards === 0;
-      emptyState.classList.toggle('hidden', !showEmpty);
-      if (emptyTitle) emptyTitle.textContent = emptyCopy.title;
-      if (emptyDetail) emptyDetail.textContent = emptyCopy.detail;
+      if (normalized !== 'all' && visibleTotalCards === 0) {
+        // Auto-fallback: if the remembered filter yields zero cards, reset to 'all'
+        // so the user always sees their chains instead of a confusing empty state.
+        window.rememberResearchActiveView('all');
+        return window.applyResearchActiveView('all');
+      }
+      emptyState.classList.toggle('hidden', true);
     }
 
     window.updateResearchActiveViewSelectionState();
