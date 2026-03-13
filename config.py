@@ -545,7 +545,7 @@ OPTION_EPIC_PATTERNS = {
     "EWG": {"search": "Germany 40", "index": "DAX", "epic_prefix": "OP.D.DAX."},
     "EWU": {"search": "FTSE 100", "index": "FTSE", "epic_prefix": "OP.D.FTSE."},
     "EWJ": {"search": "Japan 225", "index": "JP225", "epic_prefix": "OP.D.JP225."},
-    "GLD": {"search": "Gold", "index": "GOLD", "epic_prefix": "OP.D.GOLD."},
+    "GLD": {"search": "Gold", "index": "GC1", "epic_prefix": "OP.D.GC1."},
 }
 
 # Safety limits for options trading
