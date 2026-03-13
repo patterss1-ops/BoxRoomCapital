@@ -597,8 +597,13 @@ class OptionsSpreadsMixin:
     def _find_closest_option(self, options: list, target_strike: float,
                              option_type: str):
         from broker.base import OptionMarket
-        matching = [o for o in options if o.option_type == option_type and o.strike > 0]
+        matching = [o for o in options
+                    if o.option_type == option_type and o.strike > 0
+                    and getattr(o, 'bid', 0) > 0 and getattr(o, 'offer', 0) > 0]
         if not matching:
+            # Fall back: try without bid/offer filter for diagnostics
+            type_only = [o for o in options if o.option_type == option_type and o.strike > 0]
+            no_price = len(type_only) - len(matching)
             # Diagnostic: log what we got vs what we need
             type_counts = {}
             zero_strike = 0
@@ -607,8 +612,9 @@ class OptionsSpreadsMixin:
                 if o.strike == 0:
                     zero_strike += 1
             logger.warning(
-                f"No matching options for {option_type} strike={target_strike}: "
-                f"total={len(options)}, by_type={type_counts}, zero_strike={zero_strike}"
+                f"No tradeable options for {option_type} strike={target_strike}: "
+                f"total={len(options)}, by_type={type_counts}, zero_strike={zero_strike}, "
+                f"no_price={no_price}"
             )
             if zero_strike > 0:
                 samples = [f"{o.epic} '{o.instrument_name}'" for o in options if o.strike == 0][:3]
