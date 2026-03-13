@@ -136,6 +136,8 @@ class TechnicalJobRunner:
                     continue
 
                 snapshot = TechnicalSnapshot(
+                    ticker=ticker,
+                    snapshot_date=snap_data.get("snapshot_date", datetime.now(timezone.utc).strftime("%Y-%m-%d")),
                     close=snap_data["close"],
                     sma_50=snap_data["sma_50"],
                     sma_200=snap_data["sma_200"],
