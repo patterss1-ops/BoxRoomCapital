@@ -104,7 +104,25 @@ _GRAPH_REASON_WEIGHTS = {
     "same_session": 2.0,
     "shared_ticker": 1.5,
     "shared_tag": 1.0,
+    "theme_related": 1.8,
+    "theme_support": 1.2,
 }
+_MEMORY_PROMOTION_TYPE_SCORES = {
+    "decision": 3.0,
+    "goal": 2.8,
+    "preference": 2.4,
+    "fact": 1.9,
+    "bookmark": 1.7,
+    "observation": 1.2,
+    "note": 1.0,
+}
+_THEME_KEYWORD_GROUPS = (
+    ("theme:tax_wrappers", "Tax wrappers", "tax", {"isa", "sipp", "gia", "tax", "allowance", "cgt", "wrapper"}),
+    ("theme:risk_posture", "Risk posture", "risk", {"risk", "volatility", "drawdown", "downside", "conservative", "aggressive"}),
+    ("theme:goals_constraints", "Goals and constraints", "goals", {"goal", "income", "retirement", "horizon", "liquidity", "withdrawal"}),
+    ("theme:portfolio_allocation", "Portfolio allocation", "allocation", {"allocation", "rebalance", "diversification", "core", "satellite", "weight", "portfolio"}),
+    ("theme:watchlist_research", "Watchlist and research", "research", {"watchlist", "bookmark", "research", "thesis", "idea"}),
+)
 _MARKET_QUERY_HINTS = {
     "price",
     "prices",
@@ -675,16 +693,78 @@ def _add_graph_edge(
     edge["weight"] += _GRAPH_REASON_WEIGHTS.get(reason_type, 1.0)
 
 
+def _slugify_theme_fragment(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+    return slug or "general"
+
+
+def _derive_memory_theme(node: dict[str, Any]) -> dict[str, str]:
+    tickers = [str(ticker).upper() for ticker in node.get("tickers", []) if str(ticker).strip()]
+    if tickers:
+        primary = tickers[0]
+        return {
+            "id": f"theme:holding:{primary}",
+            "label": f"Holding · {primary}",
+            "category": "holding",
+        }
+
+    tags = {str(tag).lower() for tag in node.get("tags", []) if str(tag).strip()}
+    text = " ".join(
+        [
+            str(node.get("topic") or ""),
+            str(node.get("summary") or ""),
+            " ".join(sorted(tags)),
+        ]
+    ).lower()
+    for theme_id, label, category, keywords in _THEME_KEYWORD_GROUPS:
+        if tags.intersection(keywords) or any(keyword in text for keyword in keywords):
+            return {"id": theme_id, "label": label, "category": category}
+
+    topic_words = re.findall(r"[A-Za-z0-9]+", str(node.get("topic") or ""))[:2]
+    topic_label = " ".join(topic_words).title() if topic_words else "General"
+    topic_slug = _slugify_theme_fragment(" ".join(topic_words))
+    return {
+        "id": f"theme:topic:{topic_slug}",
+        "label": f"Theme · {topic_label}",
+        "category": "topic",
+    }
+
+
+def _score_memory_promotion(
+    node: dict[str, Any],
+    *,
+    raw_degree: int,
+    theme_size: int,
+    superseded_target_count: int,
+) -> float:
+    memory_type = str(node.get("memory_type") or "note").lower()
+    score = _MEMORY_PROMOTION_TYPE_SCORES.get(memory_type, 1.0)
+    score += float(node.get("confidence") or 0.0) * 2.5
+    score += min(2.0, raw_degree * 0.45)
+    score += min(1.5, max(0, theme_size - 1) * 0.45)
+    if node.get("tickers"):
+        score += 0.75
+    if any(tag in {"isa", "sipp", "gia", "tax", "risk", "allocation", "goal"} for tag in node.get("tags", [])):
+        score += 0.4
+    if str(node.get("superseded_by") or "").strip():
+        score -= 1.25
+    if superseded_target_count > 0:
+        score += min(1.0, superseded_target_count * 0.35)
+    return round(max(0.1, score), 2)
+
+
 def build_advisor_memory_graph(
     db_path: str,
     limit: int | None = None,
 ) -> dict[str, Any]:
     memories = list_advisor_memories(db_path, limit=limit)
-    nodes_by_id: dict[str, dict[str, Any]] = {}
+    raw_nodes_by_id: dict[str, dict[str, Any]] = {}
     session_groups: dict[str, list[str]] = defaultdict(list)
     tag_groups: dict[str, list[str]] = defaultdict(list)
     ticker_groups: dict[str, list[str]] = defaultdict(list)
-    edges: dict[tuple[str, str], dict[str, Any]] = {}
+    theme_groups: dict[str, list[str]] = defaultdict(list)
+    raw_edges: dict[tuple[str, str], dict[str, Any]] = {}
+    superseded_target_counts: dict[str, int] = defaultdict(int)
 
     for memory in memories:
         memory_id = str(memory.get("id") or "").strip()
@@ -711,20 +791,31 @@ def build_advisor_memory_graph(
             "source_message_id": memory.get("source_message_id") or "",
             "session_id": memory.get("session_id") or "",
             "superseded_by": memory.get("superseded_by") or "",
+            "node_kind": "memory",
+            "layer": 1,
+            "promotion_score": 0.0,
+            "promoted": False,
         }
-        nodes_by_id[memory_id] = node
+        theme = _derive_memory_theme(node)
+        node["theme_id"] = theme["id"]
+        node["theme_label"] = theme["label"]
+        node["theme_category"] = theme["category"]
+        raw_nodes_by_id[memory_id] = node
+        theme_groups[theme["id"]].append(memory_id)
         if node["session_id"]:
             session_groups[node["session_id"]].append(memory_id)
         for tag in tags:
             tag_groups[tag].append(memory_id)
         for ticker in tickers:
             ticker_groups[ticker].append(memory_id)
+        if node["superseded_by"]:
+            superseded_target_counts[node["superseded_by"]] += 1
 
-    for node in nodes_by_id.values():
+    for node in raw_nodes_by_id.values():
         target_id = str(node.get("superseded_by") or "").strip()
-        if target_id and target_id in nodes_by_id:
+        if target_id and target_id in raw_nodes_by_id:
             _add_graph_edge(
-                edges,
+                raw_edges,
                 node["id"],
                 target_id,
                 "superseded_by",
@@ -733,20 +824,156 @@ def build_advisor_memory_graph(
 
     for session_id, memory_ids in session_groups.items():
         for source_id, target_id in combinations(sorted(set(memory_ids)), 2):
-            _add_graph_edge(edges, source_id, target_id, "same_session", session_id)
+            _add_graph_edge(raw_edges, source_id, target_id, "same_session", session_id)
 
     for tag, memory_ids in tag_groups.items():
         for source_id, target_id in combinations(sorted(set(memory_ids)), 2):
-            _add_graph_edge(edges, source_id, target_id, "shared_tag", tag)
+            _add_graph_edge(raw_edges, source_id, target_id, "shared_tag", tag)
 
     for ticker, memory_ids in ticker_groups.items():
         for source_id, target_id in combinations(sorted(set(memory_ids)), 2):
-            _add_graph_edge(edges, source_id, target_id, "shared_ticker", ticker)
+            _add_graph_edge(raw_edges, source_id, target_id, "shared_ticker", ticker)
+
+    raw_degree_by_id: dict[str, int] = defaultdict(int)
+    for edge in raw_edges.values():
+        raw_degree_by_id[edge["source"]] += 1
+        raw_degree_by_id[edge["target"]] += 1
+
+    promoted_memory_ids: set[str] = set()
+    theme_nodes_by_id: dict[str, dict[str, Any]] = {}
+    for theme_id, memory_ids in theme_groups.items():
+        members = [raw_nodes_by_id[memory_id] for memory_id in memory_ids if memory_id in raw_nodes_by_id]
+        for member in members:
+            member["promotion_score"] = _score_memory_promotion(
+                member,
+                raw_degree=raw_degree_by_id.get(member["id"], 0),
+                theme_size=len(members),
+                superseded_target_count=superseded_target_counts.get(member["id"], 0),
+            )
+
+        ranked_members = sorted(
+            members,
+            key=lambda item: (
+                -(item["promotion_score"] or 0.0),
+                -(item["confidence"] or 0.0),
+                item["created_at"],
+            ),
+        )
+        promoted_members: list[dict[str, Any]] = []
+        for index, member in enumerate(ranked_members):
+            should_promote = (
+                index == 0
+                or (index < 3 and float(member["promotion_score"] or 0.0) >= 4.2)
+            )
+            member["promoted"] = should_promote
+            if should_promote:
+                promoted_members.append(member)
+                promoted_memory_ids.add(member["id"])
+
+        theme_tags = sorted(
+            {
+                tag
+                for member in members
+                for tag in member.get("tags", [])
+            }
+        )
+        theme_tickers = sorted(
+            {
+                ticker
+                for member in members
+                for ticker in member.get("tickers", [])
+            }
+        )
+        supporting_members = promoted_members or ranked_members[:1]
+        summary_parts = [
+            _truncate_text(str(member.get("summary") or member.get("topic") or ""), 72)
+            for member in supporting_members[:2]
+            if str(member.get("summary") or member.get("topic") or "").strip()
+        ]
+        theme_label = str(ranked_members[0].get("theme_label") if ranked_members else theme_id)
+        theme_score = round(
+            sum(float(member.get("promotion_score") or 0.0) for member in supporting_members) / max(len(supporting_members), 1),
+            2,
+        )
+        top_confidence = round(
+            min(
+                1.0,
+                (
+                    sum(float(member.get("confidence") or 0.0) for member in supporting_members)
+                    / max(len(supporting_members), 1)
+                ) + 0.15,
+            ),
+            2,
+        )
+        latest_created = max((str(member.get("created_at") or "") for member in members), default="")
+        latest_updated = max((str(member.get("updated_at") or "") for member in members), default="")
+        theme_nodes_by_id[theme_id] = {
+            "id": theme_id,
+            "label": _truncate_text(theme_label, 28),
+            "topic": theme_label,
+            "memory_type": "theme",
+            "summary": "; ".join(summary_parts) or f"{len(members)} supporting memories",
+            "detail": f"{len(members)} memories in this theme; {len(promoted_members)} promoted into the graph.",
+            "confidence": top_confidence,
+            "created_at": latest_created,
+            "updated_at": latest_updated or latest_created,
+            "tags": theme_tags[:8],
+            "tickers": theme_tickers[:6],
+            "source_message_id": "",
+            "session_id": "",
+            "superseded_by": "",
+            "node_kind": "theme",
+            "layer": 0,
+            "promotion_score": theme_score,
+            "promoted": True,
+            "theme_category": ranked_members[0].get("theme_category", "topic") if ranked_members else "topic",
+            "theme_id": theme_id,
+            "theme_label": theme_label,
+            "evidence_count": len(members),
+            "promoted_memory_count": len(promoted_members),
+            "supporting_memory_ids": [member["id"] for member in ranked_members],
+        }
+
+    display_edges: dict[tuple[str, str], dict[str, Any]] = {}
+    for theme_id, theme_node in theme_nodes_by_id.items():
+        for memory_id in theme_node.get("supporting_memory_ids", [])[: theme_node.get("promoted_memory_count", 0) or 1]:
+            if memory_id in promoted_memory_ids:
+                _add_graph_edge(display_edges, theme_id, memory_id, "theme_support", theme_node["topic"])
+
+    for raw_edge in raw_edges.values():
+        source_id = str(raw_edge["source"])
+        target_id = str(raw_edge["target"])
+        source_node = raw_nodes_by_id.get(source_id)
+        target_node = raw_nodes_by_id.get(target_id)
+        if source_node is None or target_node is None:
+            continue
+
+        if source_id in promoted_memory_ids and target_id in promoted_memory_ids:
+            for reason in raw_edge.get("reasons", []):
+                _add_graph_edge(
+                    display_edges,
+                    source_id,
+                    target_id,
+                    str(reason.get("type") or "related"),
+                    str(reason.get("value") or "") or None,
+                )
+
+        source_theme_id = str(source_node.get("theme_id") or "")
+        target_theme_id = str(target_node.get("theme_id") or "")
+        if source_theme_id and target_theme_id and source_theme_id != target_theme_id:
+            strongest_reason = (raw_edge.get("reasons") or [{}])[0]
+            _add_graph_edge(
+                display_edges,
+                source_theme_id,
+                target_theme_id,
+                "theme_related",
+                str(strongest_reason.get("type") or "related"),
+            )
 
     degree_by_id: dict[str, int] = defaultdict(int)
     relationship_counts: dict[str, int] = defaultdict(int)
-    edge_list = []
-    for edge in edges.values():
+    edge_list: list[dict[str, Any]] = []
+    for edge in display_edges.values():
         edge["reasons"].sort(
             key=lambda item: _GRAPH_REASON_WEIGHTS.get(item["type"], 0.0),
             reverse=True,
@@ -760,17 +987,27 @@ def build_advisor_memory_graph(
         edge_list.append(edge)
 
     nodes = sorted(
-        (
+        [
             {
                 **node,
-                "degree": degree_by_id.get(node["id"], 0),
+                "degree": degree_by_id.get(node_id, 0),
             }
-            for node in nodes_by_id.values()
-        ),
+            for node_id, node in theme_nodes_by_id.items()
+        ]
+        + [
+            {
+                **node,
+                "degree": degree_by_id.get(node_id, 0),
+            }
+            for node_id, node in raw_nodes_by_id.items()
+            if node_id in promoted_memory_ids
+        ],
         key=lambda item: (
-            -item["degree"],
-            -(item["confidence"] or 0.0),
-            item["created_at"],
+            int(item.get("layer", 1)),
+            -(item.get("degree") or 0),
+            -(float(item.get("promotion_score") or 0.0)),
+            -(float(item.get("confidence") or 0.0)),
+            item.get("created_at") or "",
         ),
     )
     edge_list.sort(key=lambda item: (-item["weight"], item["source"], item["target"]))
@@ -782,6 +1019,10 @@ def build_advisor_memory_graph(
             "node_count": len(nodes),
             "edge_count": len(edge_list),
             "isolated_node_count": sum(1 for node in nodes if node["degree"] == 0),
+            "theme_count": len(theme_nodes_by_id),
+            "promoted_memory_count": len(promoted_memory_ids),
+            "hidden_memory_count": max(0, len(raw_nodes_by_id) - len(promoted_memory_ids)),
+            "raw_memory_count": len(raw_nodes_by_id),
             "relationship_counts": dict(sorted(relationship_counts.items())),
         },
     }

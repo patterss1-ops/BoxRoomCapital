@@ -319,8 +319,11 @@ def test_memory_graph_api_and_fragment(monkeypatch, db):
         assert response.status_code == 200
         payload = response.json()
         assert payload["ok"] is True
-        assert payload["meta"]["node_count"] == 1
-        assert payload["nodes"][0]["topic"] == "ISA graph seed"
+        assert payload["meta"]["raw_memory_count"] == 1
+        assert payload["meta"]["theme_count"] == 1
+        assert payload["meta"]["promoted_memory_count"] == 1
+        assert any(node["topic"] == "ISA graph seed" for node in payload["nodes"])
+        assert any(node["node_kind"] == "theme" for node in payload["nodes"])
 
         fragment = client.get("/fragments/advisory-memory-graph")
         assert fragment.status_code == 200

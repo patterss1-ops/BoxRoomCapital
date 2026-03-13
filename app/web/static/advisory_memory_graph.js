@@ -3,6 +3,7 @@
 (function () {
   const GRAPH_HEIGHT = 320;
   const TYPE_COLORS = {
+    theme: '#0f172a',
     decision: '#2563eb',
     observation: '#059669',
     preference: '#7c3aed',
@@ -12,6 +13,8 @@
     note: '#6b7280'
   };
   const EDGE_STYLES = {
+    theme_related: { color: '#0f172a', opacity: 0.35, width: 2.0, dasharray: '2 4' },
+    theme_support: { color: '#b45309', opacity: 0.5, width: 1.8, dasharray: '' },
     superseded_by: { color: '#d97706', opacity: 0.8, width: 2.2, dasharray: '6 3' },
     same_session: { color: '#6b7280', opacity: 0.45, width: 1.7, dasharray: '' },
     shared_ticker: { color: '#2563eb', opacity: 0.55, width: 1.9, dasharray: '' },
@@ -58,6 +61,13 @@
     return TYPE_COLORS[String(memoryType || '').toLowerCase()] || TYPE_COLORS.note;
   }
 
+  function getNodeRadius(node) {
+    const base = node && node.node_kind === 'theme' ? 11 : 6;
+    const confidenceBoost = Math.max(0, Math.min(6, Number(node && node.confidence || 0) * 4));
+    const promotionBoost = Math.max(0, Math.min(4, Number(node && node.promotion_score || 0) / 3));
+    return base + confidenceBoost + promotionBoost;
+  }
+
   function getEdgeStyle(edge) {
     const key = edge && edge.kind ? edge.kind : 'related';
     return EDGE_STYLES[key] || EDGE_STYLES.related;
@@ -66,6 +76,8 @@
   function relationshipLabel(reason) {
     const type = String(reason && reason.type || '');
     const value = String(reason && reason.value || '').trim();
+    if (type === 'theme_related') return value ? 'Theme link via ' + value : 'Theme link';
+    if (type === 'theme_support') return value ? 'Supports ' + value : 'Supporting memory';
     if (type === 'superseded_by') return 'Superseded';
     if (type === 'same_session') return 'Same session';
     if (type === 'shared_ticker') return value ? 'Ticker: ' + value : 'Shared ticker';
@@ -146,22 +158,36 @@
     const tags = (node.tags || []).length ? node.tags.map(function (tag) {
       return '<span class="px-1.5 py-0.5 rounded bg-gray-200 text-gray-600">' + escapeHtml(tag) + '</span>';
     }).join(' ') : '<span class="text-gray-400">none</span>';
+    const tickers = (node.tickers || []).length ? node.tickers.map(function (ticker) {
+      return '<span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-100">' + escapeHtml(ticker) + '</span>';
+    }).join(' ') : '<span class="text-gray-400">none</span>';
     const related = relatedItems.length ? relatedItems.map(function (entry) {
       const reasons = (entry.edge.reasons || []).map(relationshipLabel).join(' · ');
       return '<button type="button" data-related-node-id="' + escapeHtml(entry.node.id) + '" class="w-full text-left px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100">' +
         '<div class="flex items-center gap-2">' +
         '<span class="inline-block w-2 h-2 rounded-full" style="background:' + escapeHtml(getNodeColor(entry.node.memory_type)) + '"></span>' +
-        '<span class="text-[10px] font-semibold text-gray-700">' + escapeHtml(truncate(entry.node.topic || entry.node.label, 40)) + '</span>' +
+          '<span class="text-[10px] font-semibold text-gray-700">' + escapeHtml(truncate(entry.node.topic || entry.node.label, 40)) + '</span>' +
+          (entry.node.node_kind === 'theme' ? '<span class="text-[8px] font-mono uppercase text-gray-400">theme</span>' : '') +
         '</div>' +
         '<div class="text-[9px] text-gray-400 mt-0.5">' + escapeHtml(reasons) + '</div>' +
         '</button>';
     }).join('') : '<div class="text-[10px] font-mono text-gray-400">No connected memories.</div>';
+    const stats = [];
+    stats.push('<div class="rounded bg-white border border-gray-200 px-2 py-1">confidence: <span class="text-gray-700">' + escapeHtml(formatConfidence(node.confidence)) + '</span></div>');
+    stats.push('<div class="rounded bg-white border border-gray-200 px-2 py-1">degree: <span class="text-gray-700">' + escapeHtml(String(node.degree || 0)) + '</span></div>');
+    if (node.node_kind === 'theme') {
+      stats.push('<div class="rounded bg-white border border-gray-200 px-2 py-1">evidence: <span class="text-gray-700">' + escapeHtml(String(node.evidence_count || 0)) + '</span></div>');
+      stats.push('<div class="rounded bg-white border border-gray-200 px-2 py-1">score: <span class="text-gray-700">' + escapeHtml(formatConfidence(node.promotion_score)) + '</span></div>');
+    } else {
+      stats.push('<div class="rounded bg-white border border-gray-200 px-2 py-1">score: <span class="text-gray-700">' + escapeHtml(formatConfidence(node.promotion_score)) + '</span></div>');
+      stats.push('<div class="rounded bg-white border border-gray-200 px-2 py-1">theme: <span class="text-gray-700">' + escapeHtml(node.theme_label || 'none') + '</span></div>');
+    }
 
     detail.innerHTML =
       '<div class="space-y-1.5">' +
         '<div class="flex items-center gap-2">' +
           '<span class="inline-block w-2.5 h-2.5 rounded-full" style="background:' + escapeHtml(getNodeColor(node.memory_type)) + '"></span>' +
-          '<span class="text-[9px] font-semibold uppercase tracking-wide text-gray-500">' + escapeHtml(node.memory_type || 'note') + '</span>' +
+          '<span class="text-[9px] font-semibold uppercase tracking-wide text-gray-500">' + escapeHtml(node.node_kind === 'theme' ? 'theme' : (node.memory_type || 'note')) + '</span>' +
           '<span class="text-[9px] font-mono text-gray-300 ml-auto">' + escapeHtml(formatDate(node.created_at)) + '</span>' +
         '</div>' +
         '<div>' +
@@ -169,13 +195,11 @@
           '<div class="text-[10px] font-mono text-gray-600 mt-0.5">' + escapeHtml(node.summary || '') + '</div>' +
           (node.detail ? '<div class="text-[9px] font-mono text-gray-400 mt-1">' + escapeHtml(node.detail) + '</div>' : '') +
         '</div>' +
-        '<div class="grid grid-cols-2 gap-1 text-[9px] font-mono text-gray-500">' +
-          '<div class="rounded bg-white border border-gray-200 px-2 py-1">confidence: <span class="text-gray-700">' + escapeHtml(formatConfidence(node.confidence)) + '</span></div>' +
-          '<div class="rounded bg-white border border-gray-200 px-2 py-1">degree: <span class="text-gray-700">' + escapeHtml(String(node.degree || 0)) + '</span></div>' +
-        '</div>' +
+        '<div class="grid grid-cols-2 gap-1 text-[9px] font-mono text-gray-500">' + stats.join('') + '</div>' +
         '<div class="text-[9px] font-mono text-gray-500">tags: ' + tags + '</div>' +
+        '<div class="text-[9px] font-mono text-gray-500">tickers: ' + tickers + '</div>' +
         '<div class="space-y-1">' +
-          '<div class="text-[9px] font-semibold uppercase tracking-wide text-gray-400">Related memories</div>' +
+          '<div class="text-[9px] font-semibold uppercase tracking-wide text-gray-400">' + escapeHtml(node.node_kind === 'theme' ? 'Supporting memories & related themes' : 'Related memories') + '</div>' +
           '<div class="space-y-1">' + related + '</div>' +
         '</div>' +
       '</div>';
@@ -223,7 +247,7 @@
         return node.id === selectedId ? 2.4 : 1.4;
       })
       .attr('r', function (node) {
-        const radius = 6 + Math.max(0, Math.min(6, Number(node.confidence || 0) * 4));
+        const radius = getNodeRadius(node);
         return node.id === selectedId ? radius + 1.5 : radius;
       });
 
@@ -326,9 +350,7 @@
       .attr('cursor', 'pointer');
 
     nodeSelection.append('circle')
-      .attr('r', function (node) {
-        return 6 + Math.max(0, Math.min(6, Number(node.confidence || 0) * 4));
-      })
+      .attr('r', function (node) { return getNodeRadius(node); })
       .attr('fill', function (node) { return getNodeColor(node.memory_type); })
       .attr('stroke', '#ffffff')
       .attr('stroke-width', 1.4);
@@ -339,8 +361,8 @@
       .attr('y', 3)
       .attr('font-size', 9)
       .attr('font-family', 'JetBrains Mono, monospace')
-      .attr('font-weight', 500)
-      .attr('fill', '#4b5563')
+      .attr('font-weight', function (node) { return node.node_kind === 'theme' ? 700 : 500; })
+      .attr('fill', function (node) { return node.node_kind === 'theme' ? '#111827' : '#4b5563'; })
       .attr('stroke', '#f9fafb')
       .attr('stroke-width', 2.4)
       .style('paint-order', 'stroke');
@@ -349,10 +371,12 @@
       .force('link', d3.forceLink(graph.edges).id(function (node) { return node.id; }).distance(function (edge) {
         return Math.max(48, 90 - (Number(edge.weight || 1) * 10));
       }))
-      .force('charge', d3.forceManyBody().strength(-180))
+      .force('charge', d3.forceManyBody().strength(function (node) {
+        return node.node_kind === 'theme' ? -240 : -180;
+      }))
       .force('center', d3.forceCenter(width / 2, height / 2))
       .force('collide', d3.forceCollide().radius(function (node) {
-        return 18 + Math.max(0, Math.min(6, Number(node.confidence || 0) * 4));
+        return getNodeRadius(node) + 10;
       }));
 
     nodeSelection.call(
@@ -411,7 +435,7 @@
     setStatus(
       shell,
       'Graph ready',
-      String(meta.node_count || graph.nodes.length) + ' nodes / ' + String(meta.edge_count || graph.edges.length) + ' edges'
+      String(meta.theme_count || 0) + ' themes / ' + String(meta.promoted_memory_count || 0) + ' promoted memories'
     );
     setError(shell, '');
     if (graph.nodes.length) {

@@ -280,7 +280,10 @@ def test_build_advisor_memory_graph_aggregates_relationships(db):
     conn.commit()
 
     graph = build_advisor_memory_graph(db)
-    assert graph["meta"]["node_count"] == 3
+    assert graph["meta"]["raw_memory_count"] == 3
+    assert graph["meta"]["theme_count"] >= 2
+    assert graph["meta"]["promoted_memory_count"] >= 3
+    assert any(node["node_kind"] == "theme" for node in graph["nodes"])
 
     first_second = next(
         edge
@@ -296,6 +299,7 @@ def test_build_advisor_memory_graph_aggregates_relationships(db):
         if {edge["source"], edge["target"]} == {first_memory_id, third_memory_id}
     )
     assert any(reason["type"] == "superseded_by" for reason in first_third["reasons"])
+    assert any(edge["kind"] == "theme_support" for edge in graph["edges"])
 
 
 def test_save_exchange_updates_session_metadata(engine, db):
