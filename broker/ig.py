@@ -897,22 +897,24 @@ class IGBroker(BaseBroker):
                 else:
                     level = float(snap.get("bid", 0) or 0)
 
+            if not level or level <= 0:
+                logger.warning(f"No valid price for {epic} ({direction}), bid/offer unavailable — skipping order")
+                return OrderResult(success=False, message=f"No price available for {epic} — cannot place LIMIT order")
+
+            logger.info(f"Option leg: {direction} {epic} @ {level} (LIMIT), size={size}")
             order = {
                 "epic": epic,
                 "expiry": expiry,
                 "direction": direction,
                 "size": str(size),
+                "orderType": "LIMIT",
+                "level": level,
                 "currencyCode": "GBP",
                 "forceOpen": True,
                 "guaranteedStop": False,
                 "stopDistance": None,
                 "limitDistance": None,
             }
-            if level and level > 0:
-                order["orderType"] = "LIMIT"
-                order["level"] = level
-            else:
-                order["orderType"] = "MARKET"
             if deal_reference:
                 order["dealReference"] = deal_reference
 
