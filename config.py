@@ -490,8 +490,8 @@ IBS_CREDIT_SPREAD_PARAMS = {
     # Best Net (7.55):    1.0%/1.5%/10 DTE → +64pts, PF=10.88
     # Using best net config (Sharpe difference is negligible):
     "short_distance_pct": 1.0,    # Short strike 1% below (ATM-ish = max premium)
-    "spread_width_pct": 1.5,      # 1.5% wide spreads (amortises fixed IG cost)
-    "min_credit_pct": 3.0,        # Min premium = 3% of width
+    "spread_width_pct": 2.5,      # 2.5% wide spreads (wider = more credit vs fixed IG cost)
+    "min_credit_pct": 5.0,        # Min premium = 5% of width (skip thin credits)
     "expiry_days": 10,            # 10 DTE (was 5): 2× premium for same IG cost
     # Iron condor — DISABLED (4 legs = double IG cost on thin premiums)
     "enable_iron_condor": False,
@@ -525,12 +525,9 @@ TRADING_MODE = _runtime_overrides.get("trading_mode", os.getenv("TRADING_MODE", 
 # Markets selected for live trading (run: python3 run_options_backtest.py --portfolio --top 6 --calibrate)
 # Update after running market selection with calibration applied
 LIVE_TRADING_TICKERS = [
-    "SPY",   # US 500 — best calibrated (ratio 1.17-1.56)
-    "QQQ",   # US Tech 100 — ~25% optimistic in backtest
-    "EWJ",   # Japan 225 — needs EU hours calibration
-    "GLD",   # Gold — needs EU hours calibration
-    "EWU",   # FTSE 100 — needs EU hours calibration
-    "EWG",   # Germany 40 — wide spreads in calibration, watch closely
+    "SPY",   # US 500 — tightest IG spreads (1.0 pts), best calibrated
+    "QQQ",   # US Tech 100 — decent liquidity, second tightest
+    "GLD",   # Gold — tight IG spreads (0.5 pts), good diversifier
 ]
 
 # IG option EPIC search patterns for each index
@@ -554,7 +551,7 @@ OPTIONS_SAFETY = {
     "max_total_heat_pct": 4.0,        # 4% across all open spreads (£200)
     "max_daily_loss_pct": 10.0,       # Kill switch at 10% daily loss (£500)
     "max_open_spreads": 6,            # Max 6 simultaneous spreads
-    "min_premium_pct": 2.0,           # Don't trade if premium < 2% of spread width
+    "min_premium_pct": 5.0,           # Don't trade if premium < 5% of spread width
     "max_contracts_per_trade": 10,    # Hard cap (was 20 — too large for £8k equity)
     "max_spread_width_pct": 10.0,     # Reject spreads wider than 10% of underlying price
     "max_strike_deviation_pct": 5.0,  # Reject if matched strike >5% from target
