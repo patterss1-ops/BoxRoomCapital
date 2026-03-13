@@ -222,12 +222,50 @@ class OptionsControlsMixin:
                 acct = self.broker.get_account_info()
                 if acct.equity > 0:
                     self.safety.equity = acct.equity
+
+            # Auto-close DB spreads whose deal IDs are gone from broker
+            auto_closed = []
+            if self.broker:
+                broker_deal_ids = set()
+                try:
+                    for broker_pos in self.broker.get_positions():
+                        deal_id = str(getattr(broker_pos, "deal_id", "") or "").strip()
+                        if deal_id:
+                            broker_deal_ids.add(deal_id)
+                except Exception as exc:
+                    logger.warning(f"Reconcile: broker position fetch failed: {exc}")
+                    broker_deal_ids = None  # Can't reconcile without broker data
+
+                if broker_deal_ids is not None:
+                    for spread_id, spread in list(self.open_spreads.items()):
+                        short_id = str(spread.get("short_deal_id", "") or "").strip()
+                        long_id = str(spread.get("long_deal_id", "") or "").strip()
+                        # If BOTH deal IDs are missing from broker, position was closed externally
+                        short_gone = short_id and short_id not in broker_deal_ids
+                        long_gone = long_id and long_id not in broker_deal_ids
+                        if short_gone and long_gone:
+                            ticker = spread.get("ticker", "?")
+                            logger.info(
+                                f"  Reconcile: {ticker} spread {spread_id} closed externally "
+                                f"(deals {short_id}, {long_id} absent from broker)"
+                            )
+                            close_option_position(spread_id, exit_pnl=0.0,
+                                                  exit_reason="Closed externally (reconcile)")
+                            self.open_spreads.pop(spread_id, None)
+                            auto_closed.append(spread_id)
+                            log_event("POSITION",
+                                      f"{ticker} — Closed externally (auto-reconcile)",
+                                      f"spread_id={spread_id}",
+                                      ticker=ticker, strategy="IBS Credit Spreads")
+
+            current_ids = set(self.open_spreads.keys())
             self.safety.update_state(self.safety.equity, list(self.open_spreads.values()))
             added = sorted(current_ids - previous_ids)
             removed = sorted(previous_ids - current_ids)
             report = self.build_reconcile_report()
             detail = (
                 f"added={len(added)} removed={len(removed)} open={len(current_ids)} "
+                f"auto_closed={len(auto_closed)} "
                 f"db_only_deals={len(report['db_only_deal_ids'])} "
                 f"broker_only_deals={len(report['broker_only_deal_ids'])}"
             )
@@ -253,6 +291,7 @@ class OptionsControlsMixin:
                 "message": f"Reconcile complete ({detail}).",
                 "added": added,
                 "removed": removed,
+                "auto_closed": auto_closed,
                 "open_count": len(current_ids),
                 "db_only_deal_ids": report["db_only_deal_ids"],
                 "broker_only_deal_ids": report["broker_only_deal_ids"],
