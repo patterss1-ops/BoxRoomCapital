@@ -883,47 +883,36 @@ class IGBroker(BaseBroker):
             return OrderResult(success=False, message=f"EPIC {epic} is blocked")
 
         try:
-            # Get market info for expiry and current bid/offer
             expiry = "DFB"
-            limit_level = None
+            level = None
             mkt_info = self.get_market_info(epic)
             if mkt_info:
                 inst = mkt_info.get("instrument", {})
                 mkt_expiry = inst.get("expiry", "")
                 if mkt_expiry and mkt_expiry != "-":
                     expiry = mkt_expiry
-                # Options epics require LIMIT orders — fetch current bid/offer
                 snap = mkt_info.get("snapshot", {})
-                bid = float(snap.get("bid", 0) or 0)
-                offer = float(snap.get("offer", 0) or 0)
-                if direction == "BUY" and offer > 0:
-                    limit_level = offer
-                elif direction == "SELL" and bid > 0:
-                    limit_level = bid
-
-            # Use LIMIT order with current price if we have a quote,
-            # fall back to MARKET for non-option epics
-            if limit_level and limit_level > 0:
-                order_type = "LIMIT"
-                logger.info(f"  Option leg {direction} {epic}: LIMIT @ {limit_level}")
-            else:
-                order_type = "MARKET"
-                logger.info(f"  Option leg {direction} {epic}: MARKET (no quote available)")
+                if direction == "BUY":
+                    level = float(snap.get("offer", 0) or 0)
+                else:
+                    level = float(snap.get("bid", 0) or 0)
 
             order = {
                 "epic": epic,
                 "expiry": expiry,
                 "direction": direction,
                 "size": str(size),
-                "orderType": order_type,
                 "currencyCode": "GBP",
                 "forceOpen": True,
                 "guaranteedStop": False,
                 "stopDistance": None,
                 "limitDistance": None,
             }
-            if order_type == "LIMIT":
-                order["level"] = limit_level
+            if level and level > 0:
+                order["orderType"] = "LIMIT"
+                order["level"] = level
+            else:
+                order["orderType"] = "MARKET"
             if deal_reference:
                 order["dealReference"] = deal_reference
 
@@ -961,6 +950,19 @@ class IGBroker(BaseBroker):
                 "size": str(size),
                 "orderType": "MARKET",
             }
+            pos_info = self._deal_map.get(deal_id, {})
+            pos_epic = pos_info.get("epic") if isinstance(pos_info, dict) else None
+            if pos_epic:
+                mkt_info = self.get_market_info(pos_epic)
+                if mkt_info:
+                    snap = mkt_info.get("snapshot", {})
+                    if direction == "BUY":
+                        lvl = float(snap.get("offer", 0) or 0)
+                    else:
+                        lvl = float(snap.get("bid", 0) or 0)
+                    if lvl > 0:
+                        close_payload["orderType"] = "LIMIT"
+                        close_payload["level"] = lvl
             if deal_reference:
                 close_payload["dealReference"] = deal_reference
 

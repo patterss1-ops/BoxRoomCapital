@@ -328,12 +328,14 @@ class TestApiIncidents:
         assert resp.json()["items"] == []
 
     def test_active_incidents_keep_failed_order_action_rows(self, monkeypatch):
+        from datetime import datetime, timezone
+        recent = datetime.now(timezone.utc).isoformat()
         monkeypatch.setattr(
             server,
             "get_incidents",
             lambda limit=50: [
                 {
-                    "timestamp": "2026-03-05T19:24:54.063240+00:00",
+                    "timestamp": recent,
                     "category": "FAILED",
                     "title": "close_spread failed",
                     "detail": "execution failure",

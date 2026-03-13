@@ -92,9 +92,7 @@ def _is_active_incident(
     if not item:
         return False
     source = str(item.get("source") or "")
-    if source == "order_action":
-        return True
-    if source != "bot_event":
+    if source not in ("order_action", "bot_event"):
         return False
     timestamp = incident_timestamp(item)
     if timestamp is None:

@@ -10,9 +10,12 @@ import concurrent.futures
 import json
 import logging
 import os
+import re
 import threading
 import uuid
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from itertools import combinations
 from typing import Any
 
 import requests
@@ -68,6 +71,38 @@ CREATE TABLE IF NOT EXISTS advisor_memory (
 );
 """
 
+_ADVISOR_MEMORY_REQUIRED_COLUMNS = {
+    "updated_at": "TEXT DEFAULT ''",
+    "detail": "TEXT",
+    "source_message_id": "TEXT",
+    "confidence": "REAL DEFAULT 1.0",
+    "expires_at": "TEXT",
+    "superseded_by": "TEXT",
+    "tags": "TEXT",
+}
+
+_MEMORY_TICKER_PATTERN = re.compile(r"(?:\$|\b)([A-Z]{1,5}(?:\.[A-Z]{1,3})?)\b")
+_MEMORY_TICKER_STOPWORDS = {
+    "ISA",
+    "SIPP",
+    "GIA",
+    "ETF",
+    "ETFS",
+    "GBP",
+    "USD",
+    "CASH",
+    "UK",
+    "USA",
+    "EU",
+    "VIX",
+}
+_GRAPH_REASON_WEIGHTS = {
+    "superseded_by": 3.0,
+    "same_session": 2.0,
+    "shared_ticker": 1.5,
+    "shared_tag": 1.0,
+}
+
 _schema_init_lock = threading.Lock()
 _schema_initialised: set[str] = set()
 
@@ -80,7 +115,29 @@ def _ensure_schema(db_path: str) -> None:
             return
         conn = get_conn(db_path)
         conn.executescript(_INIT_SQL)
+        _ensure_table_columns(
+            conn,
+            "advisor_memory",
+            _ADVISOR_MEMORY_REQUIRED_COLUMNS,
+        )
+        conn.commit()
         _schema_initialised.add(db_path)
+
+
+def _ensure_table_columns(
+    conn,
+    table_name: str,
+    required_columns: dict[str, str],
+) -> None:
+    existing = {
+        str(row["name"])
+        for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    }
+    for column_name, definition in required_columns.items():
+        if column_name not in existing:
+            conn.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
+            )
 
 
 def save_advisor_session(
@@ -221,6 +278,199 @@ def search_advisor_memories(
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+def list_advisor_memories(
+    db_path: str,
+    limit: int | None = None,
+) -> list[dict]:
+    _ensure_schema(db_path)
+    conn = get_conn(db_path)
+    query = """SELECT m.id, m.topic, m.memory_type, m.summary, m.detail,
+                      m.confidence, m.created_at, m.updated_at, m.expires_at,
+                      m.superseded_by, m.tags, m.source_message_id,
+                      msg.session_id
+               FROM advisor_memory AS m
+               LEFT JOIN advisor_messages AS msg
+                 ON msg.id = m.source_message_id
+               WHERE (m.expires_at IS NULL OR m.expires_at > datetime('now'))
+               ORDER BY m.created_at DESC"""
+    params: list[Any] = []
+    if limit is not None:
+        query += " LIMIT ?"
+        params.append(limit)
+    rows = conn.execute(query, params).fetchall()
+    return [dict(r) for r in rows]
+
+
+def _split_memory_tags(raw_tags: str | None) -> list[str]:
+    if not raw_tags:
+        return []
+    tags = []
+    for part in raw_tags.split(","):
+        cleaned = part.strip().lower()
+        if cleaned and cleaned not in tags:
+            tags.append(cleaned)
+    return tags
+
+
+def _extract_memory_tickers(*parts: str | None) -> list[str]:
+    tickers: list[str] = []
+    for part in parts:
+        if not part:
+            continue
+        for match in _MEMORY_TICKER_PATTERN.findall(part.upper()):
+            if match in _MEMORY_TICKER_STOPWORDS:
+                continue
+            if len(match) == 1 and "." not in match:
+                continue
+            if match not in tickers:
+                tickers.append(match)
+    return tickers
+
+
+def _add_graph_edge(
+    edges: dict[tuple[str, str], dict[str, Any]],
+    source_id: str,
+    target_id: str,
+    reason_type: str,
+    reason_value: str | None = None,
+) -> None:
+    if source_id == target_id:
+        return
+    edge_key = tuple(sorted((source_id, target_id)))
+    edge = edges.setdefault(
+        edge_key,
+        {
+            "id": f"{edge_key[0]}::{edge_key[1]}",
+            "source": edge_key[0],
+            "target": edge_key[1],
+            "weight": 0.0,
+            "reasons": [],
+            "_reason_keys": set(),
+        },
+    )
+    reason_key = (reason_type, str(reason_value or ""))
+    if reason_key in edge["_reason_keys"]:
+        return
+    edge["_reason_keys"].add(reason_key)
+    reason = {"type": reason_type}
+    if reason_value:
+        reason["value"] = reason_value
+    edge["reasons"].append(reason)
+    edge["weight"] += _GRAPH_REASON_WEIGHTS.get(reason_type, 1.0)
+
+
+def build_advisor_memory_graph(
+    db_path: str,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    memories = list_advisor_memories(db_path, limit=limit)
+    nodes_by_id: dict[str, dict[str, Any]] = {}
+    session_groups: dict[str, list[str]] = defaultdict(list)
+    tag_groups: dict[str, list[str]] = defaultdict(list)
+    ticker_groups: dict[str, list[str]] = defaultdict(list)
+    edges: dict[tuple[str, str], dict[str, Any]] = {}
+
+    for memory in memories:
+        memory_id = str(memory.get("id") or "").strip()
+        if not memory_id:
+            continue
+        tags = _split_memory_tags(memory.get("tags"))
+        tickers = _extract_memory_tickers(
+            memory.get("topic"),
+            memory.get("summary"),
+            memory.get("tags"),
+        )
+        node = {
+            "id": memory_id,
+            "label": (memory.get("topic") or memory.get("summary") or "note")[:32],
+            "topic": memory.get("topic") or "General",
+            "memory_type": memory.get("memory_type") or "note",
+            "summary": memory.get("summary") or "",
+            "detail": memory.get("detail") or "",
+            "confidence": float(memory.get("confidence") or 0.0),
+            "created_at": memory.get("created_at") or "",
+            "updated_at": memory.get("updated_at") or memory.get("created_at") or "",
+            "tags": tags,
+            "tickers": tickers,
+            "source_message_id": memory.get("source_message_id") or "",
+            "session_id": memory.get("session_id") or "",
+            "superseded_by": memory.get("superseded_by") or "",
+        }
+        nodes_by_id[memory_id] = node
+        if node["session_id"]:
+            session_groups[node["session_id"]].append(memory_id)
+        for tag in tags:
+            tag_groups[tag].append(memory_id)
+        for ticker in tickers:
+            ticker_groups[ticker].append(memory_id)
+
+    for node in nodes_by_id.values():
+        target_id = str(node.get("superseded_by") or "").strip()
+        if target_id and target_id in nodes_by_id:
+            _add_graph_edge(
+                edges,
+                node["id"],
+                target_id,
+                "superseded_by",
+                target_id,
+            )
+
+    for session_id, memory_ids in session_groups.items():
+        for source_id, target_id in combinations(sorted(set(memory_ids)), 2):
+            _add_graph_edge(edges, source_id, target_id, "same_session", session_id)
+
+    for tag, memory_ids in tag_groups.items():
+        for source_id, target_id in combinations(sorted(set(memory_ids)), 2):
+            _add_graph_edge(edges, source_id, target_id, "shared_tag", tag)
+
+    for ticker, memory_ids in ticker_groups.items():
+        for source_id, target_id in combinations(sorted(set(memory_ids)), 2):
+            _add_graph_edge(edges, source_id, target_id, "shared_ticker", ticker)
+
+    degree_by_id: dict[str, int] = defaultdict(int)
+    relationship_counts: dict[str, int] = defaultdict(int)
+    edge_list = []
+    for edge in edges.values():
+        edge["reasons"].sort(
+            key=lambda item: _GRAPH_REASON_WEIGHTS.get(item["type"], 0.0),
+            reverse=True,
+        )
+        edge["kind"] = edge["reasons"][0]["type"] if edge["reasons"] else "related"
+        degree_by_id[edge["source"]] += 1
+        degree_by_id[edge["target"]] += 1
+        for reason in edge["reasons"]:
+            relationship_counts[reason["type"]] += 1
+        edge.pop("_reason_keys", None)
+        edge_list.append(edge)
+
+    nodes = sorted(
+        (
+            {
+                **node,
+                "degree": degree_by_id.get(node["id"], 0),
+            }
+            for node in nodes_by_id.values()
+        ),
+        key=lambda item: (
+            -item["degree"],
+            -(item["confidence"] or 0.0),
+            item["created_at"],
+        ),
+    )
+    edge_list.sort(key=lambda item: (-item["weight"], item["source"], item["target"]))
+
+    return {
+        "nodes": nodes,
+        "edges": edge_list,
+        "meta": {
+            "node_count": len(nodes),
+            "edge_count": len(edge_list),
+            "isolated_node_count": sum(1 for node in nodes if node["degree"] == 0),
+            "relationship_counts": dict(sorted(relationship_counts.items())),
+        },
+    }
 
 
 def get_recent_rss_headlines(
