@@ -62,6 +62,8 @@ def broker(mock_session):
         b._lock = __import__("threading").RLock()
         b._deal_map = {}
         b._blocked_epics = set()
+        from broker.circuit_breaker import BrokerCircuitBreaker
+        b._circuit_breaker = BrokerCircuitBreaker(broker_name="IG-test")
         b._connected = True
         return b
 

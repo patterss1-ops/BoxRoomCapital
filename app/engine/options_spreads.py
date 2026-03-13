@@ -53,10 +53,38 @@ class OptionsSpreadsMixin:
             notifier.trade_rejected(ticker, reason)
             return
 
+        # --- Drawdown breaker: auto-halt on excessive daily/weekly losses ---
+        dd_decision = self._check_drawdown_gate()
+        if dd_decision and dd_decision.action.value == "halt":
+            reason = f"Drawdown breaker HALT: {dd_decision.reason}"
+            logger.warning(f"  {ticker}: {reason}")
+            log_event("REJECTION", f"{ticker} — Drawdown breaker halted entry",
+                      reason, ticker=ticker, strategy="IBS Credit Spreads")
+            notifier.trade_rejected(ticker, reason)
+            # Auto-engage kill switch so the halt persists until manual reset
+            if not self.kill_switch_active:
+                self.set_kill_switch(True, reason=reason, actor="drawdown_breaker")
+            return
+
         spread_width = sig.short_strike - sig.long_strike
         if spread_width <= 0:
             logger.warning(f"  {ticker}: invalid spread width {spread_width}")
             return
+
+        # --- Spread width sanity check: reject absurdly wide spreads ---
+        max_spread_width_pct = config.OPTIONS_SAFETY.get("max_spread_width_pct", 10.0)
+        if current_price > 0:
+            width_pct = (spread_width / current_price) * 100
+            if width_pct > max_spread_width_pct:
+                reason = (
+                    f"Spread width {spread_width:.0f} is {width_pct:.1f}% of price "
+                    f"{current_price:.0f} (max {max_spread_width_pct}%)"
+                )
+                logger.warning(f"  {ticker}: {reason}")
+                log_event("REJECTION", f"{ticker} — Spread too wide", reason,
+                          ticker=ticker, strategy="IBS Credit Spreads")
+                notifier.trade_rejected(ticker, reason)
+                return
 
         estimated_premium = spread_width * 0.30
 
@@ -185,6 +213,13 @@ class OptionsSpreadsMixin:
                         if not short_option or not long_option:
                             last_error = "Couldn't find matching options"
                             last_code, recoverable = self._classify_order_error(last_error, "OPTION_MATCH_FAILED")
+                        elif short_option.epic == long_option.epic:
+                            last_error = (
+                                f"Both legs matched same epic {short_option.epic} "
+                                f"(short_target={sig.short_strike}, long_target={sig.long_strike}, "
+                                f"matched_strike={short_option.strike}) — IG may lack sufficient strikes"
+                            )
+                            last_code, recoverable = self._classify_order_error(last_error, "SAME_EPIC_BOTH_LEGS")
                         else:
                             logger.info(f"    Short leg: {short_option.epic} (strike={short_option.strike})")
                             logger.info(f"    Long leg: {long_option.epic} (strike={long_option.strike})")
@@ -277,6 +312,30 @@ class OptionsSpreadsMixin:
 
         actual_premium = result.net_premium
         actual_max_loss = spread_width - actual_premium if actual_premium > 0 else max_loss_per_contract
+
+        # --- Fill-price anomaly check ---
+        if actual_premium <= 0:
+            logger.error(
+                f"  {ticker}: NEGATIVE/ZERO premium ({actual_premium:.2f}) on fill — "
+                f"spread may be inverted. Logging but NOT blocking (already filled)."
+            )
+            log_event("WARNING", f"{ticker} — Zero/negative premium on fill",
+                      f"premium={actual_premium:.2f}, spread_width={spread_width:.1f}",
+                      ticker=ticker, strategy="IBS Credit Spreads")
+            notifier.error(
+                f"{ticker}: FILL ANOMALY — premium={actual_premium:.2f} "
+                f"(expected ~{estimated_premium:.1f}). Check positions!"
+            )
+        elif estimated_premium > 0:
+            fill_deviation = abs(actual_premium - estimated_premium) / estimated_premium * 100
+            if fill_deviation > 50:
+                logger.warning(
+                    f"  {ticker}: fill premium {actual_premium:.2f} deviates "
+                    f"{fill_deviation:.0f}% from estimate {estimated_premium:.1f}"
+                )
+                log_event("WARNING", f"{ticker} — Fill premium deviation {fill_deviation:.0f}%",
+                          f"actual={actual_premium:.2f}, expected={estimated_premium:.1f}",
+                          ticker=ticker, strategy="IBS Credit Spreads")
 
         self.open_spreads[spread_id] = {
             "spread_id": spread_id,
@@ -504,10 +563,39 @@ class OptionsSpreadsMixin:
                 return s
         return None
 
+    # Maximum allowed deviation between target strike and matched strike (5%)
+    MAX_STRIKE_DEVIATION_PCT = 5.0
+
     def _find_closest_option(self, options: list, target_strike: float,
                              option_type: str):
         from broker.base import OptionMarket
         matching = [o for o in options if o.option_type == option_type and o.strike > 0]
         if not matching:
             return None
-        return min(matching, key=lambda o: abs(o.strike - target_strike))
+        best = min(matching, key=lambda o: abs(o.strike - target_strike))
+        # Reject if matched strike is too far from target
+        if target_strike > 0:
+            deviation_pct = abs(best.strike - target_strike) / target_strike * 100
+            if deviation_pct > self.MAX_STRIKE_DEVIATION_PCT:
+                logger.warning(
+                    f"Closest strike {best.strike} is {deviation_pct:.1f}% from "
+                    f"target {target_strike} (max {self.MAX_STRIKE_DEVIATION_PCT}%) — rejecting"
+                )
+                return None
+        return best
+
+    def _check_drawdown_gate(self):
+        """Check fund-level drawdown breaker. Returns DrawdownDecision or None."""
+        try:
+            from risk.drawdown_breaker import check_drawdown, DrawdownAction
+            decision = check_drawdown()
+            if decision.action == DrawdownAction.WARN:
+                logger.warning(
+                    f"Drawdown WARNING: {decision.reason} "
+                    f"(daily={decision.daily_drawdown_pct:.2f}%, "
+                    f"weekly={decision.weekly_drawdown_pct:.2f}%)"
+                )
+            return decision
+        except Exception as exc:
+            logger.warning(f"Drawdown check failed (allowing trade): {exc}")
+            return None

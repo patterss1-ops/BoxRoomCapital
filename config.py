@@ -553,6 +553,8 @@ OPTIONS_SAFETY = {
     "max_open_spreads": 6,            # Max 6 simultaneous spreads
     "min_premium_pct": 2.0,           # Don't trade if premium < 2% of spread width
     "max_contracts_per_trade": 10,    # Hard cap (was 20 — too large for £8k equity)
+    "max_spread_width_pct": 10.0,     # Reject spreads wider than 10% of underlying price
+    "max_strike_deviation_pct": 5.0,  # Reject if matched strike >5% from target
 }
 
 # ─── STRATEGY SLOTS (D-001) ────────────────────────────────────────────────
