@@ -536,13 +536,16 @@ LIVE_TRADING_TICKERS = [
 # IG option EPIC search patterns for each index
 # Used by the bot to find option markets dynamically
 OPTION_EPIC_PATTERNS = {
-    "SPY": {"search": "US 500", "index": "SPX", "epic_prefix": "OP.D.SPX."},
-    "QQQ": {"search": "US Tech 100", "index": "USTECH", "epic_prefix": "OP.D.USTECH."},
-    "DIA": {"search": "Wall Street", "index": "WALL", "epic_prefix": "OP.D.WALL."},
-    "EWG": {"search": "Germany 40", "index": "DAX", "epic_prefix": "OP.D.DAX."},
-    "EWU": {"search": "FTSE 100", "index": "FTSE", "epic_prefix": "OP.D.FTSE."},
-    "EWJ": {"search": "Japan 225", "index": "JP225", "epic_prefix": "OP.D.JP225."},
-    "GLD": {"search": "Gold", "index": "GOLD", "epic_prefix": "OP.D.GOLD."},
+    # strike_scale: multiplier to convert yfinance ETF price → IG option strike scale
+    # e.g. QQQ ETF ~$520 but IG US Tech 100 options use Nasdaq 100 index ~$21000 → scale ≈ 37
+    # SPY ETF ~$520 and IG US 500 options use S&P 500 index ~$5200 → scale ≈ 10
+    "SPY": {"search": "US 500", "index": "SPX", "epic_prefix": "OP.D.SPX.", "strike_scale": 10.0},
+    "QQQ": {"search": "US Tech 100", "index": "USTECH", "epic_prefix": "OP.D.USTECH.", "strike_scale": 37.0},
+    "DIA": {"search": "Wall Street", "index": "WALL", "epic_prefix": "OP.D.WALL.", "strike_scale": 100.0},
+    "EWG": {"search": "Germany 40", "index": "DAX", "epic_prefix": "OP.D.DAX.", "strike_scale": 660.0},
+    "EWU": {"search": "FTSE 100", "index": "FTSE", "epic_prefix": "OP.D.FTSE.", "strike_scale": 247.0},
+    "EWJ": {"search": "Japan 225", "index": "JP225", "epic_prefix": "OP.D.JP225.", "strike_scale": 543.0},
+    "GLD": {"search": "Gold", "index": "GOLD", "epic_prefix": "OP.D.GOLD.", "strike_scale": 11.0},
 }
 
 # Safety limits for options trading
