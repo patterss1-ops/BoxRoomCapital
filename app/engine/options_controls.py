@@ -9,6 +9,7 @@ import config
 from data.trade_db import (
     log_event, log_control_action,
     get_open_option_positions,
+    close_option_position,
 )
 
 logger = logging.getLogger(__name__)
@@ -237,12 +238,21 @@ class OptionsControlsMixin:
                     broker_deal_ids = None  # Can't reconcile without broker data
 
                 if broker_deal_ids is not None:
+                    logger.info(
+                        f"  Reconcile: broker has {len(broker_deal_ids)} deal(s), "
+                        f"checking {len(self.open_spreads)} open spread(s)"
+                    )
                     for spread_id, spread in list(self.open_spreads.items()):
                         short_id = str(spread.get("short_deal_id", "") or "").strip()
                         long_id = str(spread.get("long_deal_id", "") or "").strip()
                         # If BOTH deal IDs are missing from broker, position was closed externally
                         short_gone = short_id and short_id not in broker_deal_ids
                         long_gone = long_id and long_id not in broker_deal_ids
+                        logger.info(
+                            f"  Reconcile check: {spread.get('ticker','?')} spread={spread_id[:12]} "
+                            f"short_id='{short_id}' long_id='{long_id}' "
+                            f"short_gone={short_gone} long_gone={long_gone}"
+                        )
                         if short_gone and long_gone:
                             ticker = spread.get("ticker", "?")
                             logger.info(
