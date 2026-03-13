@@ -552,7 +552,7 @@ OPTIONS_SAFETY = {
     "max_daily_loss_pct": 10.0,       # Kill switch at 10% daily loss (£500)
     "max_open_spreads": 6,            # Max 6 simultaneous spreads
     "min_premium_pct": 2.0,           # Don't trade if premium < 2% of spread width
-    "max_contracts_per_trade": 20,    # Hard cap
+    "max_contracts_per_trade": 10,    # Hard cap (was 20 — too large for £8k equity)
 }
 
 # ─── STRATEGY SLOTS (D-001) ────────────────────────────────────────────────

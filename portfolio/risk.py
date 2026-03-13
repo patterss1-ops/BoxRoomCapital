@@ -299,6 +299,14 @@ def calc_option_spread_size(
     # Number of contracts
     num_contracts = risk_budget / max_loss_per_contract
     num_contracts = max(min_size, min(num_contracts, max_size))
+
+    # IG margin for credit spreads ≈ spread_width × size (full notional),
+    # not just max loss.  Cap contracts so margin stays within equity.
+    if spread_width > 0:
+        margin_cap = equity * 0.90 / spread_width  # keep 10% buffer
+        if margin_cap < num_contracts:
+            num_contracts = max(min_size, margin_cap)
+
     num_contracts = int(num_contracts)  # Round down
 
     actual_risk = num_contracts * max_loss_per_contract
@@ -309,8 +317,8 @@ def calc_option_spread_size(
         f"£{actual_risk:.0f} ({risk_pct:.1f}% of equity)"
     )
 
-    # Options on IG don't require margin (defined risk = max loss is the margin)
-    margin_required = actual_risk  # IG holds max loss as margin for credit spreads
+    # IG margin for credit spreads ≈ spread_width × contracts (full notional)
+    margin_required = spread_width * num_contracts
 
     logger.info(
         f"OPTIONS SIZE: {num_contracts} contracts, "
