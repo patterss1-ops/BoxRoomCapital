@@ -208,12 +208,17 @@ class OptionsSpreadsMixin:
                         last_error = f"No options found on IG for '{search_term}'"
                         last_code, recoverable = self._classify_order_error(last_error, "OPTIONS_NOT_FOUND")
                     else:
+                        # Scale ETF-based strikes to IG index/commodity scale
+                        strike_scale = option_cfg.get("strike_scale", 1.0)
+                        scaled_short = round(sig.short_strike * strike_scale)
+                        scaled_long = round(sig.long_strike * strike_scale)
                         logger.info(
                             f"    {ticker}: IG returned {len(options)} options for '{search_term}', "
-                            f"looking for {option_type} near short={sig.short_strike} long={sig.long_strike}"
+                            f"looking for {option_type} near short={scaled_short} long={scaled_long} "
+                            f"(raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale}x)"
                         )
-                        short_option = self._find_closest_option(options, sig.short_strike, option_type)
-                        long_option = self._find_closest_option(options, sig.long_strike, option_type)
+                        short_option = self._find_closest_option(options, scaled_short, option_type)
+                        long_option = self._find_closest_option(options, scaled_long, option_type)
                         if not short_option or not long_option:
                             available = sorted(set(
                                 o.strike for o in options
@@ -221,7 +226,8 @@ class OptionsSpreadsMixin:
                             ))
                             last_error = (
                                 f"Couldn't find matching {option_type} options "
-                                f"(short_target={sig.short_strike}, long_target={sig.long_strike}, "
+                                f"(scaled_short={scaled_short}, scaled_long={scaled_long}, "
+                                f"raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale}x, "
                                 f"available_strikes={available[:10]})"
                             )
                             last_code, recoverable = self._classify_order_error(last_error, "OPTION_MATCH_FAILED")
