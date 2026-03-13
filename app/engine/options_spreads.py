@@ -511,10 +511,23 @@ class OptionsSpreadsMixin:
                 return s
         return None
 
+    # Maximum allowed deviation between target strike and matched strike (5%)
+    MAX_STRIKE_DEVIATION_PCT = 5.0
+
     def _find_closest_option(self, options: list, target_strike: float,
                              option_type: str):
         from broker.base import OptionMarket
         matching = [o for o in options if o.option_type == option_type and o.strike > 0]
         if not matching:
             return None
-        return min(matching, key=lambda o: abs(o.strike - target_strike))
+        best = min(matching, key=lambda o: abs(o.strike - target_strike))
+        # Reject if matched strike is too far from target
+        if target_strike > 0:
+            deviation_pct = abs(best.strike - target_strike) / target_strike * 100
+            if deviation_pct > self.MAX_STRIKE_DEVIATION_PCT:
+                logger.warning(
+                    f"Closest strike {best.strike} is {deviation_pct:.1f}% from "
+                    f"target {target_strike} (max {self.MAX_STRIKE_DEVIATION_PCT}%) — rejecting"
+                )
+                return None
+        return best

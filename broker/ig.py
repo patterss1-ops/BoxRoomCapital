@@ -5,6 +5,7 @@ Uses direct HTTP calls (proven working in ping test) instead of trading-ig libra
 API key from: https://labs.ig.com/
 """
 import logging
+import re
 import threading
 import time
 import requests
@@ -616,7 +617,6 @@ class IGBroker(BaseBroker):
                 epic_parts = epic.split(".")
                 for ep in epic_parts:
                     # Match digits optionally followed by P or C (e.g. "5400P", "23760C")
-                    import re
                     m = re.match(r"^(\d+)[PC]$", ep)
                     if m:
                         strike = float(m.group(1))
