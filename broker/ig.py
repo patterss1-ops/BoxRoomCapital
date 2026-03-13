@@ -22,6 +22,7 @@ from broker.base import (
     SpreadOrderResult,
 )
 import config
+from broker.circuit_breaker import BrokerCircuitBreaker, CircuitBreakerConfig
 from data.trade_db import get_open_positions, remove_position, upsert_position
 
 logger = logging.getLogger(__name__)
@@ -53,6 +54,16 @@ class IGBroker(BaseBroker):
         self._deal_map: dict[str, tuple[str, str]] = {}
         # EPICs that returned 403/404 — skip on future attempts
         self._blocked_epics: set = set()
+
+        # Circuit breaker: trips after consecutive API failures to prevent hammering
+        self._circuit_breaker = BrokerCircuitBreaker(
+            broker_name=f"IG-{'demo' if is_demo else 'live'}",
+            config=CircuitBreakerConfig(
+                failure_threshold=5,
+                recovery_timeout_secs=60.0,
+                half_open_max_calls=1,
+            ),
+        )
 
     def _credentials(self) -> dict[str, str]:
         return config.ig_credentials(bool(getattr(self, "is_demo", True)))
@@ -204,6 +215,36 @@ class IGBroker(BaseBroker):
         except (TypeError, ValueError):
             return self._TIMEOUT
 
+    # ─── Circuit breaker wrapper ────────────────────────────────────────
+
+    def _api_request(self, method: str, url: str, **kwargs) -> requests.Response:
+        """Wrap all HTTP calls with circuit breaker protection.
+
+        Raises RuntimeError if the circuit is open (caller must handle).
+        Records success/failure to the breaker after each call.
+        """
+        decision = self._circuit_breaker.check()
+        if not decision.allowed:
+            raise RuntimeError(f"Circuit breaker OPEN: {decision.reason}")
+
+        fn = getattr(self.session, method)
+        try:
+            resp = fn(url, **kwargs)
+            # 5xx errors count as failures; 4xx are application-level, not infra
+            if resp.status_code >= 500:
+                self._circuit_breaker.record_failure()
+            else:
+                self._circuit_breaker.record_success()
+            return resp
+        except Exception:
+            self._circuit_breaker.record_failure()
+            raise
+
+    @property
+    def circuit_breaker_stats(self):
+        """Expose circuit breaker stats for monitoring/status endpoints."""
+        return self._circuit_breaker.get_stats()
+
     # ─── Account info ────────────────────────────────────────────────────
 
     def get_account_info(self, timeout: Optional[float] = None) -> AccountInfo:
@@ -218,7 +259,7 @@ class IGBroker(BaseBroker):
         timeout_value = self._resolve_timeout(timeout)
         try:
             account_number = self._account_number()
-            r = self.session.get(
+            r = self._api_request("get",
                 f"{self.base_url}/accounts",
                 headers=self._headers("1"),
                 timeout=timeout_value,
@@ -258,7 +299,7 @@ class IGBroker(BaseBroker):
 
         timeout_value = self._resolve_timeout(timeout)
         try:
-            r = self.session.get(
+            r = self._api_request("get",
                 f"{self.base_url}/positions",
                 headers=self._headers("2"),
                 timeout=timeout_value,
@@ -337,7 +378,7 @@ class IGBroker(BaseBroker):
             return None
         timeout_value = self._resolve_timeout(timeout)
         try:
-            r = self.session.get(
+            r = self._api_request("get",
                 f"{self.base_url}/markets/{epic}",
                 headers=self._headers("3"),
                 timeout=timeout_value,
@@ -476,7 +517,7 @@ class IGBroker(BaseBroker):
                 "limitDistance": None,
             }
 
-            r = self.session.post(
+            r = self._api_request("post",
                 f"{self.base_url}/positions/otc",
                 json=order,
                 headers=self._headers("2"),
@@ -520,7 +561,7 @@ class IGBroker(BaseBroker):
     def _confirm_deal(self, deal_ref: str, ticker: str, strategy: str, size: float) -> OrderResult:
         """Confirm a deal and return the result."""
         try:
-            r = self.session.get(
+            r = self._api_request("get",
                 f"{self.base_url}/confirms/{deal_ref}",
                 headers=self._headers("1"),
                 timeout=self._TIMEOUT,
@@ -586,7 +627,7 @@ class IGBroker(BaseBroker):
             return []
 
         try:
-            r = self.session.get(
+            r = self._api_request("get",
                 f"{self.base_url}/markets",
                 params={"searchTerm": search_term},
                 headers=self._headers("1"),
@@ -930,7 +971,7 @@ class IGBroker(BaseBroker):
             if deal_reference:
                 order["dealReference"] = deal_reference
 
-            r = self.session.post(
+            r = self._api_request("post",
                 f"{self.base_url}/positions/otc",
                 json=order,
                 headers=self._headers("2"),
@@ -980,7 +1021,7 @@ class IGBroker(BaseBroker):
             if deal_reference:
                 close_payload["dealReference"] = deal_reference
 
-            r = self.session.post(
+            r = self._api_request("post",
                 f"{self.base_url}/positions/otc",
                 json=close_payload,
                 headers={**self._headers("1"), "_method": "DELETE"},
@@ -1047,7 +1088,7 @@ class IGBroker(BaseBroker):
         if not deal_id:
             epic = self.get_epic(ticker)
             try:
-                r = self.session.get(f"{self.base_url}/positions", headers=self._headers("2"), timeout=self._TIMEOUT)
+                r = self._api_request("get", f"{self.base_url}/positions", headers=self._headers("2"), timeout=self._TIMEOUT)
                 if r.status_code == 200:
                     for p in r.json().get("positions", []):
                         mkt = p.get("market", {})
@@ -1080,7 +1121,7 @@ class IGBroker(BaseBroker):
                 "orderType": "MARKET",
             }
 
-            r = self.session.post(
+            r = self._api_request("post",
                 f"{self.base_url}/positions/otc",
                 json=close_payload,
                 headers={**self._headers("1"), "_method": "DELETE"},
