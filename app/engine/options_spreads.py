@@ -208,35 +208,32 @@ class OptionsSpreadsMixin:
                         last_error = f"No options found on IG for '{search_term}'"
                         last_code, recoverable = self._classify_order_error(last_error, "OPTIONS_NOT_FOUND")
                     else:
-                        # Compute dynamic scale: ETF strikes → IG index/commodity strikes
-                        # Use live IG mid-price for the underlying instrument as the reference.
-                        strike_scale = 1.0
-                        ig_live_price = 0.0
-                        underlying_epic = option_cfg.get("underlying_epic")
-                        if underlying_epic and sig.short_strike > 0:
-                            mkt_info = self.broker.get_market_info(underlying_epic)
-                            if mkt_info:
-                                snap = mkt_info.get("snapshot", {})
-                                bid = float(snap.get("bid", 0) or 0)
-                                offer = float(snap.get("offer", 0) or 0)
-                                ig_live_price = (bid + offer) / 2 if bid and offer else 0
-                            if ig_live_price > 0:
-                                # Signal's short_strike ≈ 99% of ETF price, so ETF price ≈ short_strike / 0.99
-                                yf_price_approx = sig.short_strike / 0.99
-                                strike_scale = ig_live_price / yf_price_approx
-                                if strike_scale < 1.5:
-                                    strike_scale = 1.0
+                        # Compute dynamic scale: ETF strikes → IG option strike scale
+                        # Use the available IG option strikes themselves as the reference,
+                        # NOT the underlying instrument price (which may differ in unit/currency).
+                        # For PUTS: max available strike ≈ near-ATM on IG side
+                        # For CALLS: min available strike ≈ near-ATM on IG side
                         valid_strikes = sorted(set(
                             o.strike for o in options
                             if o.option_type == option_type and o.strike > 0
                         ))
+                        strike_scale = 1.0
+                        ig_atm_ref = 0.0
+                        if valid_strikes and sig.short_strike > 0:
+                            if option_type == "PUT":
+                                ig_atm_ref = max(valid_strikes)
+                            else:
+                                ig_atm_ref = min(valid_strikes)
+                            strike_scale = ig_atm_ref / sig.short_strike
+                            if strike_scale < 1.5:
+                                strike_scale = 1.0
                         scaled_short = round(sig.short_strike * strike_scale)
                         scaled_long = round(sig.long_strike * strike_scale)
                         logger.info(
                             f"    {ticker}: IG returned {len(options)} options for '{search_term}', "
                             f"looking for {option_type} near short={scaled_short} long={scaled_long} "
                             f"(raw={sig.short_strike}/{sig.long_strike}, scale={strike_scale:.2f}x, "
-                            f"ig_live={ig_live_price:.1f}, strikes={valid_strikes[:5]}..)"
+                            f"ig_atm_ref={ig_atm_ref}, strikes={valid_strikes[:5]}..{valid_strikes[-3:]})"
                         )
                         # Find tradeable options (validates bid/offer + market status)
                         short_option, short_result = self._find_tradeable_option(
