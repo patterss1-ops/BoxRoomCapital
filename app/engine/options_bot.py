@@ -61,7 +61,10 @@ class OptionsBot(
         self.data = DataProvider(lookback_days=500)
         self.safety = SafetyController(
             initial_equity=5000,
-            limits=SafetyLimits(**config.OPTIONS_SAFETY),
+            limits=SafetyLimits(**{
+                k: v for k, v in config.OPTIONS_SAFETY.items()
+                if k in SafetyLimits.__dataclass_fields__
+            }),
         )
 
         self.open_spreads: dict[str, dict] = {}
