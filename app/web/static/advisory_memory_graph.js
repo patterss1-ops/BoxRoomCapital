@@ -3,7 +3,6 @@
 (function () {
   const GRAPH_HEIGHT = 360;
   const TYPE_COLORS = {
-    theme: '#0f172a',
     decision: '#2563eb',
     observation: '#059669',
     preference: '#7c3aed',
@@ -11,6 +10,15 @@
     fact: '#0f766e',
     goal: '#dc2626',
     note: '#6b7280'
+  };
+  const THEME_CATEGORY_COLORS = {
+    holding: '#2563eb',
+    tax: '#d97706',
+    risk: '#dc2626',
+    goals: '#7c3aed',
+    allocation: '#059669',
+    research: '#0f766e',
+    topic: '#475569'
   };
   const EDGE_STYLES = {
     theme_related: { color: '#0f172a', opacity: 0.35, width: 2.0, dasharray: '2 4' },
@@ -57,8 +65,11 @@
     return String(nodeRef.id || '');
   }
 
-  function getNodeColor(memoryType) {
-    return TYPE_COLORS[String(memoryType || '').toLowerCase()] || TYPE_COLORS.note;
+  function getNodeColor(node) {
+    if (node && node.node_kind === 'theme') {
+      return THEME_CATEGORY_COLORS[String(node.theme_category || 'topic').toLowerCase()] || THEME_CATEGORY_COLORS.topic;
+    }
+    return TYPE_COLORS[String(node && node.memory_type || '').toLowerCase()] || TYPE_COLORS.note;
   }
 
   function getNodeRadius(node) {
@@ -70,6 +81,17 @@
 
   function getEdgeStyle(edge) {
     const key = edge && edge.kind ? edge.kind : 'related';
+    if (key === 'theme_related') {
+      const reason = edge && Array.isArray(edge.reasons) && edge.reasons.length ? edge.reasons[0] : null;
+      const relatedKey = reason && reason.value ? String(reason.value) : '';
+      const relatedStyle = EDGE_STYLES[relatedKey] || EDGE_STYLES.related;
+      return {
+        color: relatedStyle.color,
+        opacity: EDGE_STYLES.theme_related.opacity,
+        width: EDGE_STYLES.theme_related.width,
+        dasharray: EDGE_STYLES.theme_related.dasharray
+      };
+    }
     return EDGE_STYLES[key] || EDGE_STYLES.related;
   }
 
@@ -212,7 +234,7 @@
       const reasons = (entry.edge.reasons || []).map(relationshipLabel).join(' · ');
       return '<button type="button" data-related-node-id="' + escapeHtml(entry.node.id) + '" class="w-full text-left px-2 py-1 rounded border border-gray-200 bg-white hover:bg-gray-100">' +
         '<div class="flex items-center gap-2">' +
-        '<span class="inline-block w-2 h-2 rounded-full" style="background:' + escapeHtml(getNodeColor(entry.node.memory_type)) + '"></span>' +
+        '<span class="inline-block w-2 h-2 rounded-full" style="background:' + escapeHtml(getNodeColor(entry.node)) + '"></span>' +
           '<span class="text-[10px] font-semibold text-gray-700">' + escapeHtml(truncate(entry.node.topic || entry.node.label, 40)) + '</span>' +
           (entry.node.node_kind === 'theme' ? '<span class="text-[8px] font-mono uppercase text-gray-400">theme</span>' : '') +
         '</div>' +
@@ -233,7 +255,7 @@
     detail.innerHTML =
       '<div class="space-y-1.5">' +
         '<div class="flex items-center gap-2">' +
-          '<span class="inline-block w-2.5 h-2.5 rounded-full" style="background:' + escapeHtml(getNodeColor(node.memory_type)) + '"></span>' +
+          '<span class="inline-block w-2.5 h-2.5 rounded-full" style="background:' + escapeHtml(getNodeColor(node)) + '"></span>' +
           '<span class="text-[9px] font-semibold uppercase tracking-wide text-gray-500">' + escapeHtml(node.node_kind === 'theme' ? 'theme' : (node.memory_type || 'note')) + '</span>' +
           '<span class="text-[9px] font-mono text-gray-300 ml-auto">' + escapeHtml(formatDate(node.created_at)) + '</span>' +
         '</div>' +
@@ -288,10 +310,13 @@
         return connectedIds.has(node.id) ? 1 : 0.4;
       })
       .attr('stroke', function (node) {
-        return node.id === selectedId ? '#111827' : '#ffffff';
+        if (node.id === selectedId) return '#111827';
+        if (node.__pinned) return '#f59e0b';
+        return '#ffffff';
       })
       .attr('stroke-width', function (node) {
-        return node.id === selectedId ? 2.4 : 1.4;
+        if (node.id === selectedId) return 2.4;
+        return node.__pinned ? 2.2 : 1.4;
       })
       .attr('r', function (node) {
         const radius = getNodeRadius(node);
@@ -357,10 +382,18 @@
     const state = shell.__advisoryMemoryGraphState || { viewMode: 'overview' };
     state.payload = payload;
     state.viewMode = state.viewMode || 'overview';
+    state.pinnedPositions = state.pinnedPositions || {};
     shell.__advisoryMemoryGraphState = state;
     updateViewButtons(shell, state.viewMode);
 
     const fullGraph = normalizeGraphPayload(payload);
+    (fullGraph.nodes || []).forEach(function (node) {
+      const pinned = state.pinnedPositions[node.id];
+      if (!pinned) return;
+      node.fx = pinned.x;
+      node.fy = pinned.y;
+      node.__pinned = true;
+    });
     const graph = buildVisibleGraph(fullGraph, state.viewMode);
     destroyGraph(shell);
     const canvas = shell.querySelector('[data-graph-canvas]');
@@ -412,9 +445,9 @@
 
     nodeSelection.append('circle')
       .attr('r', function (node) { return getNodeRadius(node); })
-      .attr('fill', function (node) { return getNodeColor(node.memory_type); })
-      .attr('stroke', '#ffffff')
-      .attr('stroke-width', 1.4);
+      .attr('fill', function (node) { return getNodeColor(node); })
+      .attr('stroke', function (node) { return node.__pinned ? '#f59e0b' : '#ffffff'; })
+      .attr('stroke-width', function (node) { return node.__pinned ? 2.2 : 1.4; });
 
     nodeSelection.append('text')
       .text(function (node) { return truncate(node.label || node.topic || node.summary, 20); })
@@ -452,11 +485,24 @@
           node.fy = event.y;
         })
         .on('end', function (event, node) {
-          if (!event.active) simulation.alphaTarget(0);
-          node.fx = null;
-          node.fy = null;
+          if (!event.active) simulation.alphaTarget(0.02);
+          node.fx = event.x;
+          node.fy = event.y;
+          node.__pinned = true;
+          state.pinnedPositions[node.id] = { x: event.x, y: event.y };
         })
     );
+
+    nodeSelection.on('dblclick', function (event, node) {
+      event.preventDefault();
+      event.stopPropagation();
+      delete state.pinnedPositions[node.id];
+      node.fx = null;
+      node.fy = null;
+      node.__pinned = false;
+      simulation.alphaTarget(0.2).restart();
+      applySelection(shell.__advisoryMemoryGraph);
+    });
 
     simulation.on('tick', function () {
       linkSelection
@@ -584,6 +630,18 @@
     if (refresh) {
       refresh.addEventListener('click', function () {
         loadGraph(shell);
+      });
+    }
+
+    const reset = shell.querySelector('[data-graph-reset]');
+    if (reset) {
+      reset.addEventListener('click', function () {
+        const state = shell.__advisoryMemoryGraphState || {};
+        state.pinnedPositions = {};
+        shell.__advisoryMemoryGraphState = state;
+        if (state.payload) {
+          renderGraph(shell, state.payload, shell.__advisoryMemoryGraph ? shell.__advisoryMemoryGraph.selectedNodeId : '');
+        }
       });
     }
 
